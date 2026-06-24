@@ -1,0 +1,206 @@
+// SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+// SPDX-License-Identifier: Apache-2.0
+
+use std::fs;
+use std::path::Path;
+use std::process::{Command, ExitStatus};
+
+use anyhow::{bail, Context, Result};
+
+pub const DEFAULT_SPEC_REF: &str = "origin/main";
+
+const SPEC_REPOSITORY: &str =
+    "https://github.com/NVIDIA-dev/yaml-sigil-spec.git";
+const CHECKOUT_DIR: &str = "target/spec-update/yaml-sigil-spec";
+
+const SOURCE_PROTO: &str = "proto/yaml_sigil/v1alpha1/yaml_sigil.proto";
+const DEST_PROTO: &str = "crates/yaml-sigil-core/spec/proto/yaml_sigil/v1alpha1/yaml_sigil.proto";
+const SOURCE_SCHEMA: &str = "schema/YamlSigilSignature.v1alpha1.schema.json";
+const DEST_SCHEMA: &str =
+    "crates/yaml-sigil-core/spec/schema/YamlSigilSignature.v1alpha1.schema.json";
+
+const FIXTURE_DIRS: &[&str] = &[
+    "alg-ecdsa",
+    "alg-ed25519",
+    "base64",
+    "key-id",
+    "protobuf-conformance",
+    "schema-alignment",
+    "yaml-decomposition",
+    "yaml-signature-conformance",
+];
+
+type Run = fn(Command) -> Result<ExitStatus>;
+
+pub fn update_spec(root: &Path, spec_ref: &str, run: Run) -> Result<()> {
+    let checkout = root.join(CHECKOUT_DIR);
+    ensure_spec_checkout(&checkout, run)?;
+
+    let commit = resolve_spec_ref(&checkout, spec_ref)?;
+    let mut checkout_cmd = git_in(&checkout);
+    checkout_cmd.args(["checkout", "--detach", &commit]);
+    require_success(
+        run(checkout_cmd)?,
+        &format!("checkout yaml-sigil-spec ref `{spec_ref}`"),
+    )?;
+
+    import_spec_artifacts(root, &checkout)?;
+
+    eprintln!("updated local spec artifacts from yaml-sigil-spec {spec_ref} ({commit})");
+    eprintln!("review `git diff` and apply any required Rust, test, or doc changes");
+    Ok(())
+}
+
+fn ensure_spec_checkout(checkout: &Path, run: Run) -> Result<()> {
+    if checkout.join(".git").is_dir() {
+        let mut set_url = git_in(checkout);
+        set_url.args(["remote", "set-url", "origin", SPEC_REPOSITORY]);
+        require_success(run(set_url)?, "set yaml-sigil-spec origin URL")?;
+    } else {
+        if checkout.exists() {
+            bail!(
+                "{} exists but is not a git checkout; remove it or choose a clean target",
+                checkout.display()
+            );
+        }
+        fs::create_dir_all(
+            checkout
+                .parent()
+                .with_context(|| format!("derive parent for {}", checkout.display()))?,
+        )
+        .with_context(|| format!("create {}", checkout.display()))?;
+
+        let mut clone = Command::new("git");
+        clone
+            .arg("clone")
+            .arg("--no-checkout")
+            .arg(SPEC_REPOSITORY)
+            .arg(checkout);
+        require_success(run(clone)?, "clone yaml-sigil-spec")?;
+    }
+
+    let mut fetch = git_in(checkout);
+    fetch.args(["fetch", "origin", "--prune"]);
+    require_success(run(fetch)?, "fetch yaml-sigil-spec origin")
+}
+
+fn resolve_spec_ref(checkout: &Path, spec_ref: &str) -> Result<String> {
+    let mut candidates = vec![spec_ref.to_owned()];
+    if !spec_ref.starts_with("origin/") && !spec_ref.starts_with("refs/") {
+        candidates.push(format!("origin/{spec_ref}"));
+    }
+    candidates.dedup();
+
+    for candidate in candidates {
+        if let Some(commit) = rev_parse_commit(checkout, &candidate)? {
+            return Ok(commit);
+        }
+    }
+
+    bail!("could not resolve yaml-sigil-spec ref `{spec_ref}`")
+}
+
+fn rev_parse_commit(checkout: &Path, candidate: &str) -> Result<Option<String>> {
+    let output = Command::new("git")
+        .current_dir(checkout)
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{candidate}^{{commit}}"),
+        ])
+        .output()
+        .with_context(|| format!("resolve yaml-sigil-spec ref `{candidate}`"))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let commit = String::from_utf8(output.stdout)
+        .with_context(|| format!("parse commit for yaml-sigil-spec ref `{candidate}`"))?
+        .trim()
+        .to_owned();
+    if commit.is_empty() {
+        bail!("git resolved `{candidate}` to an empty commit");
+    }
+    Ok(Some(commit))
+}
+
+fn import_spec_artifacts(root: &Path, checkout: &Path) -> Result<()> {
+    copy_file(checkout, SOURCE_PROTO, root, DEST_PROTO)?;
+    copy_file(checkout, SOURCE_SCHEMA, root, DEST_SCHEMA)?;
+    mirror_fixtures(checkout, root)
+}
+
+fn copy_file(source_root: &Path, source_rel: &str, dest_root: &Path, dest_rel: &str) -> Result<()> {
+    let source = source_root.join(source_rel);
+    let dest = dest_root.join(dest_rel);
+    fs::create_dir_all(
+        dest.parent()
+            .with_context(|| format!("derive parent for {}", dest.display()))?,
+    )
+    .with_context(|| format!("create parent for {}", dest.display()))?;
+    fs::copy(&source, &dest)
+        .with_context(|| format!("copy {} to {}", source.display(), dest.display()))?;
+    Ok(())
+}
+
+fn mirror_fixtures(checkout: &Path, root: &Path) -> Result<()> {
+    let source = checkout.join("conformance");
+    let dest = root.join("crates/yaml-sigil-conformance/fixtures");
+
+    if dest.exists() {
+        fs::remove_dir_all(&dest).with_context(|| format!("remove {}", dest.display()))?;
+    }
+    fs::create_dir_all(&dest).with_context(|| format!("create {}", dest.display()))?;
+
+    copy_file(&source, "README.md", &dest, "README.md")?;
+    for fixture_dir in FIXTURE_DIRS {
+        copy_tree(&source.join(fixture_dir), &dest.join(fixture_dir))?;
+    }
+    Ok(())
+}
+
+fn copy_tree(source: &Path, dest: &Path) -> Result<()> {
+    let file_type = fs::symlink_metadata(source)
+        .with_context(|| format!("stat {}", source.display()))?
+        .file_type();
+
+    if file_type.is_symlink() {
+        bail!("refusing to copy symlink {}", source.display());
+    }
+    if file_type.is_file() {
+        fs::create_dir_all(
+            dest.parent()
+                .with_context(|| format!("derive parent for {}", dest.display()))?,
+        )
+        .with_context(|| format!("create parent for {}", dest.display()))?;
+        fs::copy(source, dest)
+            .with_context(|| format!("copy {} to {}", source.display(), dest.display()))?;
+        return Ok(());
+    }
+    if !file_type.is_dir() {
+        bail!("unsupported fixture path type at {}", source.display());
+    }
+
+    fs::create_dir_all(dest).with_context(|| format!("create {}", dest.display()))?;
+    for entry in fs::read_dir(source).with_context(|| format!("read {}", source.display()))? {
+        let entry = entry.with_context(|| format!("read entry under {}", source.display()))?;
+        copy_tree(&entry.path(), &dest.join(entry.file_name()))?;
+    }
+    Ok(())
+}
+
+fn git_in(dir: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir);
+    cmd
+}
+
+fn require_success(status: ExitStatus, context: &str) -> Result<()> {
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("{context} (exit {})", status.code().unwrap_or(-1));
+    }
+}

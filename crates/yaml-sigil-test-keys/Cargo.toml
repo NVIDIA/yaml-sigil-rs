@@ -1,0 +1,21 @@
+[package]
+name = "yaml-sigil-test-keys"
+description = "Workspace-only dev-dependency: build-time key pairs for integration tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+p256 = { version = "0.13.2", features = ["ecdsa"] }
+
+[build-dependencies]
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+p256 = { version = "0.13.2", features = ["ecdsa"] }
+rand = { workspace = true }

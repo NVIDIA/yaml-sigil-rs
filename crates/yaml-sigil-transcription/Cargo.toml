@@ -1,0 +1,22 @@
+[package]
+name = "yaml-sigil-transcription"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "YamlSigil v1alpha1 Transcription API (Compose / Decompose)"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+yaml-sigil-core = { workspace = true, default-features = false }
+yaml-sigil-traits = { workspace = true, default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

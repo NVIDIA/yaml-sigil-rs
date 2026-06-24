@@ -1,0 +1,37 @@
+[package]
+name = "yaml-sigil-conformance"
+description = "Workspace-only test harness driving local conformance fixtures through the Verifier / Signer / Transcriber traits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+base64 = { workspace = true }
+ed25519-dalek = { workspace = true }
+p256 = { workspace = true }
+tracing = { workspace = true }
+yaml-sigil-core = { path = "../yaml-sigil-core", default-features = false }
+yaml-sigil-transcription = { path = "../yaml-sigil-transcription", default-features = false }
+yaml-sigil-verification = { path = "../yaml-sigil-verification", default-features = false }
+yaml-sigil-signing = { path = "../yaml-sigil-signing", default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+yaml-sigil-test-keys = { path = "../yaml-sigil-test-keys" }
+
+[features]
+# JSON Schema validation helper (Tier A).
+json-schema-validate = [
+    "yaml-sigil-core/json-schema-validate",
+    "yaml-sigil-verification/json-schema-validate",
+    "yaml-sigil-signing/json-schema-validate",
+]

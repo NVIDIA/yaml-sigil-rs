@@ -1,0 +1,23 @@
+# rumdl — Markdown layout for this repository.
+# See AGENTS.md: prose ~80 cols; do not break fenced code, emphasis, or links.
+
+[global]
+line-length = 80
+cache-dir = ".rumdl_cache"
+respect-gitignore = true
+exclude = [
+    ".git",
+    "target",
+    "AGENTS.md",
+    "crates/yaml-sigil-conformance/fixtures",
+]
+
+[MD013]
+reflow = true
+reflow-mode = "default"
+code-blocks = false
+tables = false
+headings = false
+paragraphs = true
+blockquotes = true
+strict = false

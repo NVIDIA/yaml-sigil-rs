@@ -1,0 +1,40 @@
+[package]
+name = "yaml-sigil-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Shared YamlSigil v1alpha1 decomposition, payload invariants, and protobuf wire helpers"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+include = ["src/**/*", "build.rs", "spec/**/*", "README.md", "LICENSE"]
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# Tier A JSON Schema validation helper (`tier_a_schema` module).
+json-schema-validate = ["dep:jsonschema", "dep:serde_json"]
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+noyalib = { workspace = true }
+thiserror = "2"
+tracing = "0.1"
+yaml-sigil-traits = { workspace = true, default-features = false }
+buffa = { workspace = true }
+jsonschema = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[build-dependencies]
+buffa-build = { workspace = true }
+
+[dev-dependencies]
+jsonschema = { workspace = true }
+serde_json = { workspace = true }
