@@ -6,7 +6,7 @@ have implementation context. It is not a user-facing support matrix.
 
 ## Current Implementation
 
-`yaml-sigil-core` uses `noyalib` `0.0.8` for
+`yaml-sigil-core` uses `noyalib` `0.0.13` for
 `YamlSigilSignature.v1alpha1` YAML signature documents. The root `Cargo.toml`
 declares the workspace dependency, and `crates/yaml-sigil-core` inherits it with
 `noyalib = { workspace = true }`.
@@ -23,6 +23,25 @@ features. `yaml-sigil-core` generates protobuf wire helpers with `buffa`.
 - Custom tags are denied.
 - Serde `deny_unknown_fields` rejects unknown top-level signature-document
   fields.
+
+The dependency enables only `std` and disables default features. The optional
+`noyalib` features do not improve this parser:
+
+- `lossless-u64` does not apply because every signature-document field is a
+  string. Unquoted numeric scalars must fail string deserialization, including
+  values at and above the `u64` boundary.
+- `fast-int` and `fast-float` do not affect serialization because every emitted
+  field is a quoted string. The parser already uses its safe SIMD and SWAR hot
+  paths without the `simd` compatibility feature.
+- `strict-deserialise` duplicates the unknown-field protection on
+  `SignatureDocument` and does not replace the configured entry point needed
+  for duplicate-key, merge-key, anchor, and tag policy.
+- `schema` and `validate-schema` do not replace the hand-maintained normative
+  JSON Schema or the cached validator exposed by the optional
+  `json-schema-validate` feature.
+- Recovery, include expansion, compatibility shims, asynchronous I/O, parallel
+  multi-document parsing, and third-party validation integrations do not fit
+  this small, synchronous, fail-closed parser.
 
 `serialize_signature_document` calls `noyalib::to_string_with_config` with
 `quote_all(true)`. Signing and transcoding paths compose the resulting

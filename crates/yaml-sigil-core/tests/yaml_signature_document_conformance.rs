@@ -97,6 +97,21 @@ alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
 signature: "true"
 "#;
 
+const UNQUOTED_U64_MAX_SIGNATURE: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+signature: 18446744073709551615
+"#;
+
+const UNQUOTED_U64_OVERFLOW_SIGNATURE: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+signature: 18446744073709551616
+"#;
+
+const QUOTED_U64_MAX_SIGNATURE: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+signature: "18446744073709551615"
+"#;
+
 fn assert_parse_err_contains_duplicate(yaml: &[u8]) {
     let err = parse_signature_document(yaml).unwrap_err();
     let CoreError::SignatureYaml(msg) = err else {
@@ -196,4 +211,9 @@ fn scalar_resolution_must_still_produce_strings() {
     assert!(parse_signature_document(UNQUOTED_BOOLEAN_SIGNATURE).is_err());
     let doc = parse_signature_document(QUOTED_BOOLEAN_SIGNATURE).unwrap();
     assert_eq!(doc.signature, "true");
+
+    assert!(parse_signature_document(UNQUOTED_U64_MAX_SIGNATURE).is_err());
+    assert!(parse_signature_document(UNQUOTED_U64_OVERFLOW_SIGNATURE).is_err());
+    let doc = parse_signature_document(QUOTED_U64_MAX_SIGNATURE).unwrap();
+    assert_eq!(doc.signature, "18446744073709551615");
 }
