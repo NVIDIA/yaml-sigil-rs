@@ -12,7 +12,15 @@ repository.workspace = true
 readme = "README.md"
 publish = false
 
-include = ["src/**/*", "build.rs", "spec/**/*", "README.md", "LICENSE"]
+include = [
+    "src/**/*",
+    "build.rs",
+    "spec/**/*",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+]
 
 [lints]
 workspace = true
