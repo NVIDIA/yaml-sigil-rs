@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 const WORKSPACE_INTERNAL_DEPS: &[&str] = &[
     "yaml-sigil-core",
@@ -54,9 +54,7 @@ pub fn sync_workspace_dependency_versions(root: &Path) -> Result<bool> {
             "sync-workspace-versions: set [workspace.dependencies] versions to {package_version}"
         );
     } else {
-        eprintln!(
-            "sync-workspace-versions: [workspace.dependencies] already at {package_version}"
-        );
+        eprintln!("sync-workspace-versions: [workspace.dependencies] already at {package_version}");
     }
     Ok(changed)
 }

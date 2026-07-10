@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
 # rumdl — Markdown layout for this repository.
 # See AGENTS.md: prose ~80 cols; do not break fenced code, emphasis, or links.
 

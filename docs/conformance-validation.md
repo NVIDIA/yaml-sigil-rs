@@ -71,6 +71,11 @@ an unnatural workaround.
 ## Import Review Notes
 
 - 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
+  `75468ac0b665ea4edfc3a1d113de23276f9632ba`. The imported proto change is
+  comment-only, and the JSON Schema change adds only its non-semantic
+  `$comment` annotation. Generated Rust behavior, fixture bytes, fixture names,
+  suite mappings, and expected outcomes are unchanged.
+- 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
   `189ee8a747749c3b65e9f68fe9bdbda6d70e9c39`. The import adds the complete
   third-party notices at the workspace root and beside the conformance crate,
   including the complete CC BY 4.0 legal code and RFC 8032 copyright-context

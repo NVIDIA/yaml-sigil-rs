@@ -3,14 +3,14 @@
 
 //! Workspace maintenance tasks. Invoke via `cargo xtask <COMMAND>` from the repo root.
 
-mod spec_update;
 mod spec_publish;
+mod spec_update;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 
 const E2E_PACKAGE: &str = "yaml-sigil-conformance";
