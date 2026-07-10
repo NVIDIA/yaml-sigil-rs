@@ -8,10 +8,16 @@ verification, transcription, protobuf wire helpers, YAML signature-document
 parsing, and local conformance checks.
 
 The repo vendors the implementation inputs it needs: the protobuf schema, the
-signature-document JSON Schema, and the curated conformance fixtures. The
-normative specification lives in
+signature-document JSON Schema, the curated conformance fixtures, and the
+third-party notices that accompany those fixtures. The normative specification
+lives in
 [`yaml-sigil-spec`](https://github.com/NVIDIA-dev/yaml-sigil-spec), not this
 repository.
+
+NVIDIA-authored material is licensed under the
+[Apache License 2.0](./LICENSE). Third-party test data, standards-derived
+material, and their redistribution requirements are documented in
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
 
 Read [AGENTS.md](AGENTS.md) for the contributor workflow, conformance policy,
 and documentation style guide.

@@ -18,11 +18,14 @@ Local implementation inputs:
 - `crates/yaml-sigil-core/spec/schema/YamlSigilSignature.v1alpha1.schema.json`
   for the optional JSON Schema validation helper.
 - `crates/yaml-sigil-conformance/fixtures/` for conformance tests.
+- `THIRD_PARTY_NOTICES.md` and
+  `crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md` for notices that
+  accompany imported conformance material.
 
 There is no `source-spec` submodule. When the separate `yaml-sigil-spec`
 repository changes, review it outside this checkout and import only the local
 artifacts and code changes this implementation needs. Use
-`cargo xtask update-spec` for the local proto/schema/fixture import and
+`cargo xtask update-spec` for the local proto/schema/fixture/notice import and
 `.agents/skills/yaml-sigil-rs-spec-update/SKILL.md` for the review workflow.
 
 The public extension-trait contract lives in the separately published

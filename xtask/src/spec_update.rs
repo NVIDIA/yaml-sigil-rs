@@ -18,6 +18,10 @@ const DEST_PROTO: &str = "crates/yaml-sigil-core/spec/proto/yaml_sigil/v1alpha1/
 const SOURCE_SCHEMA: &str = "schema/YamlSigilSignature.v1alpha1.schema.json";
 const DEST_SCHEMA: &str =
     "crates/yaml-sigil-core/spec/schema/YamlSigilSignature.v1alpha1.schema.json";
+const SOURCE_THIRD_PARTY_NOTICES: &str = "THIRD_PARTY_NOTICES.md";
+const DEST_THIRD_PARTY_NOTICES: &str = "THIRD_PARTY_NOTICES.md";
+const DEST_CONFORMANCE_THIRD_PARTY_NOTICES: &str =
+    "crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md";
 
 const FIXTURE_DIRS: &[&str] = &[
     "alg-ecdsa",
@@ -129,6 +133,18 @@ fn rev_parse_commit(checkout: &Path, candidate: &str) -> Result<Option<String>> 
 fn import_spec_artifacts(root: &Path, checkout: &Path) -> Result<()> {
     copy_file(checkout, SOURCE_PROTO, root, DEST_PROTO)?;
     copy_file(checkout, SOURCE_SCHEMA, root, DEST_SCHEMA)?;
+    copy_file(
+        checkout,
+        SOURCE_THIRD_PARTY_NOTICES,
+        root,
+        DEST_THIRD_PARTY_NOTICES,
+    )?;
+    copy_file(
+        checkout,
+        SOURCE_THIRD_PARTY_NOTICES,
+        root,
+        DEST_CONFORMANCE_THIRD_PARTY_NOTICES,
+    )?;
     mirror_fixtures(checkout, root)
 }
 

@@ -1,6 +1,6 @@
 ---
 name: yaml-sigil-rs-spec-update
-description: Use when reviewing YamlSigil specification changes for yaml-sigil-rs, importing affected local proto/schema/conformance artifacts, or reconciling this Rust implementation after spec changes.
+description: Use when reviewing YamlSigil specification changes for yaml-sigil-rs, importing affected local proto/schema/conformance/notice artifacts, or reconciling this Rust implementation after spec changes.
 ---
 
 # yaml-sigil-rs Spec Update
@@ -15,6 +15,8 @@ workspace:
 - `crates/yaml-sigil-core/spec/proto/yaml_sigil/v1alpha1/yaml_sigil.proto`
 - `crates/yaml-sigil-core/spec/schema/YamlSigilSignature.v1alpha1.schema.json`
 - `crates/yaml-sigil-conformance/fixtures/`
+- `THIRD_PARTY_NOTICES.md`
+- `crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md`
 
 There is no `source-spec` submodule in this repository. Use this skill when
 reviewing a `yaml-sigil-spec` update for impact on this workspace.
@@ -25,7 +27,8 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
   `https://github.com/NVIDIA-dev/yaml-sigil-spec.git`.
 - Do not add `yaml-sigil-spec` back as a submodule.
 - Import only local artifacts this implementation uses: `yaml_sigil.proto`, the
-  signature-document JSON Schema, and curated conformance fixtures.
+  signature-document JSON Schema, curated conformance fixtures, and the
+  third-party notices that accompany those fixtures.
 - Do not import service protos, Buf module files, rebuild generators, or vendor
   data unless the implementation starts using them directly.
 - Do not edit, generate, or publish `yaml-sigil-traits` from this repository.
@@ -55,9 +58,10 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    cargo xtask update-spec --ref origin/dev/example-branch
    ```
 
-   This imports only `yaml_sigil.proto`, the signature-document JSON Schema, and
-   the curated conformance fixture directories. It does not import service
-   protos, Buf module files, rebuild generators, or vendor data.
+   This imports only `yaml_sigil.proto`, the signature-document JSON Schema,
+   the curated conformance fixture directories, and their third-party notices.
+   It does not import service protos, Buf module files, rebuild generators, or
+   vendor data.
 
 3. Review the spec delta that can affect this implementation. Treat this as a
    starting point, not a closed list. If you need a diff, use the managed
@@ -98,7 +102,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    ```bash
    git diff -- \
      crates/yaml-sigil-core/spec/ \
-     crates/yaml-sigil-conformance/fixtures/
+     crates/yaml-sigil-conformance/fixtures/ \
+     THIRD_PARTY_NOTICES.md \
+     crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md
    ```
 
    Revert an imported artifact only when the spec change is known to be

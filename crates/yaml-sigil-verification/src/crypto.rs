@@ -123,6 +123,9 @@ mod tests {
     }
 
     /// RFC 8032 §7.1 Test 1 signature (`Sign(seed=9d61..7f60, message=())`).
+    ///
+    /// The IETF Revised BSD notice for this Code Component is included in
+    /// this crate's `THIRD_PARTY_NOTICES.md`.
     /// `R || S`, exactly 64 octets, both components canonical.
     const RFC8032_T1_SIG_HEX: &str = "e5564300c360ac729086e2cc806e828a\
                                       84877f1eb8e5d974d873e065224901555f\
