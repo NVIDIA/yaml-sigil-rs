@@ -71,10 +71,11 @@ an unnatural workaround.
 ## Import Review Notes
 
 - 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
-  `140706bb2e0747fdc8fbaa4f0262069ce31a4e84`. The import adds the complete
+  `189ee8a747749c3b65e9f68fe9bdbda6d70e9c39`. The import adds the complete
   third-party notices at the workspace root and beside the conformance crate,
-  and updates fixture provenance wording. Fixture bytes, fixture names, suite
-  mappings, and expected outcomes are unchanged.
+  including the complete CC BY 4.0 legal code and RFC 8032 copyright-context
+  link, and updates fixture provenance wording. Fixture bytes, fixture names,
+  suite mappings, and expected outcomes are unchanged.
 - 2026-06-16: Imported `yaml-sigil-spec` `origin/main` at
   `aafcc3b432f5b7397e756d2033224bf3d0853c1b`. The imported conformance
   fixture changes are README wording updates only; fixture bytes, fixture

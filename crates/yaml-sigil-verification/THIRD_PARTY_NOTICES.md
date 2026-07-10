@@ -39,4 +39,5 @@ POSSIBILITY OF SUCH DAMAGE.
 
 Source: Simon Josefsson and Ilari Liusvaara, RFC 8032, *Edwards-Curve Digital
 Signature Algorithm (EdDSA)*, January 2017,
-<https://www.rfc-editor.org/rfc/rfc8032>.
+<https://www.rfc-editor.org/info/rfc8032/>. The RFC copyright notice and its
+reference to the applicable IETF Trust Legal Provisions appear on that page.
