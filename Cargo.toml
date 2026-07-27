@@ -26,7 +26,7 @@ publish = false
 [workspace.dependencies]
 yaml-sigil-core = { version = "0.3.1-rc.1", path = "crates/yaml-sigil-core", default-features = false }
 # External split crate; use the GitHub repository until it is published.
-yaml-sigil-traits = { version = "0.2.2-rc.1", git = "https://github.com/NVIDIA-dev/yaml-sigil-traits.git", default-features = false }
+yaml-sigil-traits = { version = "0.3.0-rc.1", git = "https://github.com/NVIDIA-dev/yaml-sigil-traits.git", default-features = false }
 yaml-sigil-transcription = { version = "0.3.1-rc.1", path = "crates/yaml-sigil-transcription", default-features = false }
 yaml-sigil-verification = { version = "0.3.1-rc.1", path = "crates/yaml-sigil-verification", default-features = false }
 yaml-sigil-signing = { version = "0.3.1-rc.1", path = "crates/yaml-sigil-signing", default-features = false }
