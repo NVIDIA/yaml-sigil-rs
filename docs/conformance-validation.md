@@ -76,7 +76,8 @@ an unnatural workaround.
   marker-injection artifacts and clarifies the strict JSON Schema profile.
   YAML and protobuf verification reject CR or LF in `keyid`, and YAML Compose
   rejects `keyid-marker-injection.carrier.txt` as
-  `InvalidSignatureCarrier`.
+  `InvalidSignatureCarrier`. YAML signature carriers must end after one
+  document.
 - 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
   `75468ac0b665ea4edfc3a1d113de23276f9632ba`. The imported proto change is
   comment-only, and the JSON Schema change adds only its non-semantic
@@ -113,9 +114,9 @@ an unnatural workaround.
   protobuf decoders use last-wins behavior for duplicate inner fields, so
   advertising a stricter unified inner profile would be misleading.
 - YAML duplicate mapping keys are rejected during signature-document parsing.
-- After decomposition isolates the YAML signature-document slice, additional
-  YAML documents in that slice are not rejected solely because the slice is a
-  multi-document stream. This does not constrain multi-document signed payloads.
+- A YAML signature carrier must contain exactly one document through EOF.
+  Additional carrier documents and content after `...` are rejected. Signed
+  payloads may contain multiple YAML documents.
 - YAML merge keys are treated as ordinary mapping keys for signature-document
   parsing.
 - YAML anchors, aliases, and custom tags are rejected during

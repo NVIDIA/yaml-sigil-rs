@@ -78,13 +78,20 @@ alg: !!str ED25519_PUREEDDSA_RAW_RS64_CANONICAL
 signature: !!str Zm9v
 "#;
 
-const MULTI_DOCUMENT_STREAM: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
+const MULTI_DOCUMENT_SIGNATURE_CARRIER: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
 signature: Zm9v
 ---
 schema: YamlSigilSignature.v1alpha1
 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
 signature: AAA
+"#;
+
+const CONTENT_AFTER_DOCUMENT_END: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+signature: Zm9v
+...
+trailing: content
 "#;
 
 const UNQUOTED_BOOLEAN_SIGNATURE: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
@@ -201,9 +208,13 @@ fn core_string_tags_are_allowed() {
 }
 
 #[test]
-fn multi_document_stream_parses_first_document() {
-    let doc = parse_signature_document(MULTI_DOCUMENT_STREAM).unwrap();
-    assert_eq!(doc.signature, "Zm9v");
+fn multi_document_signature_carrier_is_rejected() {
+    assert!(parse_signature_document(MULTI_DOCUMENT_SIGNATURE_CARRIER).is_err());
+}
+
+#[test]
+fn content_after_document_end_is_rejected() {
+    assert!(parse_signature_document(CONTENT_AFTER_DOCUMENT_END).is_err());
 }
 
 #[test]

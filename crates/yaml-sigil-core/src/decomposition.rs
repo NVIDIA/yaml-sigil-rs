@@ -88,8 +88,7 @@ fn collect_markers(bytes: &[u8]) -> Vec<usize> {
 }
 
 fn extra_marker_in_signature_body(bytes: &[u8], _m: usize, t: usize) -> bool {
-    // Any constrained marker strictly after M but before EOF — must not appear in [T, |A|)
-    // Actually step 7: markers in A[T..|A|) at line starts
+    // Correct max-marker selection makes this invariant check unreachable.
     for idx in t..bytes.len() {
         if marker_len(bytes, idx).is_some() {
             return true;

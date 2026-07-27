@@ -33,7 +33,15 @@ impl SignatureDocument {
 #[tracing::instrument(level = "debug", skip(bytes), fields(len = bytes.len()))]
 pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreError> {
     let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
-    noyalib::from_str_with_config(text, &signature_document_parser_config())
+    let config = signature_document_parser_config();
+    let documents = noyalib::load_all_with_config(text, &config)
+        .map_err(|e| CoreError::SignatureYaml(e.to_string()))?;
+    if documents.len() != 1 {
+        return Err(CoreError::SignatureYaml(
+            "signature carrier must contain exactly one YAML document".into(),
+        ));
+    }
+    noyalib::from_str_with_config(text, &config)
         .map_err(|e| CoreError::SignatureYaml(e.to_string()))
 }
 
