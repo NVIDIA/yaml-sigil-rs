@@ -21,5 +21,8 @@ SHA-256 signatures.
 `PublicKeys` is the caller-authorized key set, indexed by algorithm. The
 artifact's unsigned `keyid` does not expand that set.
 
+Only payload bytes returned by `VerifierState::Verified` are authenticated. A
+signature document inside those bytes remains payload content.
+
 The verifier exposes parser observations when callers request them. It does not
 provide RPC transport.
