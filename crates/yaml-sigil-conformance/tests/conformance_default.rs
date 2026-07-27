@@ -15,7 +15,10 @@ use yaml_sigil_conformance::{
     alg_ed25519::{run_ed25519_suite, run_ed25519_suite_async},
     base64::run_base64_suite,
     decomposition::{run_yaml_decomposition_suite, run_yaml_decomposition_suite_async},
-    key_id::{run_keyid_suite, run_keyid_suite_async},
+    key_id::{
+        run_keyid_compose_suite, run_keyid_compose_suite_async, run_keyid_suite,
+        run_keyid_suite_async,
+    },
     proto_outer::{run_protobuf_outer_suite, run_protobuf_outer_suite_async},
     schema_alignment::{run_schema_alignment_suite, run_schema_alignment_suite_async},
     yaml_signature::{run_yaml_signature_suite, run_yaml_signature_suite_async},
@@ -42,6 +45,7 @@ fn schema_alignment_default() {
 #[test]
 fn keyid_default() {
     run_keyid_suite(&DefaultVerifier);
+    run_keyid_compose_suite(&DefaultTranscriber);
 }
 
 #[test]
@@ -87,6 +91,7 @@ async fn schema_alignment_default_async() {
 #[tokio::test]
 async fn keyid_default_async() {
     run_keyid_suite_async(&DefaultAsyncVerifier).await;
+    run_keyid_compose_suite_async(&DefaultAsyncTranscriber).await;
 }
 
 #[tokio::test]

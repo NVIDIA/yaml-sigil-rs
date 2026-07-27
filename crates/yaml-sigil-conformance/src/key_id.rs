@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Key ID suite — `fixtures/key-id/`.
-//! Walks 12 YAML+protobuf fixtures covering keyid absence, present-empty,
-//! byte-length bounds, and multibyte boundaries.
+//! Covers keyid presence, byte bounds, multibyte boundaries, and line breaks.
 
+use yaml_sigil_transcription::{
+    AsyncTranscriber, ComposeOutcome, ComposeRequest, Transcriber, TranscriberError,
+    TranscriptionForm,
+};
 use yaml_sigil_verification::{ArtifactForm, AsyncVerifier, PreVerifyOutcome, Verifier};
 
 use crate::fixtures::load_bytes;
@@ -85,6 +88,16 @@ const FIXTURES: &[KeyidFixture] = &[
         form: ArtifactForm::Proto,
         expect: Expectation::Rejected,
     },
+    KeyidFixture {
+        file: "keyid-line-break.yaml",
+        form: ArtifactForm::Yaml,
+        expect: Expectation::Rejected,
+    },
+    KeyidFixture {
+        file: "keyid-line-break.binpb",
+        form: ArtifactForm::Proto,
+        expect: Expectation::Rejected,
+    },
 ];
 
 pub fn run_keyid_suite<V: Verifier>(v: &V) {
@@ -138,4 +151,32 @@ pub async fn run_keyid_suite_async<V: AsyncVerifier>(v: &V) {
             ),
         }
     }
+}
+
+pub fn run_keyid_compose_suite<T: Transcriber>(t: &T) {
+    let carrier = load_bytes(CATEGORY, "keyid-marker-injection.carrier.txt");
+    let outcome = t.compose(&ComposeRequest {
+        payload: b"payload: example\n",
+        signature_carrier: &carrier,
+        form: TranscriptionForm::Yaml,
+    });
+    assert!(matches!(
+        outcome,
+        ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier)
+    ));
+}
+
+pub async fn run_keyid_compose_suite_async<T: AsyncTranscriber>(t: &T) {
+    let carrier = load_bytes(CATEGORY, "keyid-marker-injection.carrier.txt");
+    let outcome = t
+        .compose(&ComposeRequest {
+            payload: b"payload: example\n",
+            signature_carrier: &carrier,
+            form: TranscriptionForm::Yaml,
+        })
+        .await;
+    assert!(matches!(
+        outcome,
+        ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier)
+    ));
 }

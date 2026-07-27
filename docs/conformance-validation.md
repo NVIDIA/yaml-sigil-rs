@@ -28,7 +28,7 @@ implementations can call the same `run_*_suite` helpers to compare behavior.
 | `yaml-decomposition/` | `run_yaml_decomposition_suite` | `run_yaml_decomposition_suite_async` | `(Async)Transcriber::decompose` on YAML form |
 | `protobuf-conformance/` | `run_protobuf_outer_suite` | `run_protobuf_outer_suite_async` | `(Async)Transcriber::decompose` on protobuf form |
 | `schema-alignment/` | `run_schema_alignment_suite` | `run_schema_alignment_suite_async` | `(Async)Verifier::pre_verify` and `verify` |
-| `key-id/` | `run_keyid_suite` | `run_keyid_suite_async` | `(Async)Verifier::pre_verify` and `verify` |
+| `key-id/` | `run_keyid_suite`, `run_keyid_compose_suite` | `run_keyid_suite_async`, `run_keyid_compose_suite_async` | `(Async)Verifier::pre_verify` and `(Async)Transcriber::compose` |
 | `base64/` | `run_base64_suite` | n/a | Core base64 helper behavior |
 | `alg-ed25519/` | `run_ed25519_suite` | `run_ed25519_suite_async` | `(Async)Verifier::verify`, key resolution, signing |
 | `alg-ecdsa/` | `run_ecdsa_suite` | `run_ecdsa_suite_async` | `(Async)Verifier::verify`, key resolution, signing |
@@ -53,7 +53,8 @@ The current fixture set covers:
 - Protobuf outer-envelope duplicate/unknown-field handling under
   `OuterConformance` modes.
 - YAML/protobuf algorithm mapping and malformed algorithm identifiers.
-- `keyid` presence, emptiness, UTF-8 byte bounds, and lookup-hint handling.
+- `keyid` presence, emptiness, UTF-8 byte bounds, CR/LF rejection, and
+  lookup-hint handling.
 - URL-safe no-padding base64 behavior, including invalid alphabet, padding,
   whitespace, length, and trailing-bit cases.
 - Ed25519 happy paths, noncanonical encodings, small-order configured keys,
@@ -70,6 +71,11 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-07-27: Imported `yaml-sigil-spec` `origin/main` at
+  `5e995b6566ba467bf237d8db07aff279bb6349bd`. The import adds the
+  marker-injection artifacts. YAML and protobuf verification reject CR or LF
+  in `keyid`, and YAML Compose rejects
+  `keyid-marker-injection.carrier.txt` as `InvalidSignatureCarrier`.
 - 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
   `75468ac0b665ea4edfc3a1d113de23276f9632ba`. The imported proto change is
   comment-only, and the JSON Schema change adds only its non-semantic

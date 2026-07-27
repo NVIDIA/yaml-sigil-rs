@@ -4,8 +4,10 @@
 //! Async siblings of `conformance_default_smoke.rs`.
 
 use yaml_sigil_conformance::{
-    alg_ecdsa::run_ecdsa_suite_async, alg_ed25519::run_ed25519_suite_async,
-    decomposition::run_yaml_decomposition_suite_async, key_id::run_keyid_suite_async,
+    alg_ecdsa::run_ecdsa_suite_async,
+    alg_ed25519::run_ed25519_suite_async,
+    decomposition::run_yaml_decomposition_suite_async,
+    key_id::{run_keyid_compose_suite_async, run_keyid_suite_async},
     proto_outer::run_protobuf_outer_suite_async,
     schema_alignment::run_schema_alignment_suite_async,
     yaml_signature::run_yaml_signature_suite_async,
@@ -32,6 +34,7 @@ async fn conformance_schema_alignment_async() {
 #[tokio::test]
 async fn conformance_keyid_async() {
     run_keyid_suite_async(&DefaultAsyncVerifier).await;
+    run_keyid_compose_suite_async(&DefaultAsyncTranscriber).await;
 }
 
 #[tokio::test]

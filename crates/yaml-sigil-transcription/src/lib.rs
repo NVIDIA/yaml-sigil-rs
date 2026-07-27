@@ -68,6 +68,13 @@ fn validate_decompose_invocation(
     }
 }
 
+fn contains_constrained_marker(carrier: &[u8]) -> bool {
+    carrier.starts_with(b"---\n")
+        || carrier.starts_with(b"---\r\n")
+        || carrier.windows(5).any(|window| window == b"\n---\n")
+        || carrier.windows(6).any(|window| window == b"\n---\r\n")
+}
+
 /// Assemble envelope-form bytes from an abstract Artifact.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]
 pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
@@ -79,6 +86,9 @@ pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
     }
     let artifact = match req.form {
         TranscriptionForm::Yaml => {
+            if contains_constrained_marker(req.signature_carrier) {
+                return ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier);
+            }
             let mut out = req.payload.to_vec();
             out.extend_from_slice(b"---\n");
             out.extend_from_slice(req.signature_carrier);
@@ -301,6 +311,19 @@ mod tests {
             }
             DecomposeResponse::Invocation(e) => panic!("{e:?}"),
         }
+    }
+
+    #[test]
+    fn yaml_compose_rejects_marker_in_carrier() {
+        let outcome = compose(&ComposeRequest {
+            payload: b"k: v\n",
+            signature_carrier: b"keyid: 'kid\n---\nschema: injected'\n",
+            form: TranscriptionForm::Yaml,
+        });
+        assert!(matches!(
+            outcome,
+            ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier)
+        ));
     }
 
     fn write_varint(out: &mut Vec<u8>, mut v: u64) {

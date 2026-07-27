@@ -7,9 +7,13 @@
 //! Audit trail: `docs/conformance-validation.md`.
 
 use yaml_sigil_conformance::{
-    alg_ecdsa::run_ecdsa_suite, alg_ed25519::run_ed25519_suite, base64::run_base64_suite,
-    decomposition::run_yaml_decomposition_suite, key_id::run_keyid_suite,
-    proto_outer::run_protobuf_outer_suite, schema_alignment::run_schema_alignment_suite,
+    alg_ecdsa::run_ecdsa_suite,
+    alg_ed25519::run_ed25519_suite,
+    base64::run_base64_suite,
+    decomposition::run_yaml_decomposition_suite,
+    key_id::{run_keyid_compose_suite, run_keyid_suite},
+    proto_outer::run_protobuf_outer_suite,
+    schema_alignment::run_schema_alignment_suite,
     yaml_signature::run_yaml_signature_suite,
 };
 use yaml_sigil_signing::DefaultSigner;
@@ -34,6 +38,7 @@ fn conformance_schema_alignment() {
 #[test]
 fn conformance_keyid() {
     run_keyid_suite(&DefaultVerifier);
+    run_keyid_compose_suite(&DefaultTranscriber);
 }
 
 #[test]

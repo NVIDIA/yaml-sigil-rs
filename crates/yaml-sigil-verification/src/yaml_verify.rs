@@ -51,7 +51,7 @@ fn extract_yaml_metadata(
         None => return Err(PreVerifyOutcome::MetadataParseFailure),
     };
     if let Some(ref keyid) = doc.keyid
-        && !keyid_octets_in_bounds(keyid)
+        && !keyid_is_valid(keyid)
     {
         return Err(PreVerifyOutcome::MetadataParseFailure);
     }
@@ -67,10 +67,10 @@ fn extract_yaml_metadata(
     })
 }
 
-/// `keyid` must be a non-empty UTF-8 string of at most 1024 octets.
-pub(crate) fn keyid_octets_in_bounds(keyid: &str) -> bool {
+/// `keyid` must be 1..=1024 UTF-8 octets without CR or LF.
+pub(crate) fn keyid_is_valid(keyid: &str) -> bool {
     let len = keyid.len();
-    (1..=1024).contains(&len)
+    (1..=1024).contains(&len) && !keyid.contains(['\r', '\n'])
 }
 
 pub(crate) fn pre_verify_yaml(

@@ -36,7 +36,7 @@ fn extract_proto_metadata(carrier: Vec<u8>) -> Result<UnverifiedSignature, PreVe
         None => return Err(PreVerifyOutcome::MetadataParseFailure),
     };
     if let Some(ref keyid) = inner.keyid
-        && !crate::yaml_verify::keyid_octets_in_bounds(keyid)
+        && !crate::yaml_verify::keyid_is_valid(keyid)
     {
         return Err(PreVerifyOutcome::MetadataParseFailure);
     }

@@ -86,11 +86,47 @@ fn top_level_keys_flat_line_scan(text: &str) -> std::collections::BTreeSet<Strin
     keys
 }
 
-/// Serialize a signature document (for tests and tooling).
+fn quote_yaml_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\0' => out.push_str("\\0"),
+            '\u{7}' => out.push_str("\\a"),
+            '\u{8}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{b}' => out.push_str("\\v"),
+            '\u{c}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            '\u{1b}' => out.push_str("\\e"),
+            ch if ch <= '\u{1f}'
+                || ('\u{7f}'..='\u{9f}').contains(&ch)
+                || matches!(ch, '\u{2028}' | '\u{2029}') =>
+            {
+                out.push_str(&format!("\\u{:04X}", ch as u32));
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Serialize a canonical YAML signature carrier.
 pub fn serialize_signature_document(doc: &SignatureDocument) -> Result<String, CoreError> {
-    let config = noyalib::SerializerConfig::new().quote_all(true);
-    noyalib::to_string_with_config(doc, &config)
-        .map_err(|e| CoreError::SignatureYaml(e.to_string()))
+    let mut out = format!("schema: {}\nalg: {}\n", doc.schema, doc.alg);
+    if let Some(keyid) = &doc.keyid {
+        out.push_str("keyid: ");
+        out.push_str(&quote_yaml_string(keyid));
+        out.push('\n');
+    }
+    out.push_str("signature: ");
+    out.push_str(&doc.signature);
+    out.push('\n');
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -120,5 +156,27 @@ mod tests {
     fn parse_rejects_invalid_yaml() {
         let err = super::parse_signature_document(b"not: [\n").unwrap_err();
         assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn serialize_uses_canonical_carrier() {
+        let doc = SignatureDocument {
+            schema: crate::SCHEMA_V1ALPHA1.into(),
+            alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+            keyid: Some("kid-\"1\"".into()),
+            signature: "eA".into(),
+        };
+        let carrier = super::serialize_signature_document(&doc).unwrap();
+        assert_eq!(
+            carrier,
+            "schema: YamlSigilSignature.v1alpha1\n\
+             alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+             keyid: \"kid-\\\"1\\\"\"\n\
+             signature: eA\n"
+        );
+        assert_eq!(
+            super::parse_signature_document(carrier.as_bytes()).unwrap(),
+            doc
+        );
     }
 }

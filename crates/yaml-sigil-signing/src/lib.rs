@@ -80,7 +80,7 @@ fn validate_invocation(req: &SignRequest<'_>) -> Result<(), SignInvocationError>
     }
     if let Some(keyid) = req.keyid {
         let octets = keyid.len();
-        if octets == 0 || octets > 1024 {
+        if octets == 0 || octets > 1024 || keyid.contains(['\r', '\n']) {
             return Err(SignInvocationError::InvalidKeyid);
         }
     }
@@ -340,6 +340,26 @@ mod tests {
             c.yaml_signature_unknown_field_policy,
             yaml_sigil_core::YamlSignatureDocumentUnknownFieldPolicy::RejectedAtParse
         );
+    }
+
+    #[test]
+    fn signer_rejects_line_break_in_keyid() {
+        let sk = EdSk::from_bytes(&[5u8; 32]);
+        for keyid in ["kid\nsuffix", "kid\rsuffix"] {
+            let req = SignRequest {
+                payload: b"a: b\n",
+                algorithm: AlgorithmId::Ed25519,
+                key: SigningKey::Ed25519(&sk),
+                keyid: Some(keyid),
+                append_missing_final_newline: false,
+                output_form: OutputForm::Yaml,
+                algorithm_parameters: &[],
+            };
+            assert!(matches!(
+                sign(&req),
+                SignOutcome::Invocation(SignInvocationError::InvalidKeyid)
+            ));
+        }
     }
 
     #[test]
