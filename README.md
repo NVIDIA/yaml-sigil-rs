@@ -43,6 +43,9 @@ adds validation against the local signature-document schema.
 Callers select artifact forms through the public form enums. `v1alpha1` defines
 no magic bytes, media type, or required file extension.
 
+YAML decompose and verify operations require complete artifacts because
+boundary selection uses the last constrained marker.
+
 ### Published Crate Compliance Documents
 
 Every published library crate includes its crate README, the Apache 2.0
