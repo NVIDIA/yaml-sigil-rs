@@ -18,5 +18,8 @@ SHA-256 signatures.
 - `Verifier`, `AsyncVerifier`, request types, result types, key helpers, and
   capability types are re-exported from `yaml-sigil-traits`.
 
+`PublicKeys` is the caller-authorized key set, indexed by algorithm. The
+artifact's unsigned `keyid` does not expand that set.
+
 The verifier exposes parser observations when callers request them. It does not
 provide RPC transport.
