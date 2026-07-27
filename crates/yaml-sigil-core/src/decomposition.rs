@@ -87,16 +87,6 @@ fn collect_markers(bytes: &[u8]) -> Vec<usize> {
     out
 }
 
-fn extra_marker_in_signature_body(bytes: &[u8], _m: usize, t: usize) -> bool {
-    // Correct max-marker selection makes this invariant check unreachable.
-    for idx in t..bytes.len() {
-        if marker_len(bytes, idx).is_some() {
-            return true;
-        }
-    }
-    false
-}
-
 /// Run Artifact Decomposition on UTF-8 artifact bytes (no prior YAML parse).
 #[tracing::instrument(level = "debug", skip(artifact), fields(len = artifact.len()))]
 pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
@@ -124,10 +114,6 @@ pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
     if t == artifact.len() {
         return DecompositionOutcome::Malformed;
     }
-    if extra_marker_in_signature_body(artifact, m, t) {
-        return DecompositionOutcome::Malformed;
-    }
-
     DecompositionOutcome::Signed(SignatureRanges {
         payload: 0..m,
         signature_document: m..artifact.len(),

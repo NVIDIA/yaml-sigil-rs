@@ -77,7 +77,8 @@ an unnatural workaround.
   YAML and protobuf verification reject CR or LF in `keyid`, and YAML Compose
   rejects `keyid-marker-injection.carrier.txt` as
   `InvalidSignatureCarrier`. YAML signature carriers must end after one
-  document.
+  document. The Rust implementation removes the unreachable post-selection
+  marker outcome. Other fixture bytes and expected outcomes are unchanged.
 - 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
   `75468ac0b665ea4edfc3a1d113de23276f9632ba`. The imported proto change is
   comment-only, and the JSON Schema change adds only its non-semantic
