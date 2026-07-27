@@ -40,6 +40,9 @@ and documentation style guide.
 signature documents with `noyalib`. The optional `json-schema-validate` feature
 adds validation against the local signature-document schema.
 
+Callers select artifact forms through the public form enums. `v1alpha1` defines
+no magic bytes, media type, or required file extension.
+
 ### Published Crate Compliance Documents
 
 Every published library crate includes its crate README, the Apache 2.0
