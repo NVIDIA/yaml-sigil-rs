@@ -73,9 +73,10 @@ an unnatural workaround.
 
 - 2026-07-27: Imported `yaml-sigil-spec` `origin/main` at
   `5e995b6566ba467bf237d8db07aff279bb6349bd`. The import adds the
-  marker-injection artifacts. YAML and protobuf verification reject CR or LF
-  in `keyid`, and YAML Compose rejects
-  `keyid-marker-injection.carrier.txt` as `InvalidSignatureCarrier`.
+  marker-injection artifacts and clarifies the strict JSON Schema profile.
+  YAML and protobuf verification reject CR or LF in `keyid`, and YAML Compose
+  rejects `keyid-marker-injection.carrier.txt` as
+  `InvalidSignatureCarrier`.
 - 2026-07-09: Imported `yaml-sigil-spec` `origin/main` at
   `75468ac0b665ea4edfc3a1d113de23276f9632ba`. The imported proto change is
   comment-only, and the JSON Schema change adds only its non-semantic
