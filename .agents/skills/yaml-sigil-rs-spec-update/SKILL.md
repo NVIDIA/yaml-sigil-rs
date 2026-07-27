@@ -18,6 +18,9 @@ workspace:
 - `THIRD_PARTY_NOTICES.md`
 - `crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md`
 
+Run commands from the repository root. Paths in this skill are relative to that
+root.
+
 There is no `source-spec` submodule in this repository. Use this skill when
 reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
@@ -45,7 +48,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
 1. Start from a clean worktree:
 
-   ```bash
+   ```shell
    git status --short
    ```
 
@@ -53,7 +56,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    The command defaults to `origin/main` and uses the public spec repository
    URL:
 
-   ```bash
+   ```shell
    cargo xtask update-spec
    cargo xtask update-spec --ref origin/dev/example-branch
    ```
@@ -71,13 +74,13 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    First inspect the full repository diff stat so unlisted spec files are not
    missed:
 
-   ```bash
+   ```shell
    git -C target/spec-update/yaml-sigil-spec diff --stat <old-spec-ref>..<new-spec-ref>
    ```
 
    Then inspect the known implementation-relevant paths:
 
-   ```bash
+   ```shell
    git -C target/spec-update/yaml-sigil-spec diff --stat <old-spec-ref>..<new-spec-ref> -- \
      README.md \
      signing-api.md \
@@ -99,7 +102,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
 4. Check the imported artifact diff deliberately:
 
-   ```bash
+   ```shell
    git diff -- \
      crates/yaml-sigil-core/spec/ \
      crates/yaml-sigil-conformance/fixtures/ \
@@ -142,7 +145,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
 6. Run the quality loop appropriate to the change:
 
-   ```bash
+   ```shell
    cargo fmt --all --check
    cargo clippy --workspace --all-targets --all-features -- -D warnings
    cargo test --workspace --all-features
@@ -153,6 +156,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
 7. Coordinate release order after review:
 
-   Publishing is disabled in this prelaunch cleanup branch. When publishing is
-   re-enabled, update `yaml-sigil-traits` first when the public contract
-   changes, then update this workspace's `yaml-sigil-traits` dependency.
+   Publishing is disabled in the current workspace configuration. When
+   publishing is re-enabled, update `yaml-sigil-traits` first when the public
+   contract changes, then update this workspace's `yaml-sigil-traits`
+   dependency.

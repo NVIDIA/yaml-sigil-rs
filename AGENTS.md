@@ -1,10 +1,21 @@
-# AGENTS.md - YamlSigil Rust implementation
+# AGENTS.md
 
-## Local Skill
+## Project-Local Skill
 
-Use `.agents/skills/yaml-sigil-rs-spec-update/SKILL.md` when reviewing
-YamlSigil specification changes, importing local spec artifacts, or reconciling
-this Rust implementation after spec updates.
+Use the project-local
+[YamlSigil Rust spec update skill](.agents/skills/yaml-sigil-rs-spec-update/SKILL.md)
+when reviewing YamlSigil specification changes, importing local spec
+artifacts, or reconciling this Rust implementation after spec updates.
+
+## Agent Documentation Standards
+
+Project-local skills exist under `.agents/skills/` and should remain
+discoverable by agents working in this repository. Maintain those skills
+according to the
+[Agent Skills specification](https://agentskills.io/specification), and
+maintain this file according to the
+[AGENTS.md standard](https://agents.md/). Keep both portable across compatible
+agent clients, without assumptions about user-specific paths or session state.
 
 ## Scope
 
@@ -188,7 +199,7 @@ services.
 
 Consumers that need RPC transport wire it in their own deployment.
 
-## Multi-Agent Etiquette
+## Change Separation
 
 Keep proto/schema imports, conformance fixture changes, crypto behavior
 changes, CI edits, and unrelated formatting in separate commits or clearly
