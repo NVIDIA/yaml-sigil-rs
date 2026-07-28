@@ -189,5 +189,5 @@ pub(crate) fn verify_from_pre_verify(
 
 fn decode_sig_b64(s: &str) -> Result<Vec<u8>, ()> {
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    engine.decode(s.trim()).map_err(|_| ())
+    engine.decode(s).map_err(|_| ())
 }

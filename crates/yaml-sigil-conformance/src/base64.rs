@@ -65,8 +65,8 @@ const FIXTURES: &[Base64Fixture] = &[
 ///
 /// Mirrors `yaml-sigil-verification`'s internal `decode_sig_b64` byte-for-byte
 /// (URL-safe + no-pad + trailing-bit hygiene are the
-/// `base64::engine::general_purpose::URL_SAFE_NO_PAD` defaults), but does
-/// not `trim()` the input so external whitespace is also rejected.
+/// `base64::engine::general_purpose::URL_SAFE_NO_PAD` defaults), including
+/// rejection of external whitespace without normalization.
 fn decode_yamlsigil_b64(input: &[u8]) -> Result<Vec<u8>, base64::DecodeError> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(input)
 }

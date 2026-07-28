@@ -104,7 +104,7 @@ pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>,
         .map_err(|_| TranscodeError::SchemaMismatch)?;
 
     let sig_octets = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(doc.signature.trim())
+        .decode(doc.signature.as_bytes())
         .map_err(|_| TranscodeError::InvalidSignatureBase64)?;
 
     let alg_id = AlgorithmId::from_yaml_str(&doc.alg).ok_or(TranscodeError::UnknownYamlAlg)?;
@@ -147,5 +147,50 @@ pub fn proto_wire_to_signed_yaml_stream(wire: &[u8]) -> Result<Vec<u8>, Transcod
         ComposeOutcome::Invocation(_) | ComposeOutcome::Error(_) => {
             Err(TranscodeError::NotSignedYamlStream)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ed25519_dalek::SigningKey as Ed25519SigningKey;
+
+    use super::{TranscodeError, signed_yaml_stream_to_proto_wire};
+    use crate::{SignYamlParams, SigningKey, sign_yaml};
+    use yaml_sigil_core::AlgorithmId;
+
+    fn add_signature_whitespace(artifact: &[u8]) -> Vec<u8> {
+        let text = std::str::from_utf8(artifact).expect("signer emits UTF-8 YAML");
+        let marker = "signature: ";
+        let value_start = text.rfind(marker).expect("signature field") + marker.len();
+        let value_end = value_start
+            + text[value_start..]
+                .find('\n')
+                .expect("signature line terminator");
+        let mut mutated = String::with_capacity(text.len() + 4);
+        mutated.push_str(&text[..value_start]);
+        mutated.push_str("\" ");
+        mutated.push_str(&text[value_start..value_end]);
+        mutated.push_str(" \"");
+        mutated.push_str(&text[value_end..]);
+        mutated.into_bytes()
+    }
+
+    #[test]
+    fn yaml_to_proto_rejects_signature_whitespace() {
+        let signing_key = Ed25519SigningKey::from_bytes(&[55_u8; 32]);
+        let artifact = sign_yaml(&SignYamlParams {
+            payload: b"review: cyber55\n",
+            algorithm: AlgorithmId::Ed25519,
+            key: SigningKey::Ed25519(&signing_key),
+            keyid: None,
+            append_missing_final_newline: false,
+        })
+        .expect("sign baseline artifact");
+        let mutated = add_signature_whitespace(&artifact);
+
+        assert!(matches!(
+            signed_yaml_stream_to_proto_wire(&mutated),
+            Err(TranscodeError::InvalidSignatureBase64)
+        ));
     }
 }

@@ -136,6 +136,9 @@ an unnatural workaround.
   signature-document parsing.
 - Unknown YAML signature-document fields are rejected during
   signature-document parsing.
+- YAML signature base64 is decoded without trimming or other normalization.
+  Quoted signature scalars containing leading or trailing whitespace are
+  rejected.
 - Empty signature octets can pass through transcription/decomposition and are
   rejected at verification.
 - Protobuf-form payload bytes are arbitrary octets; YAML-form payload bytes

@@ -30,6 +30,25 @@ fn p256_pair() -> (P256SigningKey, p256::ecdsa::VerifyingKey) {
     (sk, vk)
 }
 
+fn quote_signature_with_whitespace(artifact: &[u8], leading: &str, trailing: &str) -> Vec<u8> {
+    let text = std::str::from_utf8(artifact).expect("signer emits UTF-8 YAML");
+    let marker = "signature: ";
+    let value_start = text.rfind(marker).expect("signature field") + marker.len();
+    let value_end = value_start
+        + text[value_start..]
+            .find('\n')
+            .expect("signature line terminator");
+    let mut mutated = String::with_capacity(text.len() + leading.len() + trailing.len() + 2);
+    mutated.push_str(&text[..value_start]);
+    mutated.push('"');
+    mutated.push_str(leading);
+    mutated.push_str(&text[value_start..value_end]);
+    mutated.push_str(trailing);
+    mutated.push('"');
+    mutated.push_str(&text[value_end..]);
+    mutated.into_bytes()
+}
+
 #[test]
 fn verify_yaml_ed25519_sign_then_verify_and_display() {
     let (sk, vk) = ed25519_pair();
@@ -169,6 +188,33 @@ fn verify_yaml_rejects_noncanonical_algorithm_whitespace() {
     )
     .unwrap();
     assert_eq!(state, VerifierState::MalformedAttemptedSigned);
+}
+
+#[test]
+fn verify_yaml_rejects_signature_whitespace() {
+    let (sk, vk) = ed25519_pair();
+    let artifact = sign_yaml(&SignYamlParams {
+        payload: b"k: v\n",
+        algorithm: AlgorithmId::Ed25519,
+        key: SigningKey::Ed25519(&sk),
+        keyid: None,
+        append_missing_final_newline: false,
+    })
+    .unwrap();
+
+    for (leading, trailing) in [(" ", ""), ("", " "), (" ", " ")] {
+        let mutated = quote_signature_with_whitespace(&artifact, leading, trailing);
+        let state = verify_yaml(
+            &mutated,
+            &PublicKeys {
+                ed25519: Some(&vk),
+                p256: None,
+            },
+            VerifierOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(state, VerifierState::MalformedAttemptedSigned);
+    }
 }
 
 #[test]
