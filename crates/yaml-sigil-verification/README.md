@@ -24,5 +24,18 @@ artifact's unsigned `keyid` does not expand that set.
 Only payload bytes returned by `VerifierState::Verified` are authenticated. A
 signature document inside those bytes remains payload content.
 
+## YAML Signature-Document Behavior
+
+The verifier advertises `AdvertisedConformanceProfile::Permissive`. Its YAML
+decoder rejects duplicate known mapping keys and returns
+`MalformedAttemptedSigned`; it does not select an effective value from duplicate
+occurrences. The decoder also rejects unknown top-level fields, anchors,
+aliases, and custom tags.
+
+Before parsing an unauthenticated YAML signature carrier, the verifier applies
+signature-document-specific byte, nesting-depth, parser-event, constructed-node,
+scalar-byte, document-count, mapping-key, sequence-length, alias-expansion, and
+merge-key budgets. It does not register application-defined tag constructors.
+
 The verifier exposes parser observations when callers request them. It does not
 provide RPC transport.

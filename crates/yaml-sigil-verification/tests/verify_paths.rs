@@ -144,6 +144,34 @@ fn verify_yaml_malformed_unsigned_disallowed() {
 }
 
 #[test]
+fn verify_yaml_rejects_noncanonical_algorithm_whitespace() {
+    let (sk, vk) = ed25519_pair();
+    let artifact = sign_yaml(&SignYamlParams {
+        payload: b"k: v\n",
+        algorithm: AlgorithmId::Ed25519,
+        key: SigningKey::Ed25519(&sk),
+        keyid: None,
+        append_missing_final_newline: false,
+    })
+    .unwrap();
+    let text = String::from_utf8(artifact).unwrap();
+    let noncanonical = text.replace(
+        "alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
+        "alg: \" ED25519_PUREEDDSA_RAW_RS64_CANONICAL\"",
+    );
+    let state = verify_yaml(
+        noncanonical.as_bytes(),
+        &PublicKeys {
+            ed25519: Some(&vk),
+            p256: None,
+        },
+        VerifierOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(state, VerifierState::MalformedAttemptedSigned);
+}
+
+#[test]
 fn pre_verify_unsigned_allow_unsigned() {
     let pre = pre_verify_yaml(b"u: 1\n", true);
     assert_eq!(pre.outcome, PreVerifyOutcome::Unsigned);

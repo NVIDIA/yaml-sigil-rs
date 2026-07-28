@@ -13,13 +13,11 @@
 //! The suite is profile-parameterized: the assertions depend on the
 //! verifier's advertised
 //! [`AdvertisedConformanceProfile`].
-//! Under the spec's "ceiling reading" (spec commit `c695790`,
-//! `verification-api.md` § "Conformance Profiles"), the advertised profile
-//! is the *loosest* decode posture the verifier guarantees; rejecting where
-//! the column expected acceptance is conforming over-delivery. The
-//! Permissive branch of this suite asserts our actual over-delivery
-//! behavior — the four `duplicate-*.yaml` fixtures always reject
-//! at parse, and `unknown-key.yaml` also rejects at parse.
+//! Under the spec's clarified `Permissive` behavior (spec commit `692052b`),
+//! a YAML decoder may reject duplicate known mapping keys or accept them using
+//! documented effective-value semantics. The Permissive branch asserts this
+//! implementation's documented behavior: the four `duplicate-*.yaml` fixtures
+//! always reject at parse, and `unknown-key.yaml` also rejects at parse.
 //! See [`docs/conformance-validation.md`](../../docs/conformance-validation.md)
 //! § 2 (per-fixture mapping) and § 5.r § 5d (resolved upstream).
 
@@ -120,17 +118,14 @@ fn assert_strict_column<V: Verifier>(v: &V) {
     );
 }
 
-/// Drive the Permissive column of the fixture table, asserting our actual
-/// behavior — including the over-delivery axes — as a hard contract.
+/// Drive the Permissive column of the fixture table.
 ///
-/// Under the spec's "ceiling reading" paragraph, an advertised profile is the
-/// *loosest* decode posture the verifier guarantees; rejecting where the column
-/// expected acceptance is conforming over-delivery. This function records those
-/// axes as explicit assertions rather than skipping the cases.
+/// The specification permits duplicate rejection under this profile. This
+/// function records the implementation's documented rejection behavior as a
+/// hard contract.
 fn assert_permissive_column<V: Verifier>(v: &V) {
     // valid-baseline: reaches the crypto stage; placeholder signature
-    // fails to authenticate. (Permissive-baseline behavior, no
-    // over-delivery axis involved.)
+    // fails to authenticate.
     let st = verify_with(v, "valid-baseline.yaml", VerifierOptions::default());
     assert_eq!(
         st,
@@ -138,12 +133,8 @@ fn assert_permissive_column<V: Verifier>(v: &V) {
         "valid-baseline.yaml (Permissive): expected SignedButFailedVerification, got {st:?}"
     );
 
-    // The four duplicate-* fixtures: duplicate mapping keys are rejected at
-    // parse time, returning
-    // MalformedAttemptedSigned. This is over-delivery on the duplicate-key
-    // axis under the ceiling reading — Permissive expects last-wins
-    // acceptance, we strictly reject. Asserted as a hard contract per the
-    // spec's "record the over-delivery axes" guidance.
+    // The four duplicate-* fixtures reject at parse time. The Permissive
+    // profile explicitly permits this implementation's documented behavior.
     for file in [
         "duplicate-schema.yaml",
         "duplicate-alg.yaml",
@@ -154,15 +145,14 @@ fn assert_permissive_column<V: Verifier>(v: &V) {
         assert_eq!(
             st,
             VerifierState::MalformedAttemptedSigned,
-            "{}/{} (Permissive over-delivery): expected MalformedAttemptedSigned, got {st:?}",
+            "{}/{} (Permissive duplicate rejection): expected MalformedAttemptedSigned, got {st:?}",
             CATEGORY,
             file
         );
     }
 
     // unknown-key: unknown signature-document fields are rejected at parse
-    // time. This is over-delivery on the unknown-field axis under the ceiling
-    // reading — Permissive expects acceptance, we strictly reject.
+    // time. This remains stricter than the Permissive unknown-field posture.
     let st = verify_with(v, "unknown-key.yaml", VerifierOptions::default());
     assert_eq!(
         st,
@@ -258,7 +248,7 @@ async fn assert_permissive_column_async<V: AsyncVerifier>(v: &V) {
         assert_eq!(
             st,
             VerifierState::MalformedAttemptedSigned,
-            "{}/{} (Permissive over-delivery, async): expected MalformedAttemptedSigned, got {st:?}",
+            "{}/{} (Permissive duplicate rejection, async): expected MalformedAttemptedSigned, got {st:?}",
             CATEGORY,
             file
         );

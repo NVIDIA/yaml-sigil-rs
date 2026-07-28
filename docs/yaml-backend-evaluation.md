@@ -15,7 +15,8 @@ The workspace does not expose YAML parser or protobuf codegen selection
 features. `yaml-sigil-core` generates protobuf wire helpers with `buffa`.
 
 `parse_signature_document` decodes UTF-8 before YAML parsing and calls
-`noyalib::from_str_with_config` with these parser policies:
+`noyalib::load_all_with_config` and `noyalib::from_str_with_config` with these
+parser policies:
 
 - Duplicate mapping keys return an error.
 - Merge keys are treated as ordinary keys.
@@ -23,6 +24,24 @@ features. `yaml-sigil-core` generates protobuf wire helpers with `buffa`.
 - Custom tags are denied.
 - Serde `deny_unknown_fields` rejects unknown top-level signature-document
   fields.
+
+The parser applies these signature-document-specific resource limits:
+
+| Resource | Limit |
+|----------|-------|
+| Input bytes | 16 KiB |
+| Nesting depth | 16 |
+| Alias expansions | 0 |
+| Keys in one mapping | 8 |
+| Elements in one sequence | 16 |
+| Parser events | 128 |
+| Constructed nodes | 64 |
+| Cumulative scalar bytes | 8 KiB |
+| Documents | 1 |
+| Merge-key entries | 8 |
+
+These parser budgets apply independently of any deployment-level artifact size
+limit. The parser does not register application-defined tag constructors.
 
 The dependency enables only `std` and disables default features. The optional
 `noyalib` features do not improve this parser:
@@ -43,9 +62,9 @@ The dependency enables only `std` and disables default features. The optional
   multi-document parsing, and third-party validation integrations do not fit
   this small, synchronous, fail-closed parser.
 
-`serialize_signature_document` calls `noyalib::to_string_with_config` with
-`quote_all(true)`. Signing and transcoding paths compose the resulting
-signature-document YAML through `yaml-sigil-transcription`.
+`serialize_signature_document` emits the four known fields in canonical order
+and quotes `keyid` when present. Signing and transcoding paths compose the
+resulting signature-document YAML through `yaml-sigil-transcription`.
 
 The optional `json-schema-validate` feature validates parsed
 `SignatureDocument` values against the local signature-document schema. It does
@@ -79,8 +98,8 @@ implementation decisions.
 
 ## Operational Guidance
 
-- Treat signature documents as small, bounded inputs. Deployment-level outer
-  artifact size policy should enforce that bound.
+- Apply deployment-level outer artifact and payload limits before invoking this
+  workspace. The parser enforces its own signature-carrier budgets.
 - Prefer structural decomposition with `yaml-sigil-core::decompose_artifact`
   before YAML parsing so the parser only sees the signature-document slice.
 - Re-run `cargo audit` after any YAML dependency bump.

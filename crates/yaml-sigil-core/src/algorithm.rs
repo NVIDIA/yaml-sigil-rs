@@ -41,8 +41,13 @@ mod tests {
             Some(AlgorithmId::Ed25519)
         );
         assert_eq!(
-            AlgorithmId::from_yaml_str("  ECDSA_SECP256R1_SHA256_RAW_RS64  "),
+            AlgorithmId::from_yaml_str("ECDSA_SECP256R1_SHA256_RAW_RS64"),
             Some(AlgorithmId::EcdsaP256Sha256)
+        );
+        assert_eq!(
+            AlgorithmId::from_yaml_str(" ECDSA_SECP256R1_SHA256_RAW_RS64"),
+            None,
+            "YAML algorithm identifiers must be exact canonical strings"
         );
         assert_eq!(AlgorithmId::from_yaml_str("nope"), None);
         assert_eq!(

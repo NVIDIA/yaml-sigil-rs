@@ -71,6 +71,18 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-07-28: Imported `yaml-sigil-spec` `origin/main` at
+  `6fcf410d8e714971bfae086183e4964debb0ffd1`. The imported fixture README
+  clarifies that `Permissive` YAML decoders may reject duplicate known mapping
+  keys or accept them using documented effective-value semantics. This
+  implementation documents and retains duplicate rejection. Fixture bytes,
+  fixture names, suite mappings, and expected outcomes are unchanged. The
+  implementation also bounds YAML parser depth, constructed nodes, alias
+  expansion, and related parser resources before decoding unauthenticated
+  signature-carrier bytes. The workspace Git dependency resolves
+  `yaml-sigil-traits` at `d289b249d097a58267b48d0289b21036ce65c3f6`,
+  which requires exact canonical YAML `alg` strings; core mapping and verifier
+  regression tests now reject surrounding whitespace.
 - 2026-07-27: Imported `yaml-sigil-spec` `origin/main` at
   `5e995b6566ba467bf237d8db07aff279bb6349bd`. The import adds the
   marker-injection artifacts and clarifies the strict JSON Schema profile.

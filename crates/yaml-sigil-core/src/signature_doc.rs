@@ -7,6 +7,17 @@ use crate::algorithm::SCHEMA_V1ALPHA1;
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
 
+const SIGNATURE_DOCUMENT_MAX_BYTES: usize = 16 * 1024;
+const SIGNATURE_DOCUMENT_MAX_DEPTH: usize = 16;
+const SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS: usize = 0;
+const SIGNATURE_DOCUMENT_MAX_MAPPING_KEYS: usize = 8;
+const SIGNATURE_DOCUMENT_MAX_SEQUENCE_LENGTH: usize = 16;
+const SIGNATURE_DOCUMENT_MAX_EVENTS: usize = 128;
+const SIGNATURE_DOCUMENT_MAX_NODES: usize = 64;
+const SIGNATURE_DOCUMENT_MAX_TOTAL_SCALAR_BYTES: usize = 8 * 1024;
+const SIGNATURE_DOCUMENT_MAX_DOCUMENTS: usize = 1;
+const SIGNATURE_DOCUMENT_MAX_MERGE_KEYS: usize = 8;
+
 /// Top-level keys allowed in a Tier A signature document mapping.
 pub const TIER_A_TOP_LEVEL_KEYS: &[&str] = &["schema", "alg", "keyid", "signature"];
 
@@ -30,6 +41,13 @@ impl SignatureDocument {
     }
 }
 
+/// Parse one unauthenticated YAML signature document with bounded parser
+/// resources.
+///
+/// The parser accepts at most 16 KiB and independently limits nesting depth,
+/// parser events, constructed nodes, cumulative scalar bytes, collection
+/// sizes, documents, merge keys, and alias expansion. It rejects anchors,
+/// aliases, and custom tags.
 #[tracing::instrument(level = "debug", skip(bytes), fields(len = bytes.len()))]
 pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreError> {
     let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
@@ -47,6 +65,17 @@ pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreE
 
 fn signature_document_parser_config() -> noyalib::ParserConfig {
     noyalib::ParserConfig::new()
+        .max_document_length(SIGNATURE_DOCUMENT_MAX_BYTES)
+        .max_depth(SIGNATURE_DOCUMENT_MAX_DEPTH)
+        .max_alias_expansions(SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS)
+        .max_mapping_keys(SIGNATURE_DOCUMENT_MAX_MAPPING_KEYS)
+        .max_sequence_length(SIGNATURE_DOCUMENT_MAX_SEQUENCE_LENGTH)
+        .max_events(SIGNATURE_DOCUMENT_MAX_EVENTS)
+        .max_nodes(SIGNATURE_DOCUMENT_MAX_NODES)
+        .max_total_scalar_bytes(SIGNATURE_DOCUMENT_MAX_TOTAL_SCALAR_BYTES)
+        .max_documents(SIGNATURE_DOCUMENT_MAX_DOCUMENTS)
+        .max_merge_keys(SIGNATURE_DOCUMENT_MAX_MERGE_KEYS)
+        .alias_anchor_ratio(Some(1.0))
         .duplicate_key_policy(noyalib::DuplicateKeyPolicy::Error)
         .merge_key_policy(noyalib::MergeKeyPolicy::AsOrdinary)
         .with_policy(noyalib::policy::DenyAnchors)
@@ -163,6 +192,49 @@ mod tests {
     #[test]
     fn parse_rejects_invalid_yaml() {
         let err = super::parse_signature_document(b"not: [\n").unwrap_err();
+        assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn parser_uses_signature_document_resource_budgets() {
+        let config = super::signature_document_parser_config();
+        assert_eq!(
+            config.max_document_length,
+            super::SIGNATURE_DOCUMENT_MAX_BYTES
+        );
+        assert_eq!(config.max_depth, super::SIGNATURE_DOCUMENT_MAX_DEPTH);
+        assert_eq!(
+            config.max_alias_expansions,
+            super::SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS
+        );
+        assert_eq!(config.max_nodes, super::SIGNATURE_DOCUMENT_MAX_NODES);
+        assert_eq!(config.max_documents, 1);
+    }
+
+    #[test]
+    fn parse_rejects_document_over_byte_budget() {
+        let oversized = format!(
+            "#{}\nschema: YamlSigilSignature.v1alpha1\n\
+             alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+             signature: Zm9v\n",
+            "x".repeat(super::SIGNATURE_DOCUMENT_MAX_BYTES)
+        );
+        let err = super::parse_signature_document(oversized.as_bytes()).unwrap_err();
+        assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn parse_rejects_document_over_depth_budget() {
+        let nesting = super::SIGNATURE_DOCUMENT_MAX_DEPTH + 2;
+        let deeply_nested = format!(
+            "schema: YamlSigilSignature.v1alpha1\n\
+             alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+             signature: Zm9v\n\
+             extra: {}x{}\n",
+            "[".repeat(nesting),
+            "]".repeat(nesting)
+        );
+        let err = super::parse_signature_document(deeply_nested.as_bytes()).unwrap_err();
         assert!(matches!(err, CoreError::SignatureYaml(_)));
     }
 
