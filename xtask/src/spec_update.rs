@@ -149,6 +149,11 @@ fn import_spec_artifacts(root: &Path, checkout: &Path) -> Result<()> {
 
 fn copy_file(source_root: &Path, source_rel: &str, dest_root: &Path, dest_rel: &str) -> Result<()> {
     let source = source_root.join(source_rel);
+    let metadata = checked_source_metadata(source_root, &source)?;
+    if !metadata.file_type().is_file() {
+        bail!("source is not a regular file: {}", source.display());
+    }
+
     let dest = dest_root.join(dest_rel);
     fs::create_dir_all(
         dest.parent()
@@ -169,21 +174,37 @@ fn mirror_fixtures(checkout: &Path, root: &Path) -> Result<()> {
     }
     fs::create_dir_all(&dest).with_context(|| format!("create {}", dest.display()))?;
 
-    copy_file(&source, "README.md", &dest, "README.md")?;
+    copy_file(checkout, "conformance/README.md", &dest, "README.md")?;
     for fixture_dir in FIXTURE_DIRS {
-        copy_tree(&source.join(fixture_dir), &dest.join(fixture_dir))?;
+        copy_tree(checkout, &source.join(fixture_dir), &dest.join(fixture_dir))?;
     }
     Ok(())
 }
 
-fn copy_tree(source: &Path, dest: &Path) -> Result<()> {
-    let file_type = fs::symlink_metadata(source)
-        .with_context(|| format!("stat {}", source.display()))?
-        .file_type();
-
-    if file_type.is_symlink() {
+fn checked_source_metadata(source_root: &Path, source: &Path) -> Result<fs::Metadata> {
+    let metadata =
+        fs::symlink_metadata(source).with_context(|| format!("stat {}", source.display()))?;
+    if metadata.file_type().is_symlink() {
         bail!("refusing to copy symlink {}", source.display());
     }
+
+    let canonical_root = fs::canonicalize(source_root)
+        .with_context(|| format!("resolve source root {}", source_root.display()))?;
+    let canonical_source =
+        fs::canonicalize(source).with_context(|| format!("resolve source {}", source.display()))?;
+    if !canonical_source.starts_with(&canonical_root) {
+        bail!(
+            "refusing to copy {} resolved outside source root {}",
+            source.display(),
+            source_root.display()
+        );
+    }
+
+    Ok(metadata)
+}
+
+fn copy_tree(source_root: &Path, source: &Path, dest: &Path) -> Result<()> {
+    let file_type = checked_source_metadata(source_root, source)?.file_type();
     if file_type.is_file() {
         fs::create_dir_all(
             dest.parent()
@@ -201,7 +222,7 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<()> {
     fs::create_dir_all(dest).with_context(|| format!("create {}", dest.display()))?;
     for entry in fs::read_dir(source).with_context(|| format!("read {}", source.display()))? {
         let entry = entry.with_context(|| format!("read entry under {}", source.display()))?;
-        copy_tree(&entry.path(), &dest.join(entry.file_name()))?;
+        copy_tree(source_root, &entry.path(), &dest.join(entry.file_name()))?;
     }
     Ok(())
 }
@@ -217,5 +238,120 @@ fn require_success(status: ExitStatus, context: &str) -> Result<()> {
         Ok(())
     } else {
         bail!("{context} (exit {})", status.code().unwrap_or(-1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn test_dir(label: &str) -> PathBuf {
+        let sequence = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "yaml-sigil-spec-update-{label}-{}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).expect("create test directory");
+        path
+    }
+
+    #[test]
+    fn copy_file_copies_regular_source() {
+        let root = test_dir("regular-source");
+        let source_root = root.join("checkout");
+        let dest_root = root.join("workspace");
+        fs::create_dir(&source_root).expect("create source root");
+        fs::write(source_root.join("schema.json"), b"schema").expect("write source");
+
+        copy_file(&source_root, "schema.json", &dest_root, "imported.json")
+            .expect("copy regular source");
+
+        assert_eq!(
+            fs::read(dest_root.join("imported.json")).expect("read imported file"),
+            b"schema"
+        );
+        fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_file_rejects_source_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_dir("source-symlink");
+        let source_root = root.join("checkout");
+        let dest_root = root.join("workspace");
+        fs::create_dir(&source_root).expect("create source root");
+        let outside = root.join("outside.json");
+        fs::write(&outside, b"outside").expect("write outside file");
+        symlink(&outside, source_root.join("schema.json")).expect("create source symlink");
+
+        let error = copy_file(&source_root, "schema.json", &dest_root, "imported.json")
+            .expect_err("source symlink must fail");
+
+        assert!(error.to_string().contains("refusing to copy symlink"));
+        assert!(!dest_root.join("imported.json").exists());
+        fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_file_rejects_symlinked_parent_outside_source_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_dir("parent-symlink");
+        let source_root = root.join("checkout");
+        let outside_dir = root.join("outside");
+        let dest_root = root.join("workspace");
+        fs::create_dir(&source_root).expect("create source root");
+        fs::create_dir(&outside_dir).expect("create outside directory");
+        fs::write(outside_dir.join("schema.json"), b"outside").expect("write outside file");
+        symlink(&outside_dir, source_root.join("schema")).expect("create parent symlink");
+
+        let error = copy_file(
+            &source_root,
+            "schema/schema.json",
+            &dest_root,
+            "imported.json",
+        )
+        .expect_err("symlinked parent outside source root must fail");
+
+        assert!(error.to_string().contains("resolved outside source root"));
+        assert!(!dest_root.join("imported.json").exists());
+        fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_tree_rejects_symlinked_parent_outside_source_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_dir("tree-parent-symlink");
+        let source_root = root.join("checkout");
+        let outside_dir = root.join("outside");
+        let dest = root.join("workspace/fixtures");
+        fs::create_dir(&source_root).expect("create source root");
+        fs::create_dir(&outside_dir).expect("create outside directory");
+        let outside_fixture_dir = outside_dir.join("fixture-dir");
+        fs::create_dir(&outside_fixture_dir).expect("create outside fixture directory");
+        fs::write(outside_fixture_dir.join("fixture.txt"), b"outside")
+            .expect("write outside fixture");
+        symlink(&outside_dir, source_root.join("conformance")).expect("create parent symlink");
+
+        let error = copy_tree(
+            &source_root,
+            &source_root.join("conformance/fixture-dir"),
+            &dest,
+        )
+        .expect_err("symlinked tree root must fail");
+
+        assert!(error.to_string().contains("resolved outside source root"));
+        assert!(!dest.exists());
+        fs::remove_dir_all(root).expect("remove test root");
     }
 }
