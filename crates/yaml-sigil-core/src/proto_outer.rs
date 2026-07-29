@@ -54,6 +54,11 @@ fn read_tag(bytes: &[u8], i: usize) -> Option<(u32, u32, usize)> {
     Some((field as u32, (tag & 7) as u32, next))
 }
 
+fn read_length(bytes: &[u8], i: usize) -> Option<(usize, usize)> {
+    let (length, next) = read_varint(bytes, i)?;
+    Some((usize::try_from(length).ok()?, next))
+}
+
 fn write_varint(out: &mut Vec<u8>, mut v: u64) {
     while v >= 0x80 {
         out.push((v as u8) | 0x80);
@@ -74,8 +79,8 @@ fn skip_field(wire_type: u32, bytes: &[u8], i: usize) -> Option<usize> {
         0 => read_varint(bytes, i).map(|(_, j)| j),
         1 => (i + 8 <= bytes.len()).then_some(i + 8),
         2 => {
-            let (len, j) = read_varint(bytes, i)?;
-            let end = j.checked_add(len as usize)?;
+            let (len, j) = read_length(bytes, i)?;
+            let end = j.checked_add(len)?;
             (end <= bytes.len()).then_some(end)
         }
         5 => (i + 4 <= bytes.len()).then_some(i + 4),
@@ -118,12 +123,11 @@ pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterD
             continue;
         }
 
-        let (len, ni2) = match read_varint(wire, i) {
+        let (len, ni2) = match read_length(wire, i) {
             Some(v) => v,
             None => return ProtoOuterDecomposeOutcome::Malformed,
         };
         i = ni2;
-        let len = len as usize;
         if i.checked_add(len).is_none_or(|end| end > wire.len()) {
             return ProtoOuterDecomposeOutcome::Malformed;
         }

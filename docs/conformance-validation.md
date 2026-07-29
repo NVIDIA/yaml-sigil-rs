@@ -144,6 +144,8 @@ an unnatural workaround.
 - Protobuf outer-envelope parsing rejects field number zero, field numbers
   above the protobuf 29-bit maximum, and overflowing tag varints before
   applying `OuterConformance` unknown-field behavior.
+- Protobuf length prefixes use checked pointer-width conversion so malformed
+  wire bytes produce the same outcome on 32-bit and 64-bit targets.
 - Protobuf-form payload bytes are arbitrary octets; YAML-form payload bytes
   remain constrained by the YAML envelope rules.
 

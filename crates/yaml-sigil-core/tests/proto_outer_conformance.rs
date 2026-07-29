@@ -130,3 +130,32 @@ fn overflowing_tenth_tag_varint_byte_is_malformed() {
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
+
+#[test]
+fn oversized_known_field_length_is_malformed_on_every_pointer_width() {
+    let mut wire = Vec::new();
+    write_varint(&mut wire, (1 << 3) | 2);
+    write_varint(&mut wire, (1_u64 << 32) + 5);
+    wire.extend_from_slice(b"short");
+    write_len_delimited_field(&mut wire, 2, b"sig");
+
+    assert_eq!(
+        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        ProtoOuterDecomposeOutcome::Malformed
+    );
+}
+
+#[test]
+fn oversized_unknown_field_length_is_malformed_on_every_pointer_width() {
+    let mut wire = Vec::new();
+    write_varint(&mut wire, (99 << 3) | 2);
+    write_varint(&mut wire, (1_u64 << 32) + 5);
+    wire.extend_from_slice(b"short");
+    write_len_delimited_field(&mut wire, 1, b"payload\n");
+    write_len_delimited_field(&mut wire, 2, b"sig");
+
+    assert_eq!(
+        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        ProtoOuterDecomposeOutcome::Malformed
+    );
+}
