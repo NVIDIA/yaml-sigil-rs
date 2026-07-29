@@ -73,18 +73,18 @@ fn marker_len(bytes: &[u8], i: usize) -> Option<usize> {
     }
 }
 
-fn collect_markers(bytes: &[u8]) -> Vec<usize> {
-    let mut out = Vec::new();
+fn find_last_marker(bytes: &[u8]) -> Option<usize> {
+    let mut last_marker = None;
     let mut i = 0usize;
     while i < bytes.len() {
         if let Some(len) = marker_len(bytes, i) {
-            out.push(i);
+            last_marker = Some(i);
             i = i.saturating_add(len);
             continue;
         }
         i += 1;
     }
-    out
+    last_marker
 }
 
 /// Run Artifact Decomposition on UTF-8 artifact bytes (no prior YAML parse).
@@ -97,12 +97,9 @@ pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
         return DecompositionOutcome::Unsigned;
     }
 
-    let markers = collect_markers(artifact);
-    if markers.is_empty() {
+    let Some(m) = find_last_marker(artifact) else {
         return DecompositionOutcome::Unsigned;
-    }
-
-    let m = *markers.iter().max().expect("non-empty");
+    };
     let marker_tail = match marker_len(artifact, m) {
         Some(len) => len,
         None => return DecompositionOutcome::Malformed,
@@ -163,6 +160,26 @@ mod tests {
                     b"schema: YamlSigilSignature.v1alpha1\n\
                       alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\nsignature: eA\n"
                 );
+            }
+            _ => panic!("{r:?}"),
+        }
+    }
+
+    #[test]
+    fn last_marker_defines_signature_document() {
+        let a = b"foo: bar\n---\nintermediate: document\n---\nschema: \
+                  YamlSigilSignature.v1alpha1\nalg: \
+                  ED25519_PUREEDDSA_RAW_RS64_CANONICAL\nsignature: eA\n";
+        let expected_marker = a
+            .windows(4)
+            .rposition(|window| window == b"---\n")
+            .expect("fixture contains markers");
+        let r = decompose_artifact(a);
+        match r {
+            DecompositionOutcome::Signed(s) => {
+                assert_eq!(s.payload.end, expected_marker);
+                assert_eq!(s.signature_document.start, expected_marker);
+                assert_eq!(s.signature_carrier.start, expected_marker + 4);
             }
             _ => panic!("{r:?}"),
         }
