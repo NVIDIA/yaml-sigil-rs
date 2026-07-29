@@ -30,6 +30,20 @@ fn p256_pair() -> (P256SigningKey, p256::ecdsa::VerifyingKey) {
     (sk, vk)
 }
 
+fn append_varint(out: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        out.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
+fn append_len_delimited_field(out: &mut Vec<u8>, field_number: u64, value: &[u8]) {
+    append_varint(out, (field_number << 3) | 2);
+    append_varint(out, value.len() as u64);
+    out.extend_from_slice(value);
+}
+
 fn quote_signature_with_whitespace(artifact: &[u8], leading: &str, trailing: &str) -> Vec<u8> {
     let text = std::str::from_utf8(artifact).expect("signer emits UTF-8 YAML");
     let marker = "signature: ";
@@ -149,6 +163,31 @@ fn verify_proto_malformed_wire() {
     };
     let st = verify_proto(b"\xffnot-protobuf", &keys, VerifierOptions::default()).unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
+}
+
+#[test]
+fn verify_proto_rejects_out_of_range_field_alias() {
+    let (sk, vk) = ed25519_pair();
+    let mut wire = sign_proto(&SignProtoParams {
+        payload: b"authorized: true\n",
+        algorithm: AlgorithmId::Ed25519,
+        key: SigningKey::Ed25519(&sk),
+        keyid: None,
+        append_missing_final_newline: false,
+    })
+    .unwrap();
+    append_len_delimited_field(&mut wire, (1_u64 << 29) + 1, b"authorized: false\n");
+
+    let state = verify_proto(
+        &wire,
+        &PublicKeys {
+            ed25519: Some(&vk),
+            p256: None,
+        },
+        VerifierOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(state, VerifierState::MalformedAttemptedSigned);
 }
 
 #[test]

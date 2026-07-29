@@ -9,6 +9,8 @@
 use crate::conformance::OuterConformance;
 use crate::error::CoreError;
 
+const MAX_PROTOBUF_FIELD_NUMBER: u64 = (1 << 29) - 1;
+
 /// Outcome of outer protobuf envelope decomposition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtoOuterDecomposeOutcome {
@@ -27,16 +29,29 @@ fn read_varint(bytes: &[u8], mut i: usize) -> Option<(u64, usize)> {
     while i < bytes.len() {
         let b = bytes[i];
         i += 1;
+        if shift == 63 {
+            if b > 1 {
+                return None;
+            }
+            result |= u64::from(b) << 63;
+            return Some((result, i));
+        }
         result |= u64::from(b & 0x7f) << shift;
         if b & 0x80 == 0 {
             return Some((result, i));
         }
         shift += 7;
-        if shift > 63 {
-            return None;
-        }
     }
     None
+}
+
+fn read_tag(bytes: &[u8], i: usize) -> Option<(u32, u32, usize)> {
+    let (tag, next) = read_varint(bytes, i)?;
+    let field = tag >> 3;
+    if !(1..=MAX_PROTOBUF_FIELD_NUMBER).contains(&field) {
+        return None;
+    }
+    Some((field as u32, (tag & 7) as u32, next))
 }
 
 fn write_varint(out: &mut Vec<u8>, mut v: u64) {
@@ -86,13 +101,11 @@ pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterD
     let mut i = 0usize;
 
     while i < wire.len() {
-        let (tag, ni) = match read_varint(wire, i) {
+        let (field, wire_type, ni) = match read_tag(wire, i) {
             Some(v) => v,
             None => return ProtoOuterDecomposeOutcome::Malformed,
         };
         i = ni;
-        let field = (tag >> 3) as u32;
-        let wire_type = (tag & 7) as u32;
 
         if wire_type != 2 {
             if mode == OuterConformance::Strict {

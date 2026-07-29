@@ -141,6 +141,9 @@ an unnatural workaround.
   rejected.
 - Empty signature octets can pass through transcription/decomposition and are
   rejected at verification.
+- Protobuf outer-envelope parsing rejects field number zero, field numbers
+  above the protobuf 29-bit maximum, and overflowing tag varints before
+  applying `OuterConformance` unknown-field behavior.
 - Protobuf-form payload bytes are arbitrary octets; YAML-form payload bytes
   remain constrained by the YAML envelope rules.
 

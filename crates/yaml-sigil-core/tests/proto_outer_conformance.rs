@@ -15,9 +15,9 @@ fn write_varint(out: &mut Vec<u8>, mut v: u64) {
     out.push(v as u8);
 }
 
-fn write_len_delimited_field(out: &mut Vec<u8>, field_number: u32, value: &[u8]) {
+fn write_len_delimited_field(out: &mut Vec<u8>, field_number: u64, value: &[u8]) {
     let tag = (field_number << 3) | 2;
-    write_varint(out, u64::from(tag));
+    write_varint(out, tag);
     write_varint(out, value.len() as u64);
     out.extend_from_slice(value);
 }
@@ -100,4 +100,33 @@ fn last_payload_wins() {
         }
         o => panic!("{o:?}"),
     }
+}
+
+#[test]
+fn invalid_outer_field_numbers_are_malformed() {
+    for field_number in [0, (1_u64 << 29) + 1, (1_u64 << 32) + 1] {
+        let mut wire = Vec::new();
+        write_len_delimited_field(&mut wire, 1, b"signed\n");
+        write_len_delimited_field(&mut wire, 2, b"sig");
+        write_len_delimited_field(&mut wire, field_number, b"attacker\n");
+        assert_eq!(
+            decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+            ProtoOuterDecomposeOutcome::Malformed,
+            "field number {field_number} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn overflowing_tenth_tag_varint_byte_is_malformed() {
+    let mut wire = vec![0x8a];
+    wire.extend_from_slice(&[0x80; 8]);
+    wire.push(0x02);
+    wire.extend_from_slice(&[0x01, b'p']);
+    write_len_delimited_field(&mut wire, 2, b"sig");
+
+    assert_eq!(
+        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        ProtoOuterDecomposeOutcome::Malformed
+    );
 }
