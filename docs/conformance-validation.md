@@ -73,6 +73,17 @@ an unnatural workaround.
 ## Import Review Notes
 
 - 2026-07-29: Imported `yaml-sigil-spec` `origin/main` at
+  `0a4421362a36b684ac6217ec00bc9e16be24e370`. The Ed25519 `S`-boundary
+  protobuf fixtures now retain the valid `R` component from RFC 8032 section
+  7.1 Test 1, so `S >= L` is their only canonical-encoding violation. The
+  duplicate-signature YAML fixture now uses two distinct, independently valid
+  base64url encodings, so duplicate-key handling is its only structural
+  failure. Fixture names, expected outcomes, suite mappings, proto and schema
+  artifacts, notices, runtime behavior, and the public contract are unchanged.
+  Validation resolves `yaml-sigil-traits` at
+  `f5edd39c340a239145e9a97f164bffcebffe9e28`, which only advances its pinned
+  specification and does not change the Rust contract.
+- 2026-07-29: Imported `yaml-sigil-spec` `origin/main` at
   `beb065696cdbfb526566e45628c5eb9aa86579ac`. The imported notices classify
   RFC 8032 section 7.1 values as attributed IRTF Stream test-vector material
   under the applicable IETF Trust and BCP 78 framework, not as Revised-BSD
