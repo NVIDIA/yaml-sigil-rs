@@ -73,6 +73,21 @@ an unnatural workaround.
 ## Import Review Notes
 
 - 2026-07-29: Imported `yaml-sigil-spec` `origin/main` at
+  `beb065696cdbfb526566e45628c5eb9aa86579ac`. The imported notices classify
+  RFC 8032 section 7.1 values as attributed IRTF Stream test-vector material
+  under the applicable IETF Trust and BCP 78 framework, not as Revised-BSD
+  Code Components. They preserve the 2017 RFC copyright context and warranty
+  disclaimer, the RFC 4648 copying conditions and warranty disclaimer, and
+  the 2009 source notice for
+  *Standards for Efficient Cryptography 1 (SEC 1)* and 2010 source notice for
+  *Standards for Efficient Cryptography 2 (SEC 2)*, plus their patent/IP
+  caveats. Imported fixture documentation and comment-capable sidecars now
+  carry short provenance references. Proto and schema artifacts, semantic
+  fixture bytes, fixture names, expected outcomes, runtime behavior, and the
+  public contract are unchanged. Validation resolves `yaml-sigil-traits` at
+  `94a39f934c4ccf0d13dfaf442d25fdbd9a5f32b5`, whose corresponding changes are
+  also attribution-only.
+- 2026-07-29: Imported `yaml-sigil-spec` `origin/main` at
   `332b83c04e80e1efb1d233340899b920050b0124`. The import adds YAML and
   protobuf fixtures that require `PreVerify` to accept empty signature octets
   and `Verify` to return `MalformedAttemptedSigned` before disabled-algorithm

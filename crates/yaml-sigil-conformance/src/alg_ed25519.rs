@@ -5,6 +5,10 @@
 //! Covers RFC 8032 §7.1 Test 1/2, noncanonical encodings, small-order key
 //! rejection (via `Verifier::resolve_ed25519_verifying_key`), stable re-sign,
 //! and `algorithm_parameters` rejection on both verify and sign.
+//!
+//! The RFC-derived fixture values and validation rules are third-party
+//! standards/test-vector material, not material relicensed under this file's
+//! Apache-2.0 declaration. See the crate's `THIRD_PARTY_NOTICES.md`.
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_core::AlgorithmId;

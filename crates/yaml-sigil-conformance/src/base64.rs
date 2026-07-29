@@ -5,6 +5,11 @@
 //! YamlSigil uses URL-safe base64 without padding; trailing-bit hygiene is
 //! mandated for raw 64-octet signatures. This suite asserts both directions
 //! (accept / reject) against the implementation's actual decoder.
+//!
+//! The RFC-derived rules and test inputs are third-party standards/test-vector
+//! material, not material relicensed under this file's Apache-2.0 declaration.
+//! See the crate's `THIRD_PARTY_NOTICES.md` for attribution and applicable
+//! terms.
 
 use base64::Engine;
 

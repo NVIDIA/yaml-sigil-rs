@@ -43,6 +43,57 @@ The public extension-trait contract lives in the separately published
 `yaml-sigil-traits` crate. Do not edit, generate, or publish traits from this
 repository.
 
+## Third-party material and attribution
+
+`THIRD_PARTY_NOTICES.md` is the canonical attribution and redistribution
+record for imported standards text, test vectors, parameters, tables, and
+other third-party material in this workspace. The matching notice beside
+`crates/yaml-sigil-conformance` accompanies the imported fixtures. Import both
+files from `yaml-sigil-spec` with `cargo xtask update-spec`; do not let the
+copies diverge.
+
+Crate-local `THIRD_PARTY_NOTICES.md` files cover third-party material packaged
+by independently distributed crates. Reconcile those notices with the
+canonical imported notice whenever the corresponding source material or terms
+change.
+
+When adding or changing third-party material:
+
+- Update the authoritative notice in `yaml-sigil-spec` first, then use the
+  documented import workflow. Record the exact source, version, section,
+  copyright holder, applicable copying conditions, warranty disclaimer, and
+  patent or other intellectual-property caveat.
+- Read the source's own copyright notice and terms. For an RFC, check its
+  publication stream and the BCP 78 or IETF Trust terms in effect on its
+  publication date. Do not assume that RFC test data, tables, ABNF, or code
+  blocks are IETF Code Components or covered by a BSD license.
+- Ensure every file or other independently distributed material that mentions
+  or references either SEC source identifies it by its full title:
+  *Standards for Efficient Cryptography 1 (SEC 1)* or
+  *Standards for Efficient Cryptography 2 (SEC 2)*. Use the full title on the
+  first source reference in each file; the `SEC 1` and `SEC 2` short forms may
+  follow within that file.
+- Add a short provenance comment next to copied or derived constants,
+  algorithms, encodings, validation rules, or test values. State when
+  identified third-party material is not covered by a file's Apache-2.0
+  declaration.
+- Do not alter semantic fixture bytes to add attribution. For binary files,
+  signed artifacts, parser inputs, or other exact-byte fixtures, put the
+  provenance in the nearest `README.md`, a safe sidecar, and the authoritative
+  generator source.
+- Preserve applicable non-endorsement language. Do not present this workspace
+  as an official publication of, or as affiliated with or endorsed by, a
+  cited author, publisher, or standards organization.
+- Verify every package containing identified third-party material includes
+  the applicable crate-local notice. Keep notice files in explicit Cargo
+  `include` lists when a package uses one.
+
+Keep these instructions durable and repository-focused. Do not record private
+correspondence, reviewer identities, or approval history in repository
+documentation. Attribution-only imports may leave fixture bytes and runtime
+behavior unchanged, but they still require an entry in
+`docs/conformance-validation.md`.
+
 ## Documentation Style Guide
 
 These rules apply to Markdown files in this Rust implementation workspace,

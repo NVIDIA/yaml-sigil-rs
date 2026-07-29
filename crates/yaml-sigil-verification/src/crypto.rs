@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Shared cryptographic verification.
+//!
+//! The Ed25519 canonicality constants and rules below, together with the
+//! test-only RFC 8032 section 7.1 signature, are third-party RFC material.
+//! They are not relicensed under this file's Apache-2.0 declaration. See the
+//! crate's `THIRD_PARTY_NOTICES.md` for attribution and applicable terms.
 
 use ed25519_dalek::{Signature as EdSignature, Verifier as EdVerifier, VerifyingKey as EdVk};
 use p256::ecdsa::{Signature as P256Signature, VerifyingKey as P256Vk};
@@ -124,8 +129,9 @@ mod tests {
 
     /// RFC 8032 §7.1 Test 1 signature (`Sign(seed=9d61..7f60, message=())`).
     ///
-    /// The IETF Revised BSD notice for this Code Component is included in
-    /// this crate's `THIRD_PARTY_NOTICES.md`.
+    /// This is an attributed RFC test-vector value under the applicable
+    /// IETF Trust and BCP 78 framework, not a Revised-BSD Code Component.
+    /// See this crate's `THIRD_PARTY_NOTICES.md`.
     /// `R || S`, exactly 64 octets, both components canonical.
     const RFC8032_T1_SIG_HEX: &str = "e5564300c360ac729086e2cc806e828a\
                                       84877f1eb8e5d974d873e065224901555f\

@@ -6,6 +6,13 @@
 //! ranges, non-fixed-width signatures, bad-key rejection via
 //! `Verifier::resolve_p256_verifying_key`, two-nonce instability, and
 //! `algorithm_parameters` rejection on both verify and sign.
+//!
+//! The fixtures exercise encodings and operations from *Standards for
+//! Efficient Cryptography 1 (SEC 1)* and secp256r1/P-256 parameters from
+//! *Standards for Efficient Cryptography 2 (SEC 2)*. That third-party
+//! standards material is not relicensed under this file's Apache-2.0
+//! declaration. See the crate's `THIRD_PARTY_NOTICES.md` for source notices
+//! and patent/IP caveats.
 
 use p256::ecdsa::{SigningKey as P256Sk, VerifyingKey as P256Vk};
 use yaml_sigil_core::AlgorithmId;
@@ -209,7 +216,7 @@ fn non_fixed_width<V: Verifier>(v: &V) {
 
 fn bad_keys<V: Verifier>(v: &V) {
     // fixture: bad-key-identity.txt -> KeyResolutionFailure
-    // Both encodings: SEC1 single-byte 0x00 and the 65-octet all-zero string.
+    // Both encodings: SEC 1 single-byte 0x00 and the 65-octet all-zero string.
     let id_body = load_string(CATEGORY, "bad-key-identity.txt");
     let single = require_hex_field(&id_body, "Q-encoded-as-O-single-byte");
     let all_zero = require_hex_field(&id_body, "Q-encoded-all-zero-65");

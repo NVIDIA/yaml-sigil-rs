@@ -39,3 +39,10 @@ merge-key budgets. It does not register application-defined tag constructors.
 
 The verifier exposes parser observations when callers request them. It does not
 provide RPC transport.
+
+## Third-party material
+
+NVIDIA-authored crate material is licensed under Apache-2.0. RFC 8032-derived
+constants, canonical-encoding rules, and a section 7.1 test-vector value in
+`src/crypto.rs` retain their source attribution and terms in
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).

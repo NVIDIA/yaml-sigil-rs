@@ -9,14 +9,17 @@ description: Use when reviewing YamlSigil specification changes for yaml-sigil-r
 
 `yaml-sigil-rs` owns the Rust implementation crates for YamlSigil. It depends on
 the separately published `yaml-sigil-traits` crate for the public trait and DTO
-contract, and it vendors only the local implementation inputs needed by this
-workspace:
+contract, and it owns only the local implementation inputs and distribution
+notices needed by this workspace:
 
 - `crates/yaml-sigil-core/spec/proto/yaml_sigil/v1alpha1/yaml_sigil.proto`
 - `crates/yaml-sigil-core/spec/schema/YamlSigilSignature.v1alpha1.schema.json`
 - `crates/yaml-sigil-conformance/fixtures/`
 - `THIRD_PARTY_NOTICES.md`
 - `crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md`
+- `crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md` for the locally
+  maintained, crate-scoped notice that must remain aligned with imported
+  source terms.
 
 Run commands from the repository root. Paths in this skill are relative to that
 root.
@@ -65,6 +68,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    the curated conformance fixture directories, and their third-party notices.
    It does not import service protos, Buf module files, rebuild generators, or
    vendor data.
+   It also does not overwrite crate-local notices. Reconcile
+   `crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md` with the imported
+   canonical notice whenever the applicable RFC material or terms change.
 
 3. Review the spec delta that can affect this implementation. Treat this as a
    starting point, not a closed list. If you need a diff, use the managed
@@ -107,7 +113,8 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
      crates/yaml-sigil-core/spec/ \
      crates/yaml-sigil-conformance/fixtures/ \
      THIRD_PARTY_NOTICES.md \
-     crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md
+     crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md \
+     crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md
    ```
 
    Revert an imported artifact only when the spec change is known to be
@@ -134,6 +141,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    - `crates/yaml-sigil-conformance/` and `docs/conformance-validation.md`:
      fixture coverage, divergence catalog, and API gaps discovered by
      conformance changes.
+   - Root, conformance, and crate-local `THIRD_PARTY_NOTICES.md` files:
+     imported attribution, independently packaged material, source terms,
+     warranty disclaimers, patent/IP caveats, and non-endorsement language.
    - `Cargo.toml` and `Cargo.lock`: update `yaml-sigil-traits` when the public
      trait contract changes.
    - This skill: keep the map current when code moves, new crates take

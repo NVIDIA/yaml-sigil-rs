@@ -55,9 +55,10 @@ symlinks to the workspace-root documents; Cargo flattens them into ordinary
 files when it assembles a `.crate` archive.
 
 `yaml-sigil-verification` additionally includes its scoped
-`THIRD_PARTY_NOTICES.md` for the RFC 8032 test-vector value packaged in that
-crate. The other published implementation crates do not package material
-covered by that notice.
+`THIRD_PARTY_NOTICES.md` for the RFC 8032-derived constants,
+canonical-encoding rules, and test-vector value packaged in that crate. The
+other published implementation crates do not package material covered by that
+notice.
 
 Before release, use `cargo package --list -p <crate>` to confirm the applicable
 documents are present in each archive.
