@@ -183,6 +183,9 @@ an unnatural workaround.
 - Empty signature octets can pass through transcription/decomposition and
   pre-verification. Full verification rejects them before runtime
   algorithm-support classification.
+- Ed25519 verification rejects small-order public keys at the point of use,
+  including typed keys supplied without the byte-oriented key-resolution
+  helper.
 - Protobuf outer-envelope parsing rejects field number zero, field numbers
   above the protobuf 29-bit maximum, and overflowing tag varints before
   applying `OuterConformance` unknown-field behavior.

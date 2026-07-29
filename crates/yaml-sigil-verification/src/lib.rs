@@ -169,6 +169,12 @@ pub(crate) fn verify_extracted_signature(
                 return Ok(VerifierState::MalformedAttemptedSigned);
             }
             let vk = keys.ed25519.ok_or(InvocationError::KeyResolutionFailure)?;
+            // `PublicKeys` accepts an already constructed verifying key, so
+            // callers are not required to use the byte-oriented resolver.
+            // Enforce the same key-admissibility rule at the point of use.
+            if vk.is_weak() {
+                return Err(InvocationError::KeyResolutionFailure);
+            }
             if crypto::verify_ed25519(vk, payload, sig_octets).is_ok() {
                 Ok(VerifierState::Verified {
                     payload: payload.to_vec(),

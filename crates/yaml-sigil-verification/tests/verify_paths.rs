@@ -290,6 +290,47 @@ fn verify_ed25519_wrong_key_fails() {
 }
 
 #[test]
+fn verify_ed25519_rejects_direct_weak_public_key() {
+    use buffa::MessageField;
+    use yaml_sigil_core::encode_signed_yaml_artifact;
+    use yaml_sigil_core::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
+
+    // The identity point is a valid typed dalek key but is small-order. Pairing
+    // it with identity R and zero S satisfies dalek's ordinary verification
+    // equation for arbitrary payloads unless the key is rejected first.
+    let mut identity_encoding = [0u8; 32];
+    identity_encoding[0] = 1;
+    let weak_vk = ed25519_dalek::VerifyingKey::from_bytes(&identity_encoding)
+        .expect("identity point is a valid encoded point");
+    assert!(weak_vk.is_weak());
+
+    let mut forged_signature = vec![0u8; 64];
+    forged_signature[0] = 1;
+    let inner = YamlSigilSignature {
+        alg: Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL.into(),
+        signature: forged_signature,
+        ..Default::default()
+    };
+    let outer = SignedYamlArtifact {
+        payload: b"attacker: chosen\n".to_vec(),
+        signature: MessageField::from(inner),
+        ..Default::default()
+    };
+    let wire = encode_signed_yaml_artifact(&outer);
+
+    let error = verify_proto(
+        &wire,
+        &PublicKeys {
+            ed25519: Some(&weak_vk),
+            p256: None,
+        },
+        VerifierOptions::default(),
+    )
+    .expect_err("small-order keys must fail at key resolution");
+    assert_eq!(error, InvocationError::KeyResolutionFailure);
+}
+
+#[test]
 fn verify_ed25519_algorithm_disabled() {
     let (sk, vk) = ed25519_pair();
     let artifact = sign_yaml(&SignYamlParams {
