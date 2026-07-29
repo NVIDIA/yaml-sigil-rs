@@ -43,19 +43,25 @@ fn capabilities(profile: AdvertisedConformanceProfile) -> VerifierCapabilities {
 
 fn state_for_fixture(input_bytes: &[u8]) -> VerifierState {
     let text = std::str::from_utf8(input_bytes).expect("YAML signature fixtures are UTF-8");
+    let schema_identity_failure = !text.contains("\nschema: YamlSigilSignature.v1alpha1\n");
     let duplicate_known_key = ["schema", "alg", "keyid", "signature"]
         .iter()
         .any(|key| text.matches(&format!("\n{key}:")).count() > 1);
-    if duplicate_known_key || text.contains("\nbogus:") {
+    if schema_identity_failure || duplicate_known_key || text.contains("\nbogus:") {
         VerifierState::MalformedAttemptedSigned
     } else {
         VerifierState::SignedButFailedVerification
     }
 }
 
-fn pre_verify_response(form: ArtifactForm) -> PreVerifyResponse {
+fn pre_verify_response(input_bytes: &[u8], form: ArtifactForm) -> PreVerifyResponse {
+    let outcome = if state_for_fixture(input_bytes) == VerifierState::MalformedAttemptedSigned {
+        PreVerifyOutcome::MetadataParseFailure
+    } else {
+        PreVerifyOutcome::Ok
+    };
     PreVerifyResponse {
-        outcome: PreVerifyOutcome::Ok,
+        outcome,
         form,
         unverified_payload_bytes: None,
         unverified_signature: None,
@@ -70,12 +76,12 @@ impl Verifier for FakeVerifier {
 
     fn pre_verify(
         &self,
-        _input_bytes: &[u8],
+        input_bytes: &[u8],
         form: ArtifactForm,
         _allow_unsigned: bool,
         _include_parser_observations: bool,
     ) -> PreVerifyResponse {
-        pre_verify_response(form)
+        pre_verify_response(input_bytes, form)
     }
 
     fn verify(
@@ -120,12 +126,12 @@ impl AsyncVerifier for FakeVerifier {
 
     async fn pre_verify(
         &self,
-        _input_bytes: &[u8],
+        input_bytes: &[u8],
         form: ArtifactForm,
         _allow_unsigned: bool,
         _include_parser_observations: bool,
     ) -> PreVerifyResponse {
-        pre_verify_response(form)
+        pre_verify_response(input_bytes, form)
     }
 
     async fn verify(

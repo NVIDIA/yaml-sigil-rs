@@ -3,12 +3,11 @@
 
 //! YAML signature-document conformance — `fixtures/yaml-signature-conformance/`.
 //!
-//! Drives the verifier-side rules in `verification-api.md` "Conformance
-//! Profiles" (renamed from "Protobuf Inner Conformance Profiles" in
-//! spec commit `ce35681`) as they manifest on the YAML form —
-//! specifically, the duplicate-known-singular-field rule and the
-//! unknown-mapping-key rule. The protobuf-form symmetric cases live in
-//! [`proto_outer`](super::proto_outer).
+//! Drives the verifier-side rules in `verification-api.md` "Structural Rules
+//! By Form" and "Conformance Profiles" as they manifest on the YAML form. The
+//! suite covers the required schema identity, duplicate-known-singular-field
+//! behavior, and unknown-mapping-key behavior. The protobuf-form symmetric
+//! profile cases live in [`proto_outer`](super::proto_outer).
 //!
 //! The suite is profile-parameterized: the assertions depend on the
 //! verifier's advertised
@@ -23,8 +22,8 @@
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_verification::{
-    AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, PublicKeys, Verifier,
-    VerifierOptions, VerifierState,
+    AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, PreVerifyOutcome, PublicKeys,
+    Verifier, VerifierOptions, VerifierState,
 };
 
 use crate::fixtures::load_bytes;
@@ -58,10 +57,12 @@ fn verify_with<V: Verifier>(v: &V, file: &str, opts: VerifierOptions) -> Verifie
         })
 }
 
-/// Drive the six `yaml-signature-conformance/` fixtures through the supplied
+/// Drive the eight `yaml-signature-conformance/` fixtures through the supplied
 /// [`Verifier`]; the assertion table depends on the verifier's advertised
 /// [`AdvertisedConformanceProfile`].
 pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
+    assert_schema_identity_failures(v);
+
     let profile = v.capabilities().conformance_profile;
     match profile {
         AdvertisedConformanceProfile::Strict | AdvertisedConformanceProfile::SignatureStrict => {
@@ -71,12 +72,32 @@ pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
     }
 }
 
+fn assert_schema_identity_failures<V: Verifier>(v: &V) {
+    for file in ["wrong-schema.yaml", "missing-schema.yaml"] {
+        let bytes = load_bytes(CATEGORY, file);
+        let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false);
+        assert_eq!(
+            pre.outcome,
+            PreVerifyOutcome::MetadataParseFailure,
+            "{CATEGORY}/{file}: expected MetadataParseFailure at pre_verify, got {:?}",
+            pre.outcome
+        );
+
+        let st = verify_with(v, file, VerifierOptions::default());
+        assert_eq!(
+            st,
+            VerifierState::MalformedAttemptedSigned,
+            "{CATEGORY}/{file}: expected MalformedAttemptedSigned at verify, got {st:?}"
+        );
+    }
+}
+
 /// Drive the Strict / SignatureStrict column of the fixture table.
 ///
 /// The two profiles share the same expected outcomes for every fixture in
-/// this directory (the fixture README's "Strict outcome" and
-/// "SignatureStrict outcome" columns are identical for all six entries), so
-/// a single assertion routine covers both.
+/// this directory. The fixture README's "Strict outcome" and "SignatureStrict
+/// outcome" columns are identical for all eight entries, so a single assertion
+/// routine covers both.
 fn assert_strict_column<V: Verifier>(v: &V) {
     let strict_opts = VerifierOptions {
         reject_unknown_signature_document_fields: true,
@@ -184,12 +205,34 @@ async fn verify_with_async<V: AsyncVerifier>(
 
 /// Async sibling of [`run_yaml_signature_suite`].
 pub async fn run_yaml_signature_suite_async<V: AsyncVerifier>(v: &V) {
+    assert_schema_identity_failures_async(v).await;
+
     let profile = v.capabilities().conformance_profile;
     match profile {
         AdvertisedConformanceProfile::Strict | AdvertisedConformanceProfile::SignatureStrict => {
             assert_strict_column_async(v).await
         }
         AdvertisedConformanceProfile::Permissive => assert_permissive_column_async(v).await,
+    }
+}
+
+async fn assert_schema_identity_failures_async<V: AsyncVerifier>(v: &V) {
+    for file in ["wrong-schema.yaml", "missing-schema.yaml"] {
+        let bytes = load_bytes(CATEGORY, file);
+        let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false).await;
+        assert_eq!(
+            pre.outcome,
+            PreVerifyOutcome::MetadataParseFailure,
+            "{CATEGORY}/{file} (async): expected MetadataParseFailure at pre_verify, got {:?}",
+            pre.outcome
+        );
+
+        let st = verify_with_async(v, file, VerifierOptions::default()).await;
+        assert_eq!(
+            st,
+            VerifierState::MalformedAttemptedSigned,
+            "{CATEGORY}/{file} (async): expected MalformedAttemptedSigned at verify, got {st:?}"
+        );
     }
 }
 

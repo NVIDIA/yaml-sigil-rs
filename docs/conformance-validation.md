@@ -32,7 +32,7 @@ implementations can call the same `run_*_suite` helpers to compare behavior.
 | `base64/` | `run_base64_suite` | n/a | Core base64 helper behavior |
 | `alg-ed25519/` | `run_ed25519_suite` | `run_ed25519_suite_async` | `(Async)Verifier::verify`, key resolution, signing |
 | `alg-ecdsa/` | `run_ecdsa_suite` | `run_ecdsa_suite_async` | `(Async)Verifier::verify`, key resolution, signing |
-| `yaml-signature-conformance/` | `run_yaml_signature_suite` | `run_yaml_signature_suite_async` | `(Async)Verifier::verify` over YAML signature documents |
+| `yaml-signature-conformance/` | `run_yaml_signature_suite` | `run_yaml_signature_suite_async` | `(Async)Verifier::pre_verify` and `verify` over YAML signature documents |
 
 Primary entry points:
 
@@ -52,7 +52,8 @@ The current fixture set covers:
   ranges, marker selection, UTF-8 preconditions, and BOM rejection.
 - Protobuf outer-envelope duplicate/unknown-field handling under
   `OuterConformance` modes.
-- YAML/protobuf algorithm mapping and malformed algorithm identifiers.
+- YAML/protobuf algorithm mapping, malformed algorithm identifiers, and
+  empty-signature precedence over runtime algorithm support.
 - `keyid` presence, emptiness, UTF-8 byte bounds, CR/LF rejection, and
   lookup-hint handling.
 - URL-safe no-padding base64 behavior, including invalid alphabet, padding,
@@ -62,8 +63,8 @@ The current fixture set covers:
 - ECDSA P-256/SHA-256 happy paths, ACVP-derived vectors, high-S/low-S
   acceptance, invalid component ranges, wrong-size signatures, bad keys, and
   nonce-instability fixtures.
-- YAML signature-document duplicate-key and unknown-key behavior under the
-  implementation's advertised profile.
+- YAML signature-document schema identity, duplicate-key behavior, and
+  unknown-key behavior under the implementation's advertised profile.
 
 When a fixture exercises behavior that the Rust implementation cannot or
 should not represent naturally, record the divergence here rather than adding
@@ -71,6 +72,20 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-07-29: Imported `yaml-sigil-spec` `origin/main` at
+  `332b83c04e80e1efb1d233340899b920050b0124`. The import adds YAML and
+  protobuf fixtures that require `PreVerify` to accept empty signature octets
+  and `Verify` to return `MalformedAttemptedSigned` before disabled-algorithm
+  classification. The schema-alignment sync and async suites assert that
+  ordering with ECDSA disabled. The import also adds wrong-schema and
+  missing-schema YAML fixtures. The YAML signature-document sync and async
+  suites assert `MetadataParseFailure` at pre-verify and
+  `MalformedAttemptedSigned` at full verification for both fixtures under
+  every advertised profile branch. The verifier already implements both
+  behaviors, so no runtime change is required. The workspace Git dependency
+  resolves `yaml-sigil-traits` at
+  `561726b78816249b510489d350dc69412deecc59`, which documents the same
+  stage boundaries and precedence without changing the public contract shape.
 - 2026-07-28: Imported `yaml-sigil-spec` `origin/main` at
   `6fcf410d8e714971bfae086183e4964debb0ffd1`. The imported fixture README
   clarifies that `Permissive` YAML decoders may reject duplicate known mapping
@@ -139,8 +154,9 @@ an unnatural workaround.
 - YAML signature base64 is decoded without trimming or other normalization.
   Quoted signature scalars containing leading or trailing whitespace are
   rejected.
-- Empty signature octets can pass through transcription/decomposition and are
-  rejected at verification.
+- Empty signature octets can pass through transcription/decomposition and
+  pre-verification. Full verification rejects them before runtime
+  algorithm-support classification.
 - Protobuf outer-envelope parsing rejects field number zero, field numbers
   above the protobuf 29-bit maximum, and overflowing tag varints before
   applying `OuterConformance` unknown-field behavior.
