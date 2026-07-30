@@ -8,8 +8,8 @@
 //! See [`docs/conformance-validation.md`](../../docs/conformance-validation.md) § 2.
 
 use yaml_sigil_transcription::{
-    AsyncTranscriber, DecomposeOutcome, DecomposeRequest, DecomposeResponse, Transcriber,
-    TranscriptionForm,
+    AsyncTranscriber, DecomposeOutcome, DecomposeRequest, DecomposeResponse,
+    DecomposeStructuralResult, Transcriber, TranscriptionForm,
 };
 use yaml_sigil_verification::{ArtifactForm, AsyncVerifier, PreVerifyOutcome, Verifier};
 
@@ -84,7 +84,50 @@ const FIXTURES: &[YamlFixture] = &[
         decompose: DecomposeOutcome::MalformedAttemptedSigned,
         pre_verify: Some(PreVerifyOutcome::StructuralFailure),
     },
+    YamlFixture {
+        file: "marker-dense.yaml",
+        decompose: DecomposeOutcome::Ok,
+        pre_verify: Some(PreVerifyOutcome::Ok),
+    },
 ];
+
+fn assert_marker_dense_split(artifact: &[u8], structural: &DecomposeStructuralResult) {
+    let final_marker = artifact
+        .windows(4)
+        .rposition(|window| window == b"---\n")
+        .expect("marker-dense fixture must contain the final marker");
+    let payload = structural
+        .payload
+        .as_deref()
+        .expect("marker-dense decompose must return payload bytes");
+    let carrier = structural
+        .signature_carrier
+        .as_deref()
+        .expect("marker-dense decompose must return carrier bytes");
+
+    assert_eq!(
+        payload.len(),
+        final_marker,
+        "marker-dense payload must end at the final marker"
+    );
+    assert_eq!(
+        payload
+            .windows(4)
+            .filter(|window| *window == b"---\n")
+            .count(),
+        256,
+        "marker-dense payload must retain all 256 earlier marker candidates"
+    );
+    assert_eq!(
+        carrier,
+        &artifact[final_marker + 4..],
+        "marker-dense carrier must begin immediately after the final marker"
+    );
+    assert!(
+        carrier.starts_with(b"schema: YamlSigilSignature.v1alpha1\n"),
+        "marker-dense carrier must begin with the signature mapping"
+    );
+}
 
 /// Drive every `yaml-decomposition/` fixture through the supplied
 /// [`Transcriber`] and (where the spec table extends through verification's
@@ -113,6 +156,9 @@ where
             "{}/{}: DecomposeOutcome mismatch",
             CATEGORY, fx.file
         );
+        if fx.file == "marker-dense.yaml" {
+            assert_marker_dense_split(&bytes, &structural);
+        }
 
         if let Some(expected_pre) = fx.pre_verify {
             let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, true, false);
@@ -152,6 +198,9 @@ where
             "{}/{} (async): DecomposeOutcome mismatch",
             CATEGORY, fx.file
         );
+        if fx.file == "marker-dense.yaml" {
+            assert_marker_dense_split(&bytes, &structural);
+        }
 
         if let Some(expected_pre) = fx.pre_verify {
             let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, true, false).await;

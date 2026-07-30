@@ -91,6 +91,36 @@ const FIXTURES: &[ProtoFixture] = &[
         strict: DecomposeOutcome::Ok,
         signature_strict: DecomposeOutcome::Ok,
     },
+    ProtoFixture {
+        file: "invalid-field-zero.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "out-of-range-field-number.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "overflowing-tag-varint.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "oversized-length.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "invalid-wire-type-6.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "invalid-wire-type-7.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
 ];
 
 fn run_one<T: Transcriber>(t: &T, bytes: &[u8], mode: OuterConformance) -> DecomposeOutcome {

@@ -21,21 +21,40 @@ SHA-256 signatures.
 `PublicKeys` is the caller-authorized key set, indexed by algorithm. The
 artifact's unsigned `keyid` does not expand that set.
 
+Bind each artifact source, route, or storage class to one `ArtifactForm` before
+calling the verifier. Do not infer the form from artifact bytes or retry the
+other form after structural or verification failure.
+
 Only payload bytes returned by `VerifierState::Verified` are authenticated. A
 signature document inside those bytes remains payload content.
 
 ## YAML Signature-Document Behavior
 
 The verifier advertises `AdvertisedConformanceProfile::Permissive`. Its YAML
-decoder rejects duplicate known mapping keys and returns
-`MalformedAttemptedSigned`; it does not select an effective value from duplicate
-occurrences. The decoder also rejects unknown top-level fields, anchors,
-aliases, and custom tags.
+decoder rejects duplicate known mapping keys under every profile and returns
+`MalformedAttemptedSigned`; it does not select an effective value from
+duplicate occurrences. The decoder also rejects unknown top-level fields,
+which is stricter than the `Permissive` requirement.
 
 Before parsing an unauthenticated YAML signature carrier, the verifier applies
-signature-document-specific byte, nesting-depth, parser-event, constructed-node,
-scalar-byte, document-count, mapping-key, sequence-length, alias-expansion, and
-merge-key budgets. It does not register application-defined tag constructors.
+these implementation-specific hard bounds:
+
+| Parser dimension | Bound |
+|------------------|------:|
+| Markerless carrier bytes | 16,384 |
+| Nesting depth | 16 |
+| Alias expansions | 0 |
+| Mapping keys | 8 |
+| Sequence length | 16 |
+| Parser events | 128 |
+| Constructed nodes | 64 |
+| Cumulative scalar bytes | 8,192 |
+| Documents | 1 |
+| Merge keys | 8 |
+
+The parser rejects anchors, aliases, custom tags, and duplicate keys. These
+values describe this Rust implementation; they are not portable YamlSigil
+limits except for the 16,384-octet markerless carrier limit.
 
 The verifier exposes parser observations when callers request them. It does not
 provide RPC transport.

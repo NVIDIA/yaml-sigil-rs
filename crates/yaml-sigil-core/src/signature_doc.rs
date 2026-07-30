@@ -224,6 +224,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_accepts_markerless_carrier_at_exact_byte_budget() {
+        let baseline = "schema: YamlSigilSignature.v1alpha1\n\
+                        alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                        signature: Zm9v\n";
+        let comment_bytes = super::SIGNATURE_DOCUMENT_MAX_BYTES - baseline.len() - 2;
+        let carrier = format!("#{}\n{baseline}", "x".repeat(comment_bytes));
+
+        assert_eq!(carrier.len(), super::SIGNATURE_DOCUMENT_MAX_BYTES);
+        super::parse_signature_document(carrier.as_bytes())
+            .expect("markerless carrier at the byte limit must parse");
+    }
+
+    #[test]
     fn parse_rejects_document_over_depth_budget() {
         let nesting = super::SIGNATURE_DOCUMENT_MAX_DEPTH + 2;
         let deeply_nested = format!(

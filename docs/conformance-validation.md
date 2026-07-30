@@ -49,8 +49,10 @@ The conformance tests exercise this workspace's implementation crates.
 The current fixture set covers:
 
 - YAML decomposition marker handling, unsigned artifacts, malformed carrier
-  ranges, marker selection, UTF-8 preconditions, and BOM rejection.
-- Protobuf outer-envelope duplicate/unknown-field handling under
+  ranges, constant-memory final-marker selection, marker-dense payloads, UTF-8
+  preconditions, and BOM rejection.
+- Protobuf outer-envelope duplicate and unknown-field handling plus malformed
+  field numbers, tags, wire types, and lengths under both supported
   `OuterConformance` modes.
 - YAML/protobuf algorithm mapping, malformed algorithm identifiers, and
   empty-signature precedence over runtime algorithm support.
@@ -63,8 +65,9 @@ The current fixture set covers:
 - ECDSA P-256/SHA-256 happy paths, ACVP-derived vectors, high-S/low-S
   acceptance, invalid component ranges, wrong-size signatures, bad keys, and
   nonce-instability fixtures.
-- YAML signature-document schema identity, duplicate-key behavior, and
-  unknown-key behavior under the implementation's advertised profile.
+- YAML signature-document schema identity, universal known-key duplicate
+  rejection, the markerless carrier byte limit, and unknown-key behavior under
+  the implementation's advertised profile.
 
 When a fixture exercises behavior that the Rust implementation cannot or
 should not represent naturally, record the divergence here rather than adding
@@ -72,6 +75,29 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-07-29: Imported `yaml-sigil-spec` at
+  `be15ed9ac71d1fc601dc9e5cf6d1f1a87c695dae`. The import adds
+  `yaml-signature-conformance/oversized-carrier.yaml`,
+  `yaml-decomposition/marker-dense.yaml`, and six malformed protobuf fixtures:
+  `invalid-field-zero.binpb`, `out-of-range-field-number.binpb`,
+  `overflowing-tag-varint.binpb`, `oversized-length.binpb`,
+  `invalid-wire-type-6.binpb`, and `invalid-wire-type-7.binpb`. The sync and
+  async suites exercise every fixture. The signature-document JSON Schema
+  change is descriptive only. The artifact proto and all notice files are
+  unchanged.
+
+  Earlier Rust changes already reject duplicate YAML keys, bound parser work,
+  retain one final-marker candidate, reject invalid protobuf tags, and validate
+  protobuf lengths without a host-width assumption. This import closes the
+  shared-fixture and documentation gap around that behavior. Verification now
+  applies the 16,384-octet limit directly to markerless carrier bytes instead
+  of counting the transcription-owned marker.
+
+  `yaml-sigil-traits` advanced to
+  `9396edb23e6db1d15ee3a85100372cd427118cc8`, but that commit only advances its
+  pinned specification to the same revision. It does not change traits or DTO
+  shapes, so this workspace intentionally retains its existing dependency
+  resolution at `f5edd39c340a239145e9a97f164bffcebffe9e28`.
 - 2026-07-29: Imported `yaml-sigil-spec` `origin/main` at
   `0a4421362a36b684ac6217ec00bc9e16be24e370`. The Ed25519 `S`-boundary
   protobuf fixtures now retain the valid `R` component from RFC 8032 section
@@ -162,12 +188,36 @@ an unnatural workaround.
   asserts `MalformedAttemptedSigned` at transcription and `StructuralFailure`
   at pre-verify for those fixtures.
 
+## YAML parser budgets
+
+The verifier applies the following hard bounds before constructing application
+objects from unauthenticated markerless signature-carrier bytes:
+
+| Parser dimension | Implementation bound |
+|------------------|---------------------:|
+| Markerless carrier bytes | 16,384 |
+| Nesting depth | 16 |
+| Alias expansions | 0 |
+| Mapping keys | 8 |
+| Sequence length | 16 |
+| Parser events | 128 |
+| Constructed nodes | 64 |
+| Cumulative scalar bytes | 8,192 |
+| Documents | 1 |
+| Merge keys | 8 |
+
+The parser rejects anchors, aliases, custom tags, and duplicate keys. The
+numeric parser-resource bounds are implementation-specific. YamlSigil
+standardizes only the 16,384-octet markerless carrier limit.
+
 ## Known Behaviors
 
 - `Verifier` advertises `AdvertisedConformanceProfile::Permissive`. Stock
   protobuf decoders use last-wins behavior for duplicate inner fields, so
   advertising a stricter unified inner profile would be misleading.
-- YAML duplicate mapping keys are rejected during signature-document parsing.
+- Known YAML duplicate mapping keys are rejected during signature-document
+  parsing under every profile. Unknown YAML fields also reject, which is
+  stricter than `Permissive` requires.
 - A YAML signature carrier must contain exactly one document through EOF.
   Additional carrier documents and content after `...` are rejected. Signed
   payloads may contain multiple YAML documents.
@@ -193,6 +243,9 @@ an unnatural workaround.
   wire bytes produce the same outcome on 32-bit and 64-bit targets.
 - Protobuf-form payload bytes are arbitrary octets; YAML-form payload bytes
   remain constrained by the YAML envelope rules.
+- Callers bind each artifact source, route, or storage class to one form before
+  verification. They do not select a form by inspecting artifact bytes or retry
+  the other form after failure.
 
 ## Updating Fixtures
 

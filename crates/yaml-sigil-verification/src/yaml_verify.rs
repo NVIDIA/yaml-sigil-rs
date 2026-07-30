@@ -31,15 +31,13 @@ fn extract_yaml_metadata(
     carrier: Vec<u8>,
     options: &VerifierOptions,
 ) -> Result<UnverifiedSignature, PreVerifyOutcome> {
-    let mut doc_bytes = b"---\n".to_vec();
-    doc_bytes.extend_from_slice(&carrier);
     if options.reject_unknown_signature_document_fields {
-        match has_unknown_signature_document_fields(&doc_bytes) {
+        match has_unknown_signature_document_fields(&carrier) {
             Ok(true) | Err(_) => return Err(PreVerifyOutcome::MetadataParseFailure),
             Ok(false) => {}
         }
     }
-    let doc = match parse_signature_document(&doc_bytes) {
+    let doc = match parse_signature_document(&carrier) {
         Ok(d) => d,
         Err(_) => return Err(PreVerifyOutcome::MetadataParseFailure),
     };

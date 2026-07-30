@@ -40,8 +40,11 @@ and documentation style guide.
 signature documents with `noyalib`. The optional `json-schema-validate` feature
 adds validation against the local signature-document schema.
 
-Callers select artifact forms through the public form enums. `v1alpha1` defines
-no magic bytes, media type, or required file extension.
+Callers select artifact forms through the public form enums. Bind each artifact
+source, route, or storage class to one form before processing its bytes. Do not
+sniff the bytes to select a form or retry the other form after structural or
+verification failure. `v1alpha1` defines no magic bytes, media type, or required
+file extension.
 
 YAML decompose and verify operations require complete artifacts because
 boundary selection uses the last constrained marker.

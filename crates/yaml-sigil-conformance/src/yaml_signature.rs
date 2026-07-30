@@ -5,20 +5,19 @@
 //!
 //! Drives the verifier-side rules in `verification-api.md` "Structural Rules
 //! By Form" and "Conformance Profiles" as they manifest on the YAML form. The
-//! suite covers the required schema identity, duplicate-known-singular-field
-//! behavior, and unknown-mapping-key behavior. The protobuf-form symmetric
-//! profile cases live in [`proto_outer`](super::proto_outer).
+//! suite covers the carrier byte limit, required schema identity, universal
+//! duplicate-known-key rejection, and unknown-mapping-key behavior. The
+//! protobuf-form symmetric profile cases live in
+//! [`proto_outer`](super::proto_outer).
 //!
 //! The suite is profile-parameterized: the assertions depend on the
 //! verifier's advertised
 //! [`AdvertisedConformanceProfile`].
-//! Under the spec's clarified `Permissive` behavior (spec commit `692052b`),
-//! a YAML decoder may reject duplicate known mapping keys or accept them using
-//! documented effective-value semantics. The Permissive branch asserts this
-//! implementation's documented behavior: the four `duplicate-*.yaml` fixtures
-//! always reject at parse, and `unknown-key.yaml` also rejects at parse.
+//! Duplicate known keys and oversized carriers reject under every profile.
+//! The Permissive branch also asserts this implementation's documented
+//! stricter behavior for `unknown-key.yaml`.
 //! See [`docs/conformance-validation.md`](../../docs/conformance-validation.md)
-//! § 2 (per-fixture mapping) and § 5.r § 5d (resolved upstream).
+//! for the per-fixture mapping and implementation-specific parser bounds.
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_verification::{
@@ -29,6 +28,16 @@ use yaml_sigil_verification::{
 use crate::fixtures::load_bytes;
 
 const CATEGORY: &str = "yaml-signature-conformance";
+
+const UNIVERSAL_METADATA_FAILURES: &[&str] = &[
+    "wrong-schema.yaml",
+    "missing-schema.yaml",
+    "duplicate-schema.yaml",
+    "duplicate-alg.yaml",
+    "duplicate-keyid.yaml",
+    "duplicate-signature.yaml",
+    "oversized-carrier.yaml",
+];
 
 fn placeholder_keys() -> EdVk {
     // The fixtures all carry the canonical 86-char placeholder signature
@@ -57,11 +66,11 @@ fn verify_with<V: Verifier>(v: &V, file: &str, opts: VerifierOptions) -> Verifie
         })
 }
 
-/// Drive the eight `yaml-signature-conformance/` fixtures through the supplied
+/// Drive the nine `yaml-signature-conformance/` fixtures through the supplied
 /// [`Verifier`]; the assertion table depends on the verifier's advertised
 /// [`AdvertisedConformanceProfile`].
 pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
-    assert_schema_identity_failures(v);
+    assert_universal_metadata_failures(v);
 
     let profile = v.capabilities().conformance_profile;
     match profile {
@@ -72,8 +81,8 @@ pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
     }
 }
 
-fn assert_schema_identity_failures<V: Verifier>(v: &V) {
-    for file in ["wrong-schema.yaml", "missing-schema.yaml"] {
+fn assert_universal_metadata_failures<V: Verifier>(v: &V) {
+    for file in UNIVERSAL_METADATA_FAILURES {
         let bytes = load_bytes(CATEGORY, file);
         let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false);
         assert_eq!(
@@ -96,7 +105,7 @@ fn assert_schema_identity_failures<V: Verifier>(v: &V) {
 ///
 /// The two profiles share the same expected outcomes for every fixture in
 /// this directory. The fixture README's "Strict outcome" and "SignatureStrict
-/// outcome" columns are identical for all eight entries, so a single assertion
+/// outcome" columns are identical for all nine entries, so a single assertion
 /// routine covers both.
 fn assert_strict_column<V: Verifier>(v: &V) {
     let strict_opts = VerifierOptions {
@@ -113,23 +122,6 @@ fn assert_strict_column<V: Verifier>(v: &V) {
         "valid-baseline.yaml (Strict): expected SignedButFailedVerification, got {st:?}"
     );
 
-    // The four duplicate-* fixtures must structurally reject.
-    for file in [
-        "duplicate-schema.yaml",
-        "duplicate-alg.yaml",
-        "duplicate-keyid.yaml",
-        "duplicate-signature.yaml",
-    ] {
-        let st = verify_with(v, file, strict_opts.clone());
-        assert_eq!(
-            st,
-            VerifierState::MalformedAttemptedSigned,
-            "{}/{} (Strict): expected MalformedAttemptedSigned, got {st:?}",
-            CATEGORY,
-            file
-        );
-    }
-
     // unknown-key: the extra `bogus` mapping key must be rejected.
     let st = verify_with(v, "unknown-key.yaml", strict_opts);
     assert_eq!(
@@ -140,10 +132,6 @@ fn assert_strict_column<V: Verifier>(v: &V) {
 }
 
 /// Drive the Permissive column of the fixture table.
-///
-/// The specification permits duplicate rejection under this profile. This
-/// function records the implementation's documented rejection behavior as a
-/// hard contract.
 fn assert_permissive_column<V: Verifier>(v: &V) {
     // valid-baseline: reaches the crypto stage; placeholder signature
     // fails to authenticate.
@@ -153,24 +141,6 @@ fn assert_permissive_column<V: Verifier>(v: &V) {
         VerifierState::SignedButFailedVerification,
         "valid-baseline.yaml (Permissive): expected SignedButFailedVerification, got {st:?}"
     );
-
-    // The four duplicate-* fixtures reject at parse time. The Permissive
-    // profile explicitly permits this implementation's documented behavior.
-    for file in [
-        "duplicate-schema.yaml",
-        "duplicate-alg.yaml",
-        "duplicate-keyid.yaml",
-        "duplicate-signature.yaml",
-    ] {
-        let st = verify_with(v, file, VerifierOptions::default());
-        assert_eq!(
-            st,
-            VerifierState::MalformedAttemptedSigned,
-            "{}/{} (Permissive duplicate rejection): expected MalformedAttemptedSigned, got {st:?}",
-            CATEGORY,
-            file
-        );
-    }
 
     // unknown-key: unknown signature-document fields are rejected at parse
     // time. This remains stricter than the Permissive unknown-field posture.
@@ -205,7 +175,7 @@ async fn verify_with_async<V: AsyncVerifier>(
 
 /// Async sibling of [`run_yaml_signature_suite`].
 pub async fn run_yaml_signature_suite_async<V: AsyncVerifier>(v: &V) {
-    assert_schema_identity_failures_async(v).await;
+    assert_universal_metadata_failures_async(v).await;
 
     let profile = v.capabilities().conformance_profile;
     match profile {
@@ -216,8 +186,8 @@ pub async fn run_yaml_signature_suite_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn assert_schema_identity_failures_async<V: AsyncVerifier>(v: &V) {
-    for file in ["wrong-schema.yaml", "missing-schema.yaml"] {
+async fn assert_universal_metadata_failures_async<V: AsyncVerifier>(v: &V) {
+    for file in UNIVERSAL_METADATA_FAILURES {
         let bytes = load_bytes(CATEGORY, file);
         let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false).await;
         assert_eq!(
@@ -249,22 +219,6 @@ async fn assert_strict_column_async<V: AsyncVerifier>(v: &V) {
         "valid-baseline.yaml (Strict, async): expected SignedButFailedVerification, got {st:?}"
     );
 
-    for file in [
-        "duplicate-schema.yaml",
-        "duplicate-alg.yaml",
-        "duplicate-keyid.yaml",
-        "duplicate-signature.yaml",
-    ] {
-        let st = verify_with_async(v, file, strict_opts.clone()).await;
-        assert_eq!(
-            st,
-            VerifierState::MalformedAttemptedSigned,
-            "{}/{} (Strict, async): expected MalformedAttemptedSigned, got {st:?}",
-            CATEGORY,
-            file
-        );
-    }
-
     let st = verify_with_async(v, "unknown-key.yaml", strict_opts).await;
     assert_eq!(
         st,
@@ -280,22 +234,6 @@ async fn assert_permissive_column_async<V: AsyncVerifier>(v: &V) {
         VerifierState::SignedButFailedVerification,
         "valid-baseline.yaml (Permissive, async): expected SignedButFailedVerification, got {st:?}"
     );
-
-    for file in [
-        "duplicate-schema.yaml",
-        "duplicate-alg.yaml",
-        "duplicate-keyid.yaml",
-        "duplicate-signature.yaml",
-    ] {
-        let st = verify_with_async(v, file, VerifierOptions::default()).await;
-        assert_eq!(
-            st,
-            VerifierState::MalformedAttemptedSigned,
-            "{}/{} (Permissive duplicate rejection, async): expected MalformedAttemptedSigned, got {st:?}",
-            CATEGORY,
-            file
-        );
-    }
 
     let st = verify_with_async(v, "unknown-key.yaml", VerifierOptions::default()).await;
     assert_eq!(

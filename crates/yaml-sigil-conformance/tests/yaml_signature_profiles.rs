@@ -47,7 +47,15 @@ fn state_for_fixture(input_bytes: &[u8]) -> VerifierState {
     let duplicate_known_key = ["schema", "alg", "keyid", "signature"]
         .iter()
         .any(|key| text.matches(&format!("\n{key}:")).count() > 1);
-    if schema_identity_failure || duplicate_known_key || text.contains("\nbogus:") {
+    let oversized_carrier = input_bytes
+        .windows(5)
+        .rposition(|window| window == b"\n---\n")
+        .is_some_and(|marker| input_bytes.len() - (marker + 5) > 16 * 1024);
+    if schema_identity_failure
+        || duplicate_known_key
+        || oversized_carrier
+        || text.contains("\nbogus:")
+    {
         VerifierState::MalformedAttemptedSigned
     } else {
         VerifierState::SignedButFailedVerification
