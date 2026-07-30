@@ -52,3 +52,12 @@ The names of the document authors, the Crypto Forum Research Group, the IRTF,
 the IETF, the IETF Trust, and the RFC Editor are not used to endorse or promote
 `yaml-sigil-verification`. No affiliation, sponsorship, or endorsement is
 claimed or implied.
+
+This crate adapts RFC 8032 sections 5.1, 5.1.2, and 5.1.7 into Rust constants
+and canonical-encoding checks, and it reproduces one section 7.1 test-vector
+signature in a unit test. Section 3(c) of the IETF Trust Legal Provisions,
+version 5.0, addresses reproduction outside the IETF Standards Process.
+Section 5(a) states that no patent license is granted, and sections 7(b)
+through 7(d) provide the intellectual-property-rights caveat. The Rust
+representations and verifier-state mappings are identified
+`yaml-sigil-verification` adaptations.

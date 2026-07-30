@@ -75,6 +75,26 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-07-30: Imported `yaml-sigil-spec` at
+  `22150d6d182048f36238bdaea705e8aaffb93f2c`. This attribution-only import
+  expands the canonical and conformance notice files with the applicable NIST
+  FIPS 180-4 and FIPS 186-5 context, RFC 8032 and RFC 4648
+  intellectual-property caveats, RFC 3629 terms, the pinned Protocol Buffers
+  documentation license, and conformance-rebuilder distribution details. The
+  fixture documentation records the same provenance.
+
+  `alg-ed25519/configured-key-small-order.txt` now identifies Table 1 and
+  Appendix B of *Taming the Many EdDSAs* and states that the eight numeric
+  values were reordered from the paper. Its eight key encodings are unchanged.
+  Fixture outcomes, runtime behavior, proto and schema artifacts, and the
+  public Rust contract are unchanged. The independently distributed
+  `yaml-sigil-verification` notice now carries the corresponding RFC 8032
+  reproduction and intellectual-property context for `src/crypto.rs`.
+
+  `yaml-sigil-traits` advanced to
+  `402db3f9729672dc8852f32e991b1081793b3e85`, which only advances its pinned
+  specification to the same revision. It does not change traits or DTO shapes,
+  so no `Cargo.toml` change is required.
 - 2026-07-29: Imported `yaml-sigil-spec` at
   `be15ed9ac71d1fc601dc9e5cf6d1f1a87c695dae`. The import adds
   `yaml-signature-conformance/oversized-carrier.yaml`,
