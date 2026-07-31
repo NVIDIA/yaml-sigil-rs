@@ -189,13 +189,17 @@ pub(crate) fn verify_extracted_signature(
                 return Ok(VerifierState::SignedButAlgorithmUnsupported { algorithm: alg });
             }
             let vk = keys.p256.ok_or(InvocationError::KeyResolutionFailure)?;
-            if crypto::verify_ecdsa_p256_sha256(vk, payload, sig_octets).is_ok() {
-                Ok(VerifierState::Verified {
+            match crypto::verify_ecdsa_p256_sha256(vk, payload, sig_octets) {
+                Ok(()) => Ok(VerifierState::Verified {
                     payload: payload.to_vec(),
                     algorithm: alg,
-                })
-            } else {
-                Ok(VerifierState::SignedButFailedVerification)
+                }),
+                Err(crypto::EcdsaVerifyError::MalformedSignature) => {
+                    Ok(VerifierState::MalformedAttemptedSigned)
+                }
+                Err(crypto::EcdsaVerifyError::EquationFailure) => {
+                    Ok(VerifierState::SignedButFailedVerification)
+                }
             }
         }
     }

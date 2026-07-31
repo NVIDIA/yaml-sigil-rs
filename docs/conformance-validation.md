@@ -256,6 +256,9 @@ standardizes only the 16,384-octet markerless carrier limit.
 - Ed25519 verification rejects small-order public keys at the point of use,
   including typed keys supplied without the byte-oriented key-resolution
   helper.
+- ECDSA verification classifies raw signatures with `r` or `s` outside
+  `(0, n)` as `MalformedAttemptedSigned`. Structurally valid signatures that
+  fail the signature equation remain `SignedButFailedVerification`.
 - Protobuf outer-envelope parsing rejects field number zero, field numbers
   above the protobuf 29-bit maximum, and overflowing tag varints before
   applying `OuterConformance` unknown-field behavior.

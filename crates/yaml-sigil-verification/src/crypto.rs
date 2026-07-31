@@ -85,6 +85,13 @@ pub(crate) fn ed25519_signature_is_canonical(sig_bytes: &[u8]) -> bool {
     lt_le_32(&s, &ED25519_L_LE)
 }
 
+/// The stage at which ECDSA verification rejected a signature.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EcdsaVerifyError {
+    MalformedSignature,
+    EquationFailure,
+}
+
 /// Verify ECDSA P-256 SHA-256 against a raw `R || S` 64-octet signature.
 ///
 /// The wire format is fixed 64-octet raw `R || S`. ASN.1 DER signatures are not
@@ -93,28 +100,35 @@ pub(crate) fn verify_ecdsa_p256_sha256(
     vk: &P256Vk,
     payload: &[u8],
     sig_bytes: &[u8],
-) -> Result<(), ()> {
-    let sig = P256Signature::from_slice(sig_bytes).map_err(|_| ())?;
-    P256VerifierTrait::verify(vk, payload, &sig).map_err(|_| ())
+) -> Result<(), EcdsaVerifyError> {
+    let sig =
+        P256Signature::from_slice(sig_bytes).map_err(|_| EcdsaVerifyError::MalformedSignature)?;
+    P256VerifierTrait::verify(vk, payload, &sig).map_err(|_| EcdsaVerifyError::EquationFailure)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ed25519_signature_is_canonical, verify_ecdsa_p256_sha256};
+    use super::{EcdsaVerifyError, ed25519_signature_is_canonical, verify_ecdsa_p256_sha256};
     use p256::ecdsa::signature::Signer;
     use p256::ecdsa::{SigningKey, VerifyingKey};
     use rand_core::OsRng;
 
     #[test]
-    fn ecdsa_accepts_raw_rs64_only() {
+    fn ecdsa_accepts_raw_rs64_and_classifies_failures() {
         let sk = SigningKey::random(&mut OsRng);
         let vk = VerifyingKey::from(&sk);
         let msg = b"payload line\n";
         let sig: p256::ecdsa::Signature = sk.sign(msg);
         assert!(verify_ecdsa_p256_sha256(&vk, msg, &sig.to_bytes()[..]).is_ok());
-        assert!(
-            verify_ecdsa_p256_sha256(&vk, msg, sig.to_der().as_bytes()).is_err(),
-            "DER must be rejected at the wire layer"
+        assert_eq!(
+            verify_ecdsa_p256_sha256(&vk, msg, sig.to_der().as_bytes()),
+            Err(EcdsaVerifyError::MalformedSignature),
+            "DER must be malformed at the wire layer"
+        );
+        assert_eq!(
+            verify_ecdsa_p256_sha256(&vk, b"altered payload\n", &sig.to_bytes()[..]),
+            Err(EcdsaVerifyError::EquationFailure),
+            "a structurally valid signature over another payload must fail the equation"
         );
     }
 

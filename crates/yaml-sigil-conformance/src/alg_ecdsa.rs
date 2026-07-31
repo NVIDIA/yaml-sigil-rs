@@ -163,10 +163,8 @@ fn invalid_component_ranges<V: Verifier>(v: &V) {
     ] {
         // fixture: invalid-*.binpb -> MalformedAttemptedSigned (per spec).
         // The `p256` crate's `Signature::from_slice` rejects R/S outside
-        // `(0, n)`, so this should land at the structural stage and surface
-        // as MalformedAttemptedSigned. If it lands at the crypto stage and
-        // returns SignedButFailedVerification, that's still a rejection;
-        // accept both rather than chase a brittle category distinction.
+        // `(0, n)`, so this lands at the structural stage rather than the
+        // signature-equation stage.
         let bytes = load_bytes(CATEGORY, file);
         let state = v
             .verify(
@@ -176,13 +174,10 @@ fn invalid_component_ranges<V: Verifier>(v: &V) {
                 VerifierOptions::default(),
             )
             .expect("invalid-* fixture should not return invocation error");
-        assert!(
-            matches!(
-                state,
-                VerifierState::MalformedAttemptedSigned
-                    | VerifierState::SignedButFailedVerification
-            ),
-            "{}/{}: expected rejection, got {state:?}",
+        assert_eq!(
+            state,
+            VerifierState::MalformedAttemptedSigned,
+            "{}/{}: expected MalformedAttemptedSigned, got {state:?}",
             CATEGORY,
             file
         );
@@ -456,6 +451,7 @@ async fn invalid_component_ranges_async<V: AsyncVerifier>(v: &V) {
         "invalid-r-equals-n.binpb",
         "invalid-s-equals-n.binpb",
     ] {
+        // fixture: invalid-*.binpb -> MalformedAttemptedSigned (per spec).
         let bytes = load_bytes(CATEGORY, file);
         let state = v
             .verify(
@@ -466,13 +462,10 @@ async fn invalid_component_ranges_async<V: AsyncVerifier>(v: &V) {
             )
             .await
             .expect("invalid-* fixture (async) should not return invocation error");
-        assert!(
-            matches!(
-                state,
-                VerifierState::MalformedAttemptedSigned
-                    | VerifierState::SignedButFailedVerification
-            ),
-            "{}/{} (async): expected rejection, got {state:?}",
+        assert_eq!(
+            state,
+            VerifierState::MalformedAttemptedSigned,
+            "{}/{} (async): expected MalformedAttemptedSigned, got {state:?}",
             CATEGORY,
             file
         );
