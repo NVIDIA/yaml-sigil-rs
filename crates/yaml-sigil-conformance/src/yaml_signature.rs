@@ -5,9 +5,10 @@
 //!
 //! Drives the verifier-side rules in `verification-api.md` "Structural Rules
 //! By Form" and "Conformance Profiles" as they manifest on the YAML form. The
-//! suite covers the carrier byte limit, required schema identity, universal
-//! duplicate-known-key rejection, and unknown-mapping-key behavior. The
-//! protobuf-form symmetric profile cases live in
+//! suite covers the carrier byte limit, document count, mapping root, declared
+//! field types, required schema identity, universal duplicate-known-key
+//! rejection, and unknown-mapping-key behavior. The protobuf-form symmetric
+//! profile cases live in
 //! [`proto_outer`](super::proto_outer).
 //!
 //! The suite is profile-parameterized: the assertions depend on the
@@ -37,16 +38,20 @@ const UNIVERSAL_METADATA_FAILURES: &[&str] = &[
     "duplicate-keyid.yaml",
     "duplicate-signature.yaml",
     "oversized-carrier.yaml",
+    "document-end-with-second-document.yaml",
+    "non-mapping-root.yaml",
+    "non-string-schema.yaml",
+    "non-string-alg.yaml",
+    "non-string-keyid.yaml",
+    "non-string-signature.yaml",
 ];
 
 fn placeholder_keys() -> EdVk {
-    // The fixtures all carry the canonical 86-char placeholder signature
-    // (URL-safe-unpadded base64 of 64 zero bytes); the verifier's task is
-    // structural rejection (or acceptance) of the *signature document*, not
-    // the cryptographic outcome. Any well-formed Ed25519 public key suffices
-    // for the keyring; verification of `valid-baseline.yaml` lands at
-    // `SignedButFailedVerification` because the placeholder signature won't
-    // authenticate against this (or any other) real key.
+    // Fixtures that reach crypto carry the canonical 86-char placeholder
+    // signature (URL-safe-unpadded base64 of 64 zero bytes). Any well-formed
+    // Ed25519 public key suffices for the keyring; the placeholder signature
+    // lands at `SignedButFailedVerification` because it cannot authenticate
+    // against a real key.
     EdSk::from_bytes(&[1u8; 32]).verifying_key()
 }
 
@@ -66,7 +71,7 @@ fn verify_with<V: Verifier>(v: &V, file: &str, opts: VerifierOptions) -> Verifie
         })
 }
 
-/// Drive the nine `yaml-signature-conformance/` fixtures through the supplied
+/// Drive the sixteen `yaml-signature-conformance/` fixtures through the supplied
 /// [`Verifier`]; the assertion table depends on the verifier's advertised
 /// [`AdvertisedConformanceProfile`].
 pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
@@ -105,7 +110,7 @@ fn assert_universal_metadata_failures<V: Verifier>(v: &V) {
 ///
 /// The two profiles share the same expected outcomes for every fixture in
 /// this directory. The fixture README's "Strict outcome" and "SignatureStrict
-/// outcome" columns are identical for all nine entries, so a single assertion
+/// outcome" columns are identical for all sixteen entries, so a single assertion
 /// routine covers both.
 fn assert_strict_column<V: Verifier>(v: &V) {
     let strict_opts = VerifierOptions {
@@ -113,14 +118,16 @@ fn assert_strict_column<V: Verifier>(v: &V) {
         ..VerifierOptions::default()
     };
 
-    // valid-baseline: each mapping key appears once → reaches the crypto
-    // stage; the placeholder all-zero signature fails to authenticate.
-    let st = verify_with(v, "valid-baseline.yaml", strict_opts.clone());
-    assert_eq!(
-        st,
-        VerifierState::SignedButFailedVerification,
-        "valid-baseline.yaml (Strict): expected SignedButFailedVerification, got {st:?}"
-    );
+    // Both accepted carriers reach crypto, where the placeholder all-zero
+    // signature fails to authenticate.
+    for file in ["valid-baseline.yaml", "document-end-at-eof.yaml"] {
+        let st = verify_with(v, file, strict_opts.clone());
+        assert_eq!(
+            st,
+            VerifierState::SignedButFailedVerification,
+            "{file} (Strict): expected SignedButFailedVerification, got {st:?}"
+        );
+    }
 
     // unknown-key: the extra `bogus` mapping key must be rejected.
     let st = verify_with(v, "unknown-key.yaml", strict_opts);
@@ -133,14 +140,16 @@ fn assert_strict_column<V: Verifier>(v: &V) {
 
 /// Drive the Permissive column of the fixture table.
 fn assert_permissive_column<V: Verifier>(v: &V) {
-    // valid-baseline: reaches the crypto stage; placeholder signature
+    // Both accepted carriers reach crypto, where the placeholder signature
     // fails to authenticate.
-    let st = verify_with(v, "valid-baseline.yaml", VerifierOptions::default());
-    assert_eq!(
-        st,
-        VerifierState::SignedButFailedVerification,
-        "valid-baseline.yaml (Permissive): expected SignedButFailedVerification, got {st:?}"
-    );
+    for file in ["valid-baseline.yaml", "document-end-at-eof.yaml"] {
+        let st = verify_with(v, file, VerifierOptions::default());
+        assert_eq!(
+            st,
+            VerifierState::SignedButFailedVerification,
+            "{file} (Permissive): expected SignedButFailedVerification, got {st:?}"
+        );
+    }
 
     // unknown-key: unknown signature-document fields are rejected at parse
     // time. This remains stricter than the Permissive unknown-field posture.
@@ -212,12 +221,14 @@ async fn assert_strict_column_async<V: AsyncVerifier>(v: &V) {
         ..VerifierOptions::default()
     };
 
-    let st = verify_with_async(v, "valid-baseline.yaml", strict_opts.clone()).await;
-    assert_eq!(
-        st,
-        VerifierState::SignedButFailedVerification,
-        "valid-baseline.yaml (Strict, async): expected SignedButFailedVerification, got {st:?}"
-    );
+    for file in ["valid-baseline.yaml", "document-end-at-eof.yaml"] {
+        let st = verify_with_async(v, file, strict_opts.clone()).await;
+        assert_eq!(
+            st,
+            VerifierState::SignedButFailedVerification,
+            "{file} (Strict, async): expected SignedButFailedVerification, got {st:?}"
+        );
+    }
 
     let st = verify_with_async(v, "unknown-key.yaml", strict_opts).await;
     assert_eq!(
@@ -228,12 +239,14 @@ async fn assert_strict_column_async<V: AsyncVerifier>(v: &V) {
 }
 
 async fn assert_permissive_column_async<V: AsyncVerifier>(v: &V) {
-    let st = verify_with_async(v, "valid-baseline.yaml", VerifierOptions::default()).await;
-    assert_eq!(
-        st,
-        VerifierState::SignedButFailedVerification,
-        "valid-baseline.yaml (Permissive, async): expected SignedButFailedVerification, got {st:?}"
-    );
+    for file in ["valid-baseline.yaml", "document-end-at-eof.yaml"] {
+        let st = verify_with_async(v, file, VerifierOptions::default()).await;
+        assert_eq!(
+            st,
+            VerifierState::SignedButFailedVerification,
+            "{file} (Permissive, async): expected SignedButFailedVerification, got {st:?}"
+        );
+    }
 
     let st = verify_with_async(v, "unknown-key.yaml", VerifierOptions::default()).await;
     assert_eq!(

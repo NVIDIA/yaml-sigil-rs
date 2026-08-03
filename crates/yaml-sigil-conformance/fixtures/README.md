@@ -57,7 +57,8 @@ source carry the provenance together.
 
 - **YAML decomposition** — markerless carrier, LF and CRLF markers,
   UTF-8 and BOM preconditions, empty payload, extra marker inside
-  carrier, marker-dense payload, no-marker artifact, marker at EOF.
+  carrier, marker-dense payload, payload-side document-end marker, no-marker
+  artifact, marker at EOF.
 
 See [yaml-decomposition/README.md](./yaml-decomposition/README.md).
 
@@ -66,14 +67,15 @@ See [yaml-decomposition/README.md](./yaml-decomposition/README.md).
 - **Protobuf conformance** — duplicate outer `payload`, duplicate
   outer `signature`, unknown outer fields, inner strict / permissive
   duplicate handling, present-empty outer `signature` submessage, malformed
-  field numbers, wire types, and tag varints, and oversized length-delimited
-  fields.
+  field numbers, wire types, tag and length varints, and length-delimited
+  fields that exceed the remaining input.
 
 See [protobuf-conformance/README.md](./protobuf-conformance/README.md).
 
 ### YAML signature-document conformance (`yaml-signature-conformance/`)
 
 - **YAML signature-document conformance** — required `schema` identity,
+  single-document-through-EOF and mapping-root rules, string field types,
   duplicate known mapping keys, profile-specific unknown fields, and the
   universal carrier byte limit. Parser-resource counters remain
   implementation-defined and are tested by each implementation.
@@ -87,6 +89,23 @@ See [yaml-signature-conformance/README.md](./yaml-signature-conformance/README.m
   empty-signature precedence over runtime algorithm support.
 
 See [schema-alignment/README.md](./schema-alignment/README.md).
+
+### Transcoding (`transcoding/`)
+
+- **Transcoding** — paired YAML and protobuf artifacts with empty,
+  Boolean-like, null-like, and numeric-looking base64url `signature` strings.
+  The fixtures test semantic string and signature-octet preservation without
+  prescribing emitted YAML scalar presentation.
+
+See [transcoding/README.md](./transcoding/README.md).
+
+### Verification runtime (`verification-runtime/`)
+
+- **Verification runtime** — paired YAML and protobuf artifacts for the
+  supported-and-verified control, unsupported-algorithm classification,
+  and cryptographic mismatch.
+
+See [verification-runtime/README.md](./verification-runtime/README.md).
 
 ### `keyid` Conformance (`key-id/`)
 

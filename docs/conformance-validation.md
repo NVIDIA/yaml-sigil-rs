@@ -32,6 +32,8 @@ implementations can call the same `run_*_suite` helpers to compare behavior.
 | `base64/` | `run_base64_suite` | n/a | Core base64 helper behavior |
 | `alg-ed25519/` | `run_ed25519_suite` | `run_ed25519_suite_async` | `(Async)Verifier::verify`, key resolution, signing |
 | `alg-ecdsa/` | `run_ecdsa_suite` | `run_ecdsa_suite_async` | `(Async)Verifier::verify`, key resolution, signing |
+| `transcoding/` | `run_transcoding_suite` | n/a | YAML ↔ protobuf transcoding and effective-field preservation |
+| `verification-runtime/` | `run_verification_runtime_suite` | `run_verification_runtime_suite_async` | `(Async)Verifier::pre_verify`, `verify`, and key resolution |
 | `yaml-signature-conformance/` | `run_yaml_signature_suite` | `run_yaml_signature_suite_async` | `(Async)Verifier::pre_verify` and `verify` over YAML signature documents |
 
 Primary entry points:
@@ -50,10 +52,14 @@ The current fixture set covers:
 
 - YAML decomposition marker handling, unsigned artifacts, malformed carrier
   ranges, constant-memory final-marker selection, marker-dense payloads, UTF-8
-  preconditions, and BOM rejection.
+  preconditions, BOM rejection, and payload-side YAML document-end markers.
 - Protobuf outer-envelope duplicate and unknown-field handling plus malformed
-  field numbers, tags, wire types, and lengths under both supported
-  `OuterConformance` modes.
+  field numbers, tags, wire types, truncated varints, overflowing varints, and
+  lengths under both supported `OuterConformance` modes.
+- YAML ↔ protobuf transcoding for empty, Boolean-like, null-like, and
+  numeric-looking base64url signature strings.
+- Verification runtime classification for successful ECDSA verification,
+  unsupported algorithms, and cryptographic mismatch in both artifact forms.
 - YAML/protobuf algorithm mapping, malformed algorithm identifiers, and
   empty-signature precedence over runtime algorithm support.
 - `keyid` presence, emptiness, UTF-8 byte bounds, CR/LF rejection, and
@@ -66,8 +72,9 @@ The current fixture set covers:
   acceptance, invalid component ranges, wrong-size signatures, bad keys, and
   nonce-instability fixtures.
 - YAML signature-document schema identity, universal known-key duplicate
-  rejection, the markerless carrier byte limit, and unknown-key behavior under
-  the implementation's advertised profile.
+  rejection, the markerless carrier byte limit, document count, mapping root,
+  declared field types, explicit document-end handling, and unknown-key
+  behavior under the implementation's advertised profile.
 
 When a fixture exercises behavior that the Rust implementation cannot or
 should not represent naturally, record the divergence here rather than adding
@@ -75,6 +82,29 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-08-03: Imported `yaml-sigil-spec` at
+  `07d76b3624265af9632568abcb4bac5143af5a8e`. The import adds paired
+  transcoding fixtures for empty and YAML-ambiguous signature strings, three
+  malformed protobuf varint fixtures, YAML document-boundary and declared-type
+  fixtures, and a paired ECDSA runtime-classification suite. Sync and async
+  suites now exercise every applicable fixture through the public Rust
+  surfaces. The transcoding suite compares parsed string values and effective
+  protobuf fields instead of prescribing one permitted YAML scalar spelling.
+
+  Existing runtime behavior already satisfies every new expected outcome. The
+  serializer emits YAML strings for ambiguous base64url values, protobuf
+  decomposition rejects truncated and overflowing varints, YAML parsing
+  enforces the new carrier boundaries and types, and verification preserves
+  the supported, unsupported, and cryptographic-failure state distinctions.
+  The protobuf schema, JSON Schema, algorithm definitions, base64 rules, and
+  notice files are unchanged.
+
+  `yaml-sigil-traits` advanced to
+  `ae29756e4e72c4dc63a99cc6e6d2d52ed1f79597`. It updates specification pins and
+  documentation to describe `PublicKeys` as caller-supplied verification keys
+  and `SignedButFailedVerification` as an attempted cryptographic verification
+  failure. Trait and DTO shapes and the crate version remain unchanged, so no
+  `Cargo.toml` change is required.
 - 2026-07-30: Imported `yaml-sigil-spec` at
   `22150d6d182048f36238bdaea705e8aaffb93f2c`. This attribution-only import
   expands the canonical and conformance notice files with the applicable NIST

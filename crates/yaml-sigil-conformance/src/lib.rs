@@ -18,4 +18,6 @@ pub mod fixtures;
 pub mod key_id;
 pub mod proto_outer;
 pub mod schema_alignment;
+pub mod transcoding;
+pub mod verification_runtime;
 pub mod yaml_signature;

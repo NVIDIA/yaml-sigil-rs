@@ -21,6 +21,8 @@ use yaml_sigil_conformance::{
     },
     proto_outer::{run_protobuf_outer_suite, run_protobuf_outer_suite_async},
     schema_alignment::{run_schema_alignment_suite, run_schema_alignment_suite_async},
+    transcoding::run_transcoding_suite,
+    verification_runtime::{run_verification_runtime_suite, run_verification_runtime_suite_async},
     yaml_signature::{run_yaml_signature_suite, run_yaml_signature_suite_async},
 };
 use yaml_sigil_signing::{DefaultAsyncSigner, DefaultSigner};
@@ -68,6 +70,16 @@ fn yaml_signature_default() {
     run_yaml_signature_suite(&DefaultVerifier);
 }
 
+#[test]
+fn transcoding_default() {
+    run_transcoding_suite();
+}
+
+#[test]
+fn verification_runtime_default() {
+    run_verification_runtime_suite(&DefaultVerifier);
+}
+
 // Parallel async entry points — drive the same fixtures through the
 // AsyncSigner / AsyncVerifier / AsyncTranscriber traits and their
 // DefaultAsync* implementations. Sync and async paths cover identical
@@ -107,4 +119,9 @@ async fn ecdsa_default_async() {
 #[tokio::test]
 async fn yaml_signature_default_async() {
     run_yaml_signature_suite_async(&DefaultAsyncVerifier).await;
+}
+
+#[tokio::test]
+async fn verification_runtime_default_async() {
+    run_verification_runtime_suite_async(&DefaultAsyncVerifier).await;
 }

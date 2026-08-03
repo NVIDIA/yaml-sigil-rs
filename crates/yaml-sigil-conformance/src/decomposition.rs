@@ -89,6 +89,11 @@ const FIXTURES: &[YamlFixture] = &[
         decompose: DecomposeOutcome::Ok,
         pre_verify: Some(PreVerifyOutcome::Ok),
     },
+    YamlFixture {
+        file: "document-end-in-payload.yaml",
+        decompose: DecomposeOutcome::Ok,
+        pre_verify: Some(PreVerifyOutcome::Ok),
+    },
 ];
 
 fn assert_marker_dense_split(artifact: &[u8], structural: &DecomposeStructuralResult) {
@@ -129,6 +134,17 @@ fn assert_marker_dense_split(artifact: &[u8], structural: &DecomposeStructuralRe
     );
 }
 
+fn assert_document_end_remains_payload(structural: &DecomposeStructuralResult) {
+    let payload = structural
+        .payload
+        .as_deref()
+        .expect("document-end-in-payload decompose must return payload bytes");
+    assert!(
+        payload.ends_with(b"...\n"),
+        "YAML document-end marker must remain in the payload"
+    );
+}
+
 /// Drive every `yaml-decomposition/` fixture through the supplied
 /// [`Transcriber`] and (where the spec table extends through verification's
 /// metadata stage) the supplied [`Verifier`].
@@ -158,6 +174,9 @@ where
         );
         if fx.file == "marker-dense.yaml" {
             assert_marker_dense_split(&bytes, &structural);
+        }
+        if fx.file == "document-end-in-payload.yaml" {
+            assert_document_end_remains_payload(&structural);
         }
 
         if let Some(expected_pre) = fx.pre_verify {
@@ -200,6 +219,9 @@ where
         );
         if fx.file == "marker-dense.yaml" {
             assert_marker_dense_split(&bytes, &structural);
+        }
+        if fx.file == "document-end-in-payload.yaml" {
+            assert_document_end_remains_payload(&structural);
         }
 
         if let Some(expected_pre) = fx.pre_verify {

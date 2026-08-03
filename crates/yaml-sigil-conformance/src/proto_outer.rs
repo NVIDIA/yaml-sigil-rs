@@ -107,6 +107,21 @@ const FIXTURES: &[ProtoFixture] = &[
         signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
     },
     ProtoFixture {
+        file: "truncated-tag-varint.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "truncated-length-varint.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
+        file: "overflowing-length-varint.binpb",
+        strict: DecomposeOutcome::MalformedAttemptedSigned,
+        signature_strict: DecomposeOutcome::MalformedAttemptedSigned,
+    },
+    ProtoFixture {
         file: "oversized-length.binpb",
         strict: DecomposeOutcome::MalformedAttemptedSigned,
         signature_strict: DecomposeOutcome::MalformedAttemptedSigned,

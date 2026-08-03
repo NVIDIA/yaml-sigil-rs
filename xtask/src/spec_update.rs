@@ -29,6 +29,8 @@ const FIXTURE_DIRS: &[&str] = &[
     "key-id",
     "protobuf-conformance",
     "schema-alignment",
+    "transcoding",
+    "verification-runtime",
     "yaml-decomposition",
     "yaml-signature-conformance",
 ];

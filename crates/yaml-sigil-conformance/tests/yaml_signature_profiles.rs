@@ -51,9 +51,20 @@ fn state_for_fixture(input_bytes: &[u8]) -> VerifierState {
         .windows(5)
         .rposition(|window| window == b"\n---\n")
         .is_some_and(|marker| input_bytes.len() - (marker + 5) > 16 * 1024);
+    let multiple_documents = text.contains("\n...\n--- # second YAML document\n");
+    let non_string_declared_field = [
+        "\nschema: !!int ",
+        "\nalg: !!bool ",
+        "\nkeyid: !!int ",
+        "\nsignature: !!int ",
+    ]
+    .iter()
+    .any(|spelling| text.contains(spelling));
     if schema_identity_failure
         || duplicate_known_key
         || oversized_carrier
+        || multiple_documents
+        || non_string_declared_field
         || text.contains("\nbogus:")
     {
         VerifierState::MalformedAttemptedSigned
