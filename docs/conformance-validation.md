@@ -250,6 +250,10 @@ standardizes only the 16,384-octet markerless carrier limit.
 - YAML signature base64 is decoded without trimming or other normalization.
   Quoted signature scalars containing leading or trailing whitespace are
   rejected.
+- Canonical signature-document serialization rejects noncanonical `schema`
+  and `alg` values and invalid base64url signatures. Empty or YAML-ambiguous
+  base64url signatures use double-quoted scalar form so transcoding preserves
+  their string value and decoded octets.
 - Empty signature octets can pass through transcription/decomposition and
   pre-verification. Full verification rejects them before runtime
   algorithm-support classification.

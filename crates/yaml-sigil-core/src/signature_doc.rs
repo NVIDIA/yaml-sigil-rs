@@ -3,7 +3,9 @@
 
 //! Strict signature-document subset: serde model + YAML parser.
 
-use crate::algorithm::SCHEMA_V1ALPHA1;
+use base64::Engine;
+
+use crate::algorithm::{AlgorithmId, SCHEMA_V1ALPHA1};
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
 
@@ -152,8 +154,29 @@ fn quote_yaml_string(value: &str) -> String {
     out
 }
 
+fn plain_yaml_scalar_round_trips_as_string(value: &str) -> bool {
+    noyalib::from_str::<String>(value).is_ok_and(|parsed| parsed == value)
+}
+
 /// Serialize a canonical YAML signature carrier.
+///
+/// Rejects noncanonical fixed identifiers and invalid base64url signatures.
+/// Base64url values that YAML would reinterpret use double-quoted scalar form.
 pub fn serialize_signature_document(doc: &SignatureDocument) -> Result<String, CoreError> {
+    // Keep the reference emitter fail-closed for noncanonical identifiers and
+    // invalid signature encodings. If a concrete lossless parse/re-emit use
+    // case emerges, consider a separately specified serializer instead of
+    // making canonical emission accept arbitrary field values.
+    doc.validate_schema()?;
+    if AlgorithmId::from_yaml_str(&doc.alg).is_none() {
+        return Err(CoreError::SignatureYaml(
+            "signature document alg is not a canonical v1alpha1 algorithm".into(),
+        ));
+    }
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(doc.signature.as_bytes())
+        .map_err(|_| CoreError::InvalidBase64)?;
+
     let mut out = format!("schema: {}\nalg: {}\n", doc.schema, doc.alg);
     if let Some(keyid) = &doc.keyid {
         out.push_str("keyid: ");
@@ -161,7 +184,11 @@ pub fn serialize_signature_document(doc: &SignatureDocument) -> Result<String, C
         out.push('\n');
     }
     out.push_str("signature: ");
-    out.push_str(&doc.signature);
+    if plain_yaml_scalar_round_trips_as_string(&doc.signature) {
+        out.push_str(&doc.signature);
+    } else {
+        out.push_str(&quote_yaml_string(&doc.signature));
+    }
     out.push('\n');
     Ok(out)
 }
@@ -271,5 +298,127 @@ mod tests {
             super::parse_signature_document(carrier.as_bytes()).unwrap(),
             doc
         );
+    }
+
+    #[test]
+    fn serialize_rejects_parsed_signature_field_injection() {
+        let carrier = br#"schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+signature: "Zm9v\nkeyid: \"evil\""
+"#;
+        let doc = super::parse_signature_document(carrier).unwrap();
+        assert_eq!(doc.keyid, None);
+        assert_eq!(doc.signature, "Zm9v\nkeyid: \"evil\"");
+
+        let err = super::serialize_signature_document(&doc).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidBase64));
+    }
+
+    #[test]
+    fn serialize_rejects_noncanonical_schema_and_algorithm() {
+        let mut doc = SignatureDocument {
+            schema: crate::SCHEMA_V1ALPHA1.into(),
+            alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+            keyid: None,
+            signature: "Zm9v".into(),
+        };
+
+        doc.schema = "YamlSigilSignature.v1alpha1\nkeyid: evil".into();
+        let err = super::serialize_signature_document(&doc).unwrap_err();
+        assert!(matches!(err, CoreError::SchemaMismatch));
+
+        doc.schema = crate::SCHEMA_V1ALPHA1.into();
+        doc.alg = "ED25519_PUREEDDSA_RAW_RS64_CANONICAL\nkeyid: evil".into();
+        let err = super::serialize_signature_document(&doc).unwrap_err();
+        assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn serialize_rejects_invalid_signature_base64_spellings() {
+        for signature in [
+            "Zm9v\nkeyid: evil",
+            "Zm9v: evil",
+            "Zm9v\"evil",
+            "Zm9v #evil",
+            " Zm9v",
+            "Zm8=",
+            "////",
+            "Zh",
+        ] {
+            let doc = SignatureDocument {
+                schema: crate::SCHEMA_V1ALPHA1.into(),
+                alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+                keyid: None,
+                signature: signature.into(),
+            };
+
+            let err = super::serialize_signature_document(&doc).unwrap_err();
+            assert!(
+                matches!(err, CoreError::InvalidBase64),
+                "unexpected error for {signature:?}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn serialize_quotes_base64_that_is_not_a_plain_yaml_string() {
+        for signature in ["", "true", "null", "1234"] {
+            let doc = SignatureDocument {
+                schema: crate::SCHEMA_V1ALPHA1.into(),
+                alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+                keyid: None,
+                signature: signature.into(),
+            };
+
+            let carrier = super::serialize_signature_document(&doc).unwrap();
+            assert!(
+                carrier.ends_with(&format!("signature: \"{signature}\"\n")),
+                "unexpected carrier for {signature:?}: {carrier:?}"
+            );
+            assert_eq!(
+                super::parse_signature_document(carrier.as_bytes()).unwrap(),
+                doc
+            );
+        }
+    }
+
+    #[test]
+    fn serialize_quotes_keyid_field_injection() {
+        let doc = SignatureDocument {
+            schema: crate::SCHEMA_V1ALPHA1.into(),
+            alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+            keyid: Some("trusted\nsignature: evil".into()),
+            signature: "Zm9v".into(),
+        };
+
+        let carrier = super::serialize_signature_document(&doc).unwrap();
+        assert!(carrier.contains("keyid: \"trusted\\nsignature: evil\"\n"));
+        assert_eq!(
+            super::parse_signature_document(carrier.as_bytes()).unwrap(),
+            doc
+        );
+    }
+
+    #[test]
+    fn serialize_accepts_both_canonical_algorithms() {
+        for alg in [
+            "ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
+            "ECDSA_SECP256R1_SHA256_RAW_RS64",
+        ] {
+            let doc = SignatureDocument {
+                schema: crate::SCHEMA_V1ALPHA1.into(),
+                alg: alg.into(),
+                keyid: None,
+                signature: "Zm9v".into(),
+            };
+
+            let carrier = super::serialize_signature_document(&doc).unwrap();
+            assert!(carrier.contains(&format!("alg: {alg}\n")));
+            assert!(carrier.ends_with("signature: Zm9v\n"));
+            assert_eq!(
+                super::parse_signature_document(carrier.as_bytes()).unwrap(),
+                doc
+            );
+        }
     }
 }

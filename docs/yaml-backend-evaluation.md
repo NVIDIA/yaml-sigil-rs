@@ -49,9 +49,10 @@ The dependency enables only `std` and disables default features. The optional
 - `lossless-u64` does not apply because every signature-document field is a
   string. Unquoted numeric scalars must fail string deserialization, including
   values at and above the `u64` boundary.
-- `fast-int` and `fast-float` do not affect serialization because every emitted
-  field is a quoted string. The parser already uses its safe SIMD and SWAR hot
-  paths without the `simd` compatibility feature.
+- `fast-int` and `fast-float` do not affect serialization. The canonical
+  emitter writes fixed schema and algorithm values directly and validates
+  signature text against the base64url profile. The parser already uses its
+  safe SIMD and SWAR hot paths without the `simd` compatibility feature.
 - `strict-deserialise` duplicates the unknown-field protection on
   `SignatureDocument` and does not replace the configured entry point needed
   for duplicate-key, merge-key, anchor, and tag policy.
@@ -62,9 +63,13 @@ The dependency enables only `std` and disables default features. The optional
   multi-document parsing, and third-party validation integrations do not fit
   this small, synchronous, fail-closed parser.
 
-`serialize_signature_document` emits the four known fields in canonical order
-and quotes `keyid` when present. Signing and transcoding paths compose the
-resulting signature-document YAML through `yaml-sigil-transcription`.
+`serialize_signature_document` validates the fixed `schema` and `alg` values
+and the base64url `signature` value before it emits the four known fields in
+canonical order. It quotes `keyid` when present. Ordinary signatures remain
+plain scalars. Empty or YAML-ambiguous base64url values use double-quoted
+scalar form so parsing preserves the string value. Signing and transcoding
+paths compose the resulting signature-document YAML through
+`yaml-sigil-transcription`.
 
 The optional `json-schema-validate` feature validates parsed
 `SignatureDocument` values against the local signature-document schema. It does

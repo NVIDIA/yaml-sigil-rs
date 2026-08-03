@@ -152,11 +152,16 @@ pub fn proto_wire_to_signed_yaml_stream(wire: &[u8]) -> Result<Vec<u8>, Transcod
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
     use ed25519_dalek::SigningKey as Ed25519SigningKey;
 
-    use super::{TranscodeError, signed_yaml_stream_to_proto_wire};
+    use super::{
+        TranscodeError, proto_wire_to_signed_yaml_stream, signed_yaml_stream_to_proto_wire,
+    };
     use crate::{SignYamlParams, SigningKey, sign_yaml};
-    use yaml_sigil_core::AlgorithmId;
+    use yaml_sigil_core::{
+        AlgorithmId, compose_proto_outer, decode_signed_yaml_artifact, view_signed_yaml_artifact,
+    };
 
     fn add_signature_whitespace(artifact: &[u8]) -> Vec<u8> {
         let text = std::str::from_utf8(artifact).expect("signer emits UTF-8 YAML");
@@ -173,6 +178,32 @@ mod tests {
         mutated.push_str(" \"");
         mutated.push_str(&text[value_end..]);
         mutated.into_bytes()
+    }
+
+    fn assert_proto_yaml_proto_signature(signature_b64: &str, expected_yaml_line: &str) {
+        let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(signature_b64)
+            .expect("test signature is canonical base64url");
+        let carrier = crate::proto_carrier::encode_inner_signature_carrier(
+            AlgorithmId::Ed25519,
+            signature.clone(),
+            None,
+        );
+        let wire = compose_proto_outer(b"review: scalar\n", &carrier);
+
+        let yaml = proto_wire_to_signed_yaml_stream(&wire).expect("transcode protobuf to YAML");
+        let yaml_text = std::str::from_utf8(&yaml).expect("transcoder emits UTF-8 YAML");
+        assert!(
+            yaml_text.ends_with(expected_yaml_line),
+            "unexpected YAML artifact: {yaml_text:?}"
+        );
+
+        let round_trip =
+            signed_yaml_stream_to_proto_wire(&yaml).expect("transcode YAML back to protobuf");
+        let decoded = decode_signed_yaml_artifact(&round_trip).expect("decode protobuf artifact");
+        let view = view_signed_yaml_artifact(&decoded).expect("view protobuf artifact");
+        assert_eq!(view.payload, b"review: scalar\n");
+        assert_eq!(view.signature, signature);
     }
 
     #[test]
@@ -192,5 +223,15 @@ mod tests {
             signed_yaml_stream_to_proto_wire(&mutated),
             Err(TranscodeError::InvalidSignatureBase64)
         ));
+    }
+
+    #[test]
+    fn proto_yaml_proto_preserves_empty_signature() {
+        assert_proto_yaml_proto_signature("", "signature: \"\"\n");
+    }
+
+    #[test]
+    fn proto_yaml_proto_preserves_yaml_ambiguous_signature() {
+        assert_proto_yaml_proto_signature("true", "signature: \"true\"\n");
     }
 }
