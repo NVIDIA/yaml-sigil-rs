@@ -4,6 +4,7 @@
 [package]
 name = "yaml-sigil-core"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Shared YamlSigil v1alpha1 decomposition, payload invariants, and protobuf wire helpers"

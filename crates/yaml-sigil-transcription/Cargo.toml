@@ -4,6 +4,7 @@
 [package]
 name = "yaml-sigil-transcription"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "YamlSigil v1alpha1 Transcription API (Compose / Decompose)"

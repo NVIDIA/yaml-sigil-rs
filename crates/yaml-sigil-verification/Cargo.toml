@@ -4,6 +4,7 @@
 [package]
 name = "yaml-sigil-verification"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "YamlSigil v1alpha1 verification API (YAML + protobuf)"
