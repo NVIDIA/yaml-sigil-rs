@@ -17,6 +17,13 @@ maintain this file according to the
 [AGENTS.md standard](https://agents.md/). Keep both portable across compatible
 agent clients, without assumptions about user-specific paths or session state.
 
+## Commit messages
+
+Use Conventional Commits for every commit. Format the subject as
+`<type>(<optional scope>): <description>`, keep it under 72 characters, and
+choose the smallest accurate type. Follow the sign-off requirements in
+`CONTRIBUTING.md`.
+
 ## Scope
 
 This repository implements **YamlSigil v1alpha1** for Rust consumers. It is
