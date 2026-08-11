@@ -12,6 +12,8 @@ exclude = [
     ".git",
     "target",
     "AGENTS.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
     "crates/yaml-sigil-conformance/fixtures",
 ]
 
