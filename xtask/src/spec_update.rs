@@ -176,7 +176,6 @@ fn mirror_fixtures(checkout: &Path, root: &Path) -> Result<()> {
     }
     fs::create_dir_all(&dest).with_context(|| format!("create {}", dest.display()))?;
 
-    copy_file(checkout, "conformance/README.md", &dest, "README.md")?;
     for fixture_dir in FIXTURE_DIRS {
         copy_tree(checkout, &source.join(fixture_dir), &dest.join(fixture_dir))?;
     }
@@ -224,6 +223,9 @@ fn copy_tree(source_root: &Path, source: &Path, dest: &Path) -> Result<()> {
     fs::create_dir_all(dest).with_context(|| format!("create {}", dest.display()))?;
     for entry in fs::read_dir(source).with_context(|| format!("read {}", source.display()))? {
         let entry = entry.with_context(|| format!("read entry under {}", source.display()))?;
+        if entry.file_name() == "README.md" {
+            continue;
+        }
         copy_tree(source_root, &entry.path(), &dest.join(entry.file_name()))?;
     }
     Ok(())
@@ -277,6 +279,27 @@ mod tests {
             fs::read(dest_root.join("imported.json")).expect("read imported file"),
             b"schema"
         );
+        fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[test]
+    fn copy_tree_omits_fixture_readmes() {
+        let root = test_dir("omit-fixture-readmes");
+        let source_root = root.join("checkout");
+        let source = source_root.join("conformance/base64");
+        let dest = root.join("workspace/fixtures/base64");
+        fs::create_dir_all(&source).expect("create fixture source");
+        fs::write(source.join("README.md"), b"upstream documentation")
+            .expect("write fixture README");
+        fs::write(source.join("valid.txt"), b"fixture").expect("write fixture data");
+
+        copy_tree(&source_root, &source, &dest).expect("copy fixture tree");
+
+        assert_eq!(
+            fs::read(dest.join("valid.txt")).expect("read copied fixture"),
+            b"fixture"
+        );
+        assert!(!dest.join("README.md").exists());
         fs::remove_dir_all(root).expect("remove test root");
     }
 

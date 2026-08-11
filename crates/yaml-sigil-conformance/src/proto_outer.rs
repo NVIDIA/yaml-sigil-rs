@@ -6,7 +6,8 @@
 //! `Transcriber::decompose` under the two `OuterConformance` modes our IDL
 //! defines (`Strict` and `SignatureStrict`).
 //!
-//! The fixture README also lists a "Permissive outcome" column; see
+//! The pinned upstream fixture documentation referenced by the crate README
+//! also lists a "Permissive outcome" column; see
 //! [`docs/conformance-validation.md`](../../docs/conformance-validation.md) § 3a
 //! for why we do not exercise it (no `OUTER_CONFORMANCE_PERMISSIVE` exists in
 //! `transcription.proto`).

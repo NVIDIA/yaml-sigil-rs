@@ -109,9 +109,9 @@ fn assert_universal_metadata_failures<V: Verifier>(v: &V) {
 /// Drive the Strict / SignatureStrict column of the fixture table.
 ///
 /// The two profiles share the same expected outcomes for every fixture in
-/// this directory. The fixture README's "Strict outcome" and "SignatureStrict
-/// outcome" columns are identical for all sixteen entries, so a single assertion
-/// routine covers both.
+/// this directory. The pinned upstream fixture documentation's "Strict
+/// outcome" and "SignatureStrict outcome" columns are identical for all
+/// sixteen entries, so a single assertion routine covers both.
 fn assert_strict_column<V: Verifier>(v: &V) {
     let strict_opts = VerifierOptions {
         reject_unknown_signature_document_fields: true,

@@ -82,6 +82,14 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-08-11: Consolidated the 11 imported fixture README files into
+  `crates/yaml-sigil-conformance/README.md`, which links to the authoritative
+  conformance documentation at the exact imported `yaml-sigil-spec` revision,
+  `07d76b3624265af9632568abcb4bac5143af5a8e`. The spec importer now leaves
+  fixture documentation, rebuild generators, and vendor data upstream while
+  continuing to copy every fixture artifact and the applicable notices. No
+  fixture bytes, fixture mappings, expected outcomes, public APIs, or runtime
+  behavior changed.
 - 2026-08-03: Imported `yaml-sigil-spec` at
   `07d76b3624265af9632568abcb4bac5143af5a8e`. The import adds paired
   transcoding fixtures for empty and YAML-ambiguous signature strings, three
