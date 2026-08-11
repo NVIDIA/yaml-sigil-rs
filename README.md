@@ -68,7 +68,9 @@ documents are present in each archive.
 
 ## Build
 
-`rust-toolchain.toml` pins Rust. `protoc` must be on `PATH`.
+The development toolchain follows Rust `stable` through
+`rust-toolchain.toml`. The minimum supported Rust version (MSRV) is Rust
+`1.95.0`, as declared in the root `Cargo.toml`. `protoc` must be on `PATH`.
 
 The root workspace publishes library crates and does not commit `Cargo.lock`.
 Cargo may generate an ignored local lockfile while building or testing. The

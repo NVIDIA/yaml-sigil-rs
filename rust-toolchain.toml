@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 # SPDX-License-Identifier: Apache-2.0
 
+# Development toolchain; the workspace MSRV is declared in Cargo.toml.
 [toolchain]
 channel = "stable"
