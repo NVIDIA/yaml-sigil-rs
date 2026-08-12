@@ -31,4 +31,4 @@ artifacts and notices. When the imported specification revision changes,
 update the pinned upstream link in this README and add a matching entry to
 `docs/conformance-validation.md` in the same commit.
 
-[upstream-conformance]: https://github.com/NVIDIA-dev/yaml-sigil-spec/tree/07d76b3624265af9632568abcb4bac5143af5a8e/conformance
+[upstream-conformance]: https://github.com/NVIDIA/yaml-sigil-spec/tree/07d76b3624265af9632568abcb4bac5143af5a8e/conformance

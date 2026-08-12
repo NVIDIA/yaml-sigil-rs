@@ -201,7 +201,7 @@ version = "{workspace_version}"
 
 [workspace.dependencies]
 yaml-sigil-core = {{ version = "{internal_version}", path = "crates/yaml-sigil-core", default-features = false }}
-yaml-sigil-traits = {{ version = "{traits_version}", git = "https://github.com/NVIDIA-dev/yaml-sigil-traits.git", default-features = false }}
+yaml-sigil-traits = {{ version = "{traits_version}", git = "https://github.com/NVIDIA/yaml-sigil-traits.git", default-features = false }}
 yaml-sigil-transcription = {{ version = "{internal_version}", path = "crates/yaml-sigil-transcription", default-features = false }}
 yaml-sigil-verification = {{ version = "{internal_version}", path = "crates/yaml-sigil-verification", default-features = false }}
 yaml-sigil-signing = {{ version = "{internal_version}", path = "crates/yaml-sigil-signing", default-features = false }}

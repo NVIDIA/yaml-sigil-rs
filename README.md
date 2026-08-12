@@ -2,7 +2,7 @@
 
 `yaml-sigil-rs` provides Rust implementation crates for YamlSigil v1alpha1. It
 depends on
-[`yaml-sigil-traits`](https://github.com/NVIDIA-dev/yaml-sigil-traits) for the
+[`yaml-sigil-traits`](https://github.com/NVIDIA/yaml-sigil-traits) for the
 public extension-trait contract; this workspace implements signing,
 verification, transcription, protobuf wire helpers, YAML signature-document
 parsing, and local conformance checks.
@@ -11,7 +11,7 @@ The repo vendors the implementation inputs it needs: the protobuf schema, the
 signature-document JSON Schema, the curated conformance fixtures, and the
 third-party notices that accompany those fixtures. The normative specification
 lives in
-[`yaml-sigil-spec`](https://github.com/NVIDIA-dev/yaml-sigil-spec), not this
+[`yaml-sigil-spec`](https://github.com/NVIDIA/yaml-sigil-spec), not this
 repository.
 
 NVIDIA-authored material is licensed under the

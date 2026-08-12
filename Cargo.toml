@@ -19,7 +19,7 @@ edition = "2024"
 # TODO: We seek to reduce this, we just need to do the testing.
 rust-version = "1.95.0"
 license = "Apache-2.0"
-repository = "https://github.com/NVIDIA-dev/yaml-sigil-rs"
+repository = "https://github.com/NVIDIA/yaml-sigil-rs"
 publish = false
 
 # In-workspace crates use `path` + `version` for local development.
@@ -28,7 +28,7 @@ publish = false
 [workspace.dependencies]
 yaml-sigil-core = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-core", default-features = false }
 # External split crate; use the GitHub repository until it is published.
-yaml-sigil-traits = { version = "0.3.0-rc.1", git = "https://github.com/NVIDIA-dev/yaml-sigil-traits.git", default-features = false }
+yaml-sigil-traits = { version = "0.3.0-rc.1", git = "https://github.com/NVIDIA/yaml-sigil-traits.git", default-features = false }
 yaml-sigil-transcription = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-transcription", default-features = false }
 yaml-sigil-verification = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-verification", default-features = false }
 yaml-sigil-signing = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-signing", default-features = false }

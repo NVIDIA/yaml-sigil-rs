@@ -30,7 +30,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 ## Invariants
 
 - Use the public GitHub URL for spec repository operations:
-  `https://github.com/NVIDIA-dev/yaml-sigil-spec.git`.
+  `https://github.com/NVIDIA/yaml-sigil-spec.git`.
 - Do not add `yaml-sigil-spec` back as a submodule.
 - Import only local artifacts this implementation uses: `yaml_sigil.proto`, the
   signature-document JSON Schema, curated conformance fixtures, and the

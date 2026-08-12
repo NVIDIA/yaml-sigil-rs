@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 
 pub const DEFAULT_SPEC_REF: &str = "origin/main";
 
-const SPEC_REPOSITORY: &str = "https://github.com/NVIDIA-dev/yaml-sigil-spec.git";
+const SPEC_REPOSITORY: &str = "https://github.com/NVIDIA/yaml-sigil-spec.git";
 const CHECKOUT_DIR: &str = "target/spec-update/yaml-sigil-spec";
 
 const SOURCE_PROTO: &str = "proto/yaml_sigil/v1alpha1/yaml_sigil.proto";
