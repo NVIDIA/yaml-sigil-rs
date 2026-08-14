@@ -17,6 +17,8 @@ notices needed by this workspace:
 - `crates/yaml-sigil-conformance/fixtures/`
 - `THIRD_PARTY_NOTICES.md`
 - `crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md`
+- `crates/yaml-sigil-core/THIRD_PARTY_NOTICES.md` for the copied JSON Schema
+  and related conformance material packaged by core.
 - `crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md` for the locally
   maintained, crate-scoped notice that must remain aligned with imported
   source terms.
@@ -71,6 +73,8 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    It also does not overwrite crate-local notices. Reconcile
    `crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md` with the imported
    canonical notice whenever the applicable RFC material or terms change.
+   Apply the same review to `crates/yaml-sigil-core/THIRD_PARTY_NOTICES.md`
+   when the imported JSON Schema or related conformance material changes.
 
 3. Review the spec delta that can affect this implementation. Treat this as a
    starting point, not a closed list. If you need a diff, use the managed
@@ -114,6 +118,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
      crates/yaml-sigil-conformance/fixtures/ \
      THIRD_PARTY_NOTICES.md \
      crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md \
+     crates/yaml-sigil-core/THIRD_PARTY_NOTICES.md \
      crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md
    ```
 

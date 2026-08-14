@@ -133,6 +133,18 @@ jobs:
             . -> target
             xtask -> target
 
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Check xtask formatting
+        run: cargo fmt --manifest-path xtask/Cargo.toml --all --check
+
+      # Compare modeled source-package paths for core, transcription, signing,
+      # and verification with their committed exact inventories. This does not
+      # assemble archives or publish crates.
+      - name: Check package contents
+        run: cargo xtask package-content
+
       # TODO: remove after repository publication
       - name: Fetch Rust dependencies
         env:
@@ -142,12 +154,6 @@ jobs:
           GIT_CONFIG_VALUE_0: https://github.com/NVIDIA/yaml-sigil-traits.git
           GIT_TERMINAL_PROMPT: "0"
         run: cargo fetch
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Check xtask formatting
-        run: cargo fmt --manifest-path xtask/Cargo.toml --all --check
 
       - name: Lint
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings

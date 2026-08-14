@@ -1,0 +1,11 @@
+.cargo_vcs_info.json
+CONTRIBUTING.md
+Cargo.lock
+Cargo.toml
+Cargo.toml.orig
+LICENSE
+README.md
+SECURITY.md
+src/lib.rs
+src/proto_carrier.rs
+src/transcription.rs

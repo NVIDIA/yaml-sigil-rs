@@ -13,6 +13,14 @@ repository.workspace = true
 readme = "README.md"
 publish = false
 
+include = [
+    "/src/**",
+    "/README.md",
+    "/LICENSE",
+    "/SECURITY.md",
+    "/CONTRIBUTING.md",
+]
+
 [lints]
 workspace = true
 

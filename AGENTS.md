@@ -39,6 +39,9 @@ Local implementation inputs:
 - `THIRD_PARTY_NOTICES.md` and
   `crates/yaml-sigil-conformance/THIRD_PARTY_NOTICES.md` for notices that
   accompany imported conformance material.
+- `crates/yaml-sigil-core/THIRD_PARTY_NOTICES.md` and
+  `crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md` for independently
+  packaged copied specification, constant, and reference-vector material.
 
 There is no `source-spec` submodule. When the separate `yaml-sigil-spec`
 repository changes, review it outside this checkout and import only the local
@@ -188,6 +191,7 @@ Run from the repository root:
 
 ```shell
 cargo xtask ci
+cargo xtask package-content
 cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
 cargo xtask sync-workspace-versions
@@ -210,6 +214,10 @@ buf lint crates/yaml-sigil-core
 buf format crates/yaml-sigil-core --diff --exit-code
 cargo fmt --all --check
 cargo fmt --manifest-path xtask/Cargo.toml --all --check
+cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-core
+cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-transcription
+cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signing
+cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-verification
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
@@ -218,6 +226,18 @@ cargo-machete --with-metadata
 cargo audit
 cargo audit --file xtask/Cargo.lock
 ```
+
+The static package-content stage runs
+`cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
+each of the four publishable crates and compares Cargo's modeled paths with the
+committed exact inventory under `xtask/package-contents/`. `--allow-dirty`
+permits source-tree inspection without changing tracked files.
+`--exclude-lockfile` prevents the unpublished workspace's dependency graph
+from being resolved while paths are listed; the validator adds Cargo's
+generated package-local `Cargo.lock` path to the observed set before comparing
+it. The stage does not assemble a `.crate` archive or publish anything. Run
+`cargo xtask package-content` when you need only this check. Full
+`cargo package` validation remains release-sequenced.
 
 The xtask resolves its Buf executable through the same pinned `buf-tools`
 version used by `yaml-sigil-core` at build time. A system `buf` or `protoc`

@@ -8,7 +8,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::{require_success, require_tool, run as run_command};
+use super::{package_content, require_success, require_tool, run as run_command};
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
 
@@ -31,7 +31,7 @@ impl Step {
     }
 }
 
-const CI_STEPS: &[Step] = &[
+const BEFORE_PACKAGE_CONTENT: &[Step] = &[
     Step {
         label: "Markdown lint",
         program: "rumdl",
@@ -68,6 +68,9 @@ const CI_STEPS: &[Step] = &[
             "--check",
         ],
     },
+];
+
+const AFTER_PACKAGE_CONTENT: &[Step] = &[
     Step {
         label: "Rust lint",
         program: "cargo",
@@ -128,7 +131,11 @@ const CI_STEPS: &[Step] = &[
 
 pub(crate) fn run(root: &Path) -> Result<()> {
     require_tool("cargo-machete", CARGO_MACHETE_INSTALL_GUIDANCE)?;
-    for step in CI_STEPS {
+    for step in BEFORE_PACKAGE_CONTENT {
+        require_success(run_command(step.command(root))?, step.label)?;
+    }
+    package_content::run(root)?;
+    for step in AFTER_PACKAGE_CONTENT {
         require_success(run_command(step.command(root))?, step.label)?;
     }
     Ok(())

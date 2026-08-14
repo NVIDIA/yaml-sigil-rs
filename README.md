@@ -66,6 +66,12 @@ notice.
 Before release, use `cargo package --list -p <crate>` to confirm the applicable
 documents are present in each archive.
 
+Run `cargo xtask package-content` to compare Cargo's modeled source-package
+paths for all four publishable crates against their committed exact
+inventories. This static check lists package contents without assembling an
+archive or publishing a crate. Full package assembly and registry resolution
+remain release-preparation checks.
+
 ## Build
 
 The development toolchain follows Rust `stable` through
@@ -86,6 +92,8 @@ cargo xtask ci
 This runs the same Markdown, formatting, linting, test, helper-workspace, and
 dependency-audit commands that the GitHub Actions workflow declares as
 independent steps. It does not package, publish, release, or retain binaries.
+It also compares the modeled package contents with the committed exact
+inventories without assembling an archive.
 
 Run the focused E2E fixture check with:
 

@@ -13,6 +13,16 @@ repository.workspace = true
 readme = "README.md"
 publish = false
 
+include = [
+    "/src/**",
+    "/tests/**",
+    "/README.md",
+    "/LICENSE",
+    "/SECURITY.md",
+    "/CONTRIBUTING.md",
+    "/THIRD_PARTY_NOTICES.md",
+]
+
 [lints]
 workspace = true
 

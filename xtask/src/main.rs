@@ -4,6 +4,7 @@
 //! Workspace maintenance tasks. Invoke via `cargo xtask <COMMAND>` from the repo root.
 
 mod ci;
+mod package_content;
 mod spec_update;
 mod versions;
 
@@ -36,6 +37,8 @@ struct Cli {
 enum Task {
     /// Run the repository's provider-neutral non-release validation sequence.
     Ci,
+    /// Compare modeled source-package paths with committed exact inventories.
+    PackageContent,
     /// Record the E2E test with samply into `target/profile/profile.json`.
     Profile {
         /// Open the interactive Firefox Profiler UI after recording.
@@ -74,6 +77,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Task::Ci => ci::run(&root),
+        Task::PackageContent => {
+            package_content::run(&root)?;
+            Ok(())
+        }
         Task::Profile { open, iterations } => profile(&root, open, iterations),
         Task::ProfileOpen => profile_open(&root),
         Task::Coverage { open } => coverage(&root, open),
