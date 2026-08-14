@@ -320,6 +320,5 @@ When importing fixtures from a spec checkout:
 2. Do not copy `rebuild-rs/`, ACVP vendor corpora, or generator-only files.
 3. Update suite code and this document together if fixture names, categories,
    or expected outcomes change.
-4. Run `cargo test -p yaml-sigil-conformance --all-features`.
-5. Run `cargo test --workspace --all-features` before release or when fixture
-   behavior, protobuf decoding, or YAML parsing changes.
+4. Run `cargo test -p yaml-sigil-conformance --all-features` while iterating.
+5. Run `cargo xtask ci` as the final validation gate.

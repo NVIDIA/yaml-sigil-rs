@@ -16,12 +16,17 @@ publish = false
 include = [
     "src/**/*",
     "build.rs",
+    "buf.yaml",
     "spec/**/*",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
     "SECURITY.md",
 ]
+
+# Both dependencies are invoked directly by build.rs.
+[package.metadata.cargo-machete]
+ignored = ["buf-tools", "buffa-build"]
 
 [lints]
 workspace = true
@@ -45,6 +50,7 @@ jsonschema = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 [build-dependencies]
+buf-tools = { workspace = true }
 buffa-build = { workspace = true }
 
 [dev-dependencies]

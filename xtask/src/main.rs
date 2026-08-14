@@ -3,8 +3,9 @@
 
 //! Workspace maintenance tasks. Invoke via `cargo xtask <COMMAND>` from the repo root.
 
-mod spec_publish;
+mod ci;
 mod spec_update;
+mod versions;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -17,8 +18,12 @@ const E2E_PACKAGE: &str = "yaml-sigil-conformance";
 const E2E_TEST: &str = "e2e_buildtime_keys";
 const COVERAGE_HTML_DIR: &str = "target/llvm-cov-html";
 const COVERAGE_INDEX: &str = "target/llvm-cov-html/html/index.html";
-const PERF_HTML_DIR: &str = "target/perf-html";
-const PERF_PROFILE_JSON: &str = "target/perf-html/profile.json";
+const PROFILE_BUILD_PROFILE: &str = "profiling";
+const PROFILE_DIR: &str = "target/profile";
+const PROFILE_JSON: &str = "target/profile/profile.json";
+const DEFAULT_PROFILE_ITERATIONS: u32 = 100;
+const CARGO_LLVM_COV_INSTALL: &str = "cargo install cargo-llvm-cov";
+const SAMPLY_INSTALL: &str = "cargo install --locked samply";
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "yaml-sigil-rs workspace tasks")]
@@ -29,19 +34,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Task {
-    /// `fmt`, `clippy`, `test`, and `audit`.
-    /// Use `--no-test` in CI.
-    Hygiene {
-        /// Skip `cargo test --workspace --all-features`.
+    /// Run the repository's provider-neutral non-release validation sequence.
+    Ci,
+    /// Record the E2E test with samply into `target/profile/profile.json`.
+    Profile {
+        /// Open the interactive Firefox Profiler UI after recording.
         #[arg(long)]
-        no_test: bool,
+        open: bool,
+        /// Number of times to run the short E2E test while recording.
+        #[arg(long, default_value_t = DEFAULT_PROFILE_ITERATIONS, value_parser = clap::value_parser!(u32).range(1..))]
+        iterations: u32,
     },
-    /// Build the E2E test binary and run `perf record` (Linux).
-    Perfreport,
-    /// Record a CPU profile with samply into `target/perf-html/` (view with `perf-open`).
-    RustPerfHtml,
-    /// Open the samply profile UI for `target/perf-html/profile.json`.
-    PerfOpen,
+    /// Open the existing samply profile in the interactive Firefox Profiler UI.
+    ProfileOpen,
     /// `cargo llvm-cov` HTML report for the whole workspace (`--all-features`).
     Coverage {
         /// After a successful run, open `target/llvm-cov-html/html/index.html`
@@ -68,10 +73,9 @@ fn main() -> Result<()> {
     let root = workspace_root();
     let cli = Cli::parse();
     match cli.command {
-        Task::Hygiene { no_test } => hygiene(&root, no_test),
-        Task::Perfreport => perfreport(&root),
-        Task::RustPerfHtml => rust_perf_html(&root),
-        Task::PerfOpen => perf_open(&root),
+        Task::Ci => ci::run(&root),
+        Task::Profile { open, iterations } => profile(&root, open, iterations),
+        Task::ProfileOpen => profile_open(&root),
         Task::Coverage { open } => coverage(&root, open),
         Task::CoverageOpen => coverage_open(&root),
         Task::UpdateSpec(args) => {
@@ -79,11 +83,11 @@ fn main() -> Result<()> {
                 .spec_ref
                 .as_deref()
                 .unwrap_or(spec_update::DEFAULT_SPEC_REF);
-            spec_update::update_spec(&root, spec_ref, run)?;
+            spec_update::update_spec(&root, spec_ref)?;
             Ok(())
         }
         Task::SyncWorkspaceVersions => {
-            spec_publish::sync_workspace_dependency_versions(&root)?;
+            versions::sync_workspace_dependency_versions(&root)?;
             Ok(())
         }
     }
@@ -130,33 +134,7 @@ fn cargo(root: &Path, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Comm
     cmd
 }
 
-fn hygiene(root: &Path, no_test: bool) -> Result<()> {
-    let mut steps: Vec<(&str, Vec<&str>)> = vec![
-        ("cargo fmt", vec!["fmt", "--all"]),
-        (
-            "cargo clippy",
-            vec![
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--all-features",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        ),
-    ];
-    if !no_test {
-        steps.push(("cargo test", vec!["test", "--workspace", "--all-features"]));
-    }
-    steps.push(("cargo audit", vec!["audit"]));
-    for (label, args) in &steps {
-        require_success(run(cargo(root, args))?, label)?;
-    }
-    Ok(())
-}
-
-fn build_e2e_release(root: &Path) -> Result<PathBuf> {
+fn build_e2e_profile(root: &Path) -> Result<PathBuf> {
     require_success(
         run(cargo(
             root,
@@ -167,12 +145,13 @@ fn build_e2e_release(root: &Path) -> Result<PathBuf> {
                 "--test",
                 E2E_TEST,
                 "--no-run",
-                "--release",
+                "--profile",
+                PROFILE_BUILD_PROFILE,
             ],
         ))?,
-        "build E2E test binary (release)",
+        "build E2E test binary (profiling)",
     )?;
-    find_e2e_binary(root, "release")
+    find_e2e_binary(root, PROFILE_BUILD_PROFILE)
 }
 
 fn find_e2e_binary(root: &Path, profile: &str) -> Result<PathBuf> {
@@ -188,105 +167,62 @@ fn find_e2e_binary(root: &Path, profile: &str) -> Result<PathBuf> {
         .collect();
     matches.sort();
     matches.pop().context(format!(
-        "no {E2E_TEST} test binary under {} (run the release build first)",
+        "no {E2E_TEST} test binary under {} (run the profiling build first)",
         deps.display()
     ))
 }
 
-#[cfg(not(target_os = "linux"))]
-fn perfreport(_root: &Path) -> Result<()> {
-    bail!("perfreport requires Linux (`perf` is not used on this host)");
-}
-
-#[cfg(target_os = "linux")]
-fn perfreport(root: &Path) -> Result<()> {
-    let e2e = build_e2e_release(root)?;
-    eprintln!("E2E binary: {}", e2e.display());
-    let perf_data = root.join("perf.data");
-    let mut record = Command::new("perf");
-    record
-        .current_dir(root)
-        .arg("record")
-        .arg("--call-graph")
-        .arg("dwarf")
-        .arg("-o")
-        .arg(&perf_data)
-        .arg("--")
-        .arg(&e2e)
-        .arg("--test-threads=1");
-    require_success(run(record)?, "perf record")?;
-    eprintln!("Wrote {}", perf_data.display());
-    let mut report = Command::new("perf");
-    report
-        .current_dir(root)
-        .arg("report")
-        .arg("-i")
-        .arg(&perf_data);
-    require_success(run(report)?, "perf report")
-}
-
-fn rust_perf_html(root: &Path) -> Result<()> {
-    let e2e = build_e2e_release(root)?;
-    let out_dir = root.join(PERF_HTML_DIR);
+fn profile(root: &Path, open: bool, iterations: u32) -> Result<()> {
+    let samply = require_tool("samply", SAMPLY_INSTALL)?;
+    let e2e = build_e2e_profile(root)?;
+    let out_dir = root.join(PROFILE_DIR);
     std::fs::create_dir_all(&out_dir)?;
-    let profile_path = root.join(PERF_PROFILE_JSON);
+    let profile_path = root.join(PROFILE_JSON);
 
-    let samply = which("samply").context(
-        "samply not found on PATH (install: cargo install samply, or see README profiling section)",
-    )?;
-
-    // samply: `record [opts] -- COMMAND [ARGS…]`. Do not pass a second `--` before
-    // libtest flags — Rust treats everything after `--` as test-name filters (0 tests run).
+    // samply: `record [opts] -- COMMAND [ARGS...]`. Do not pass a second `--`
+    // before libtest flags: Rust treats everything after it as test-name filters.
     let mut samply_cmd = Command::new(&samply);
     samply_cmd
         .current_dir(root)
         .arg("record")
         .arg("--save-only")
-        .arg("-n")
-        .arg("-o")
+        .arg("--no-open")
+        .arg("--iteration-count")
+        .arg(iterations.to_string())
+        .arg("--profile-name")
+        .arg("yaml-sigil-rs E2E")
+        .arg("--output")
         .arg(&profile_path)
         .arg("--")
         .arg(&e2e)
         .arg("--test-threads=1");
     require_success(run(samply_cmd)?, "samply record")?;
 
-    let index = out_dir.join("index.html");
-    std::fs::write(
-        &index,
-        format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>yaml-sigil-rs perf profile</title></head>
-<body>
-  <p>CPU profile for <code>{E2E_TEST}</code> (release).</p>
-  <p>Data: <code>profile.json</code> (Firefox Profiler format).</p>
-  <p>Open the interactive UI: <code>cargo xtask perf-open</code></p>
-</body>
-</html>
-"#
-        ),
-    )?;
     eprintln!("Wrote {}", profile_path.display());
-    eprintln!("Wrote {}", index.display());
-    eprintln!("Run `cargo xtask perf-open` to view in the browser.");
+    if open {
+        profile_open(root)?;
+    } else {
+        eprintln!("Run `cargo xtask profile-open` to view it in the browser.");
+    }
     Ok(())
 }
 
-fn perf_open(root: &Path) -> Result<()> {
-    let profile = root.join(PERF_PROFILE_JSON);
+fn profile_open(root: &Path) -> Result<()> {
+    let samply = require_tool("samply", SAMPLY_INSTALL)?;
+    let profile = root.join(PROFILE_JSON);
     if !profile.is_file() {
         bail!(
-            "missing {} — run `cargo xtask rust-perf-html` first",
+            "missing {} — run `cargo xtask profile` first",
             profile.display()
         );
     }
-    let samply = which("samply").context("samply not found on PATH")?;
     let mut load = Command::new(samply);
     load.current_dir(root).arg("load").arg(&profile);
     require_success(run(load)?, "samply load")
 }
 
 fn coverage(root: &Path, open: bool) -> Result<()> {
+    require_tool("cargo-llvm-cov", CARGO_LLVM_COV_INSTALL)?;
     require_success(
         run(cargo(root, ["llvm-cov", "clean", "--workspace"]))?,
         "cargo llvm-cov clean",
@@ -359,4 +295,36 @@ fn which(program: &str) -> Result<PathBuf> {
         }
     }
     bail!("{program} not found on PATH");
+}
+
+fn require_tool(program: &str, install_command: &str) -> Result<PathBuf> {
+    which(program)
+        .with_context(|| format!("{program} is required; install it with `{install_command}`"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AGENT_GUIDANCE: &str = include_str!("../../AGENTS.md");
+    const README: &str = include_str!("../../README.md");
+
+    #[test]
+    fn report_tool_install_guidance_is_synchronized() {
+        for install_command in [CARGO_LLVM_COV_INSTALL, SAMPLY_INSTALL] {
+            assert!(AGENT_GUIDANCE.contains(install_command));
+            assert!(README.contains(install_command));
+        }
+    }
+
+    #[test]
+    fn missing_report_tool_names_its_install_command() {
+        let error = require_tool(
+            "yaml-sigil-deliberately-missing-report-tool",
+            CARGO_LLVM_COV_INSTALL,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(CARGO_LLVM_COV_INSTALL));
+    }
 }

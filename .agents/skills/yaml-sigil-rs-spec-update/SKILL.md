@@ -156,13 +156,12 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 6. Run the quality loop appropriate to the change:
 
    ```shell
-   cargo fmt --all --check
-   cargo clippy --workspace --all-targets --all-features -- -D warnings
-   cargo test --workspace --all-features
+   cargo xtask ci
    ```
 
-   Also run `cargo test -p yaml-sigil-conformance --all-features` whenever
-   conformance fixtures or fixture mapping change.
+   During fixture iteration, use
+   `cargo test -p yaml-sigil-conformance --all-features` as a faster focused
+   check. The final validation remains `cargo xtask ci`.
 
 7. Coordinate release order after review:
 

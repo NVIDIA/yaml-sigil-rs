@@ -21,7 +21,6 @@ path = "src/lib.rs"
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 p256 = { workspace = true }
-tracing = { workspace = true }
 yaml-sigil-core = { path = "../yaml-sigil-core", default-features = false }
 yaml-sigil-transcription = { path = "../yaml-sigil-transcription", default-features = false }
 yaml-sigil-verification = { path = "../yaml-sigil-verification", default-features = false }

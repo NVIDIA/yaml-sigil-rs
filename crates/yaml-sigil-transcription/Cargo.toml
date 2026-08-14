@@ -17,7 +17,6 @@ publish = false
 workspace = true
 
 [dependencies]
-thiserror = { workspace = true }
 tracing = { workspace = true }
 yaml-sigil-core = { workspace = true, default-features = false }
 yaml-sigil-traits = { workspace = true, default-features = false }

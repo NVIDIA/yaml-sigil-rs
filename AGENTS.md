@@ -136,7 +136,7 @@ review.
 | Unnecessary bold | "This is a **critical** conformance step" on routine instructions. | Reserve bold for UI labels, parameter names, and genuine warnings. |
 | Repeated em dashes | "The fixture import -- which runs through `cargo xtask update-spec` -- refreshes local artifacts." | Use commas or split the sentence. Use em dashes sparingly. |
 | Superlatives | "`yaml-sigil-rs` provides a powerful, robust, seamless signature experience." | Say which crate or API performs the work. |
-| Hedge words | "Simply run `cargo xtask hygiene`." | Write "Run `cargo xtask hygiene`." |
+| Hedge words | "Simply run `cargo xtask ci`." | Write "Run `cargo xtask ci`." |
 | Emoji in prose | "Run tests before publish." with an emoji prefix. | Do not use emoji in documentation prose. |
 | Rhetorical questions | "Want to validate fixtures?" | State the purpose directly. |
 
@@ -152,7 +152,7 @@ review.
   with `$`.
 
   ```shell
-  cargo xtask hygiene
+  cargo xtask ci
   ```
 
 - Use `text` code blocks for transcripts, log output, and examples that should
@@ -187,26 +187,132 @@ review.
 Run from the repository root:
 
 ```shell
-cargo xtask hygiene
+cargo xtask ci
 cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
 cargo xtask sync-workspace-versions
 cargo xtask coverage
 cargo xtask coverage --open
 cargo xtask coverage-open
-cargo xtask perfreport
-cargo xtask rust-perf-html
-cargo xtask perf-open
+cargo xtask profile
+cargo xtask profile --iterations 250
+cargo xtask profile --open
+cargo xtask profile-open
 ```
 
-Manual equivalents for the core quality loop:
+`cargo xtask ci` runs the complete provider-neutral non-release validation
+sequence locally. Its exact commands are:
 
 ```shell
-cargo fmt --all
+rumdl check .
+buf build crates/yaml-sigil-core
+buf lint crates/yaml-sigil-core
+buf format crates/yaml-sigil-core --diff --exit-code
+cargo fmt --all --check
+cargo fmt --manifest-path xtask/Cargo.toml --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
+cargo test --locked --manifest-path xtask/Cargo.toml
+cargo-machete --with-metadata
 cargo audit
+cargo audit --file xtask/Cargo.lock
 ```
+
+The xtask resolves its Buf executable through the same pinned `buf-tools`
+version used by `yaml-sigil-core` at build time. A system `buf` or `protoc`
+installation is not required. Keep the `buf-tools` pins in the root workspace
+and `xtask/Cargo.toml`, the `bufbuild/buf-action` `version` input, and this
+command documentation aligned when updating Buf.
+
+Install `rumdl`, `cargo-audit`, and `cargo-machete` with Cargo before running
+the wrapper:
+
+```shell
+cargo install rumdl
+cargo install cargo-audit
+cargo install --locked cargo-machete --version 0.9.2
+```
+
+Keep the cargo-machete version aligned with hosted CI. The
+`--with-metadata` check resolves normal, development, and build dependency
+names across all features, but remains an unused-dependency heuristic; retain
+the all-target, all-feature Clippy and test checks as the compilation proof.
+
+Hosted CI declares these checks as independent steps. Keep its command coverage,
+`xtask/src/ci.rs`, and the exact-command documentation above aligned when
+changing the validation sequence. Do not make the xtask read, parse, or test
+provider-specific workflow files. Validate provider configuration with its
+native tooling.
+
+Validate shell scripts under `.github/scripts` with Shuck before landing
+changes. Install it from the `shuck-cli` crate and run it from the repository
+root:
+
+```shell
+cargo install shuck-cli
+shuck check .github/scripts
+```
+
+ShellCheck is an acceptable fallback:
+
+```shell
+shellcheck .github/scripts/check-pull-request-commits.sh
+```
+
+Hosted CI runs its pinned ShellCheck Action for these provider-specific scripts.
+Keep this validation outside `cargo xtask ci`.
+
+Treat every GitHub Action `uses:` pin update as a potential validation-behavior
+change, even when the workflow inputs remain unchanged. While evaluating a
+candidate update, compare the Action at the current and candidate immutable
+SHAs, including its commands, inputs and defaults, runtime, and transitive
+`uses:` dependencies. Determine whether those changes affect the local
+`cargo xtask ci` equivalent or this exact-command documentation. When an Action
+update changes relevant behavior, reify it in hosted CI and, when applicable,
+the xtask command plan and this file in the same change. Document any
+intentional hosted-versus-local difference without making the xtask depend on
+the hosted provider's configuration.
+
+The root workspace does not commit `Cargo.lock`, so its Cargo checks must work
+from a clean checkout without `--locked`. Keep fixture imports, version
+synchronization, coverage, and profiling commands separate from CI unless the
+workflow explicitly needs them.
+
+### Coverage and profiling
+
+Install the Cargo tools used for local reports:
+
+```shell
+cargo install cargo-llvm-cov
+cargo install --locked samply
+```
+
+The coverage and profiling xtasks check for their required tool before doing
+other work and print the corresponding installation command above when it is
+absent. Keep these commands aligned with the constants and synchronization
+test in `xtask/src/main.rs`.
+
+`cargo xtask coverage` tests the workspace with all features and writes an HTML
+coverage report to `target/llvm-cov-html/html/index.html`. It does not open a
+browser unless `--open` is supplied. `cargo xtask coverage-open` opens an
+existing report without rebuilding it.
+
+`cargo xtask profile` builds the focused E2E test with release-equivalent
+optimization and debug symbols, records it with Samply, and writes Firefox
+Profiler data to `target/profile/profile.json`. The test is very short, so the
+task runs it 100 times by default; use `--iterations` to tune the sample. The
+default is non-interactive. Use `--open` after recording or run
+`cargo xtask profile-open` later to launch the interactive browser UI. Samply
+does not produce a standalone HTML file. On Linux, the host's perf-event policy
+must permit unprivileged profiling; follow local system policy if Samply reports
+that `perf_event_paranoid` is too restrictive.
+
+Agents should begin performance work with focused source inspection, tests,
+benchmarks, or timings that answer the question with less data. Run
+`cargo xtask profile` when investigating a concrete CPU-performance issue, and
+leave it non-interactive unless a human asks to open the browser UI. Report the
+saved profile path so a human can inspect it with `cargo xtask profile-open`.
 
 ## Cargo Features
 
@@ -214,7 +320,7 @@ The workspace uses `resolver = "3"` and Rust edition 2024.
 
 | Area | Features | Notes |
 |------|----------|-------|
-| Protobuf codegen | n/a | Generated with `buffa` from the local `yaml_sigil.proto`. |
+| Protobuf codegen | n/a | Generated with `buffa` from the local `yaml_sigil.proto`, using Buf from `buf-tools`. |
 | YAML parser | n/a | YAML signature documents are parsed with `noyalib`. |
 | JSON Schema helper | `json-schema-validate` | Exposes validation against the local signature-document schema. |
 

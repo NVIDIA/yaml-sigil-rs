@@ -18,3 +18,7 @@ should start with `yaml-sigil-signing`, `yaml-sigil-verification`, or
 
 The public extension-trait contract lives in `yaml-sigil-traits`. This crate
 provides implementation support for the published API crates in this workspace.
+
+Code generation obtains a pinned, verified Buf executable from the
+`buf-tools` build dependency and feeds its descriptor set to `buffa-build`.
+Neither a system `buf` nor a system `protoc` installation is required.

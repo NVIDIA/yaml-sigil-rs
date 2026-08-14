@@ -70,22 +70,66 @@ documents are present in each archive.
 
 The development toolchain follows Rust `stable` through
 `rust-toolchain.toml`. The minimum supported Rust version (MSRV) is Rust
-`1.95.0`, as declared in the root `Cargo.toml`. `protoc` must be on `PATH`.
+`1.95.0`, as declared in the root `Cargo.toml`. Protobuf code generation uses
+the Buf version pinned by the `buf-tools` build dependency; a system `buf` or
+`protoc` installation is not required. The first uncached build downloads and
+verifies the corresponding official Buf release asset.
 
 The root workspace publishes library crates and does not commit `Cargo.lock`.
 Cargo may generate an ignored local lockfile while building or testing. The
 standalone `xtask` helper keeps its own lockfile.
 
 ```shell
-cargo xtask hygiene
-cargo test --workspace --all-features
+cargo xtask ci
 ```
+
+This runs the same Markdown, formatting, linting, test, helper-workspace, and
+dependency-audit commands that the GitHub Actions workflow declares as
+independent steps. It does not package, publish, release, or retain binaries.
 
 Run the focused E2E fixture check with:
 
 ```shell
 cargo test -p yaml-sigil-conformance --test e2e_buildtime_keys
 ```
+
+## Coverage and profiling
+
+Install the report tools with Cargo:
+
+```shell
+cargo install cargo-llvm-cov
+cargo install --locked samply
+```
+
+The coverage and profiling xtasks check for their required tool before doing
+other work and print the corresponding installation command above when it is
+absent. Keep these commands aligned with the constants and synchronization
+test in `xtask/src/main.rs`.
+
+Generate the workspace coverage report and optionally open its HTML index:
+
+```shell
+cargo xtask coverage
+cargo xtask coverage --open
+cargo xtask coverage-open
+```
+
+Record the focused E2E test with release-equivalent optimization and retained
+debug symbols:
+
+```shell
+cargo xtask profile
+cargo xtask profile --open
+cargo xtask profile-open
+```
+
+The non-interactive default repeats the short E2E test 100 times and writes
+Firefox Profiler data to `target/profile/profile.json`. Use
+`--iterations <COUNT>` when a different sample size is useful. `--open` and
+`profile-open` launch Samply's interactive browser UI; Samply does not generate
+a standalone profiling HTML file. On Linux, the host's perf-event policy must
+permit unprivileged profiling.
 
 ## Spec And Conformance
 
@@ -101,12 +145,11 @@ Update `docs/conformance-validation.md` in the same change when you change
 fixtures, fixture plumbing, expected outcomes, exposed behavior, or deliberate
 divergences.
 
-## Validation
-
-Run hygiene, core tests, and E2E tests locally before release-oriented changes.
+## Release preparation
 
 Publishing is disabled in this prelaunch cleanup branch. Re-enable and validate
-crates.io metadata in a later release-preparation change.
+crates.io metadata in a later release-preparation change. When preparing a
+workspace version change, align internal dependency versions with:
 
 ```shell
 cargo xtask sync-workspace-versions

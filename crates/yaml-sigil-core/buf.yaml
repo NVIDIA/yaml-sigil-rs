@@ -1,5 +1,12 @@
 # SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 # SPDX-License-Identifier: Apache-2.0
 
-[alias]
-xtask = "run --locked --manifest-path xtask/Cargo.toml --"
+version: v2
+modules:
+  - path: spec/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

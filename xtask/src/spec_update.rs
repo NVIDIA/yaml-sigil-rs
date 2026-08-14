@@ -3,9 +3,11 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, ExitStatus};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+
+use crate::{require_success, run};
 
 pub const DEFAULT_SPEC_REF: &str = "origin/main";
 
@@ -35,11 +37,9 @@ const FIXTURE_DIRS: &[&str] = &[
     "yaml-signature-conformance",
 ];
 
-type Run = fn(Command) -> Result<ExitStatus>;
-
-pub fn update_spec(root: &Path, spec_ref: &str, run: Run) -> Result<()> {
+pub fn update_spec(root: &Path, spec_ref: &str) -> Result<()> {
     let checkout = root.join(CHECKOUT_DIR);
-    ensure_spec_checkout(&checkout, run)?;
+    ensure_spec_checkout(&checkout)?;
 
     let commit = resolve_spec_ref(&checkout, spec_ref)?;
     let mut checkout_cmd = git_in(&checkout);
@@ -56,7 +56,7 @@ pub fn update_spec(root: &Path, spec_ref: &str, run: Run) -> Result<()> {
     Ok(())
 }
 
-fn ensure_spec_checkout(checkout: &Path, run: Run) -> Result<()> {
+fn ensure_spec_checkout(checkout: &Path) -> Result<()> {
     if checkout.join(".git").is_dir() {
         let mut set_url = git_in(checkout);
         set_url.args(["remote", "set-url", "origin", SPEC_REPOSITORY]);
@@ -235,14 +235,6 @@ fn git_in(dir: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(dir);
     cmd
-}
-
-fn require_success(status: ExitStatus, context: &str) -> Result<()> {
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("{context} (exit {})", status.code().unwrap_or(-1));
-    }
 }
 
 #[cfg(test)]
