@@ -67,19 +67,8 @@ jobs:
           scandir: .github/scripts
           version: v0.11.0
 
-  # TODO: remove after repository publication
   checks:
     name: Checks
-    if: >-
-      ${{
-        github.event_name == 'push' ||
-        github.event_name == 'workflow_dispatch' ||
-        (
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.user.login != 'dependabot[bot]'
-        )
-      }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -108,17 +97,6 @@ jobs:
           pr_comment: false
           push: false
           version: "1.72.0"
-
-      # TODO: remove after repository publication
-      - name: Check out traits dependency
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          path: .ci/yaml-sigil-traits
-          persist-credentials: false
-          ref: 9f109f40e771a406b158883c6725b3e13ae208fc
-          repository: NVIDIA/yaml-sigil-traits
-          token: ${{ secrets.YAML_SIGIL_TRAITS_READ_PAT }}
 
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
@@ -154,16 +132,6 @@ jobs:
       # assemble archives or publish crates.
       - name: Check package contents
         run: cargo xtask package-content
-
-      # TODO: remove after repository publication
-      - name: Fetch Rust dependencies
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-          GIT_CONFIG_COUNT: "1"
-          GIT_CONFIG_KEY_0: url.file://${{ github.workspace }}/.ci/yaml-sigil-traits/.insteadOf
-          GIT_CONFIG_VALUE_0: https://github.com/NVIDIA/yaml-sigil-traits.git
-          GIT_TERMINAL_PROMPT: "0"
-        run: cargo fetch
 
       - name: Lint
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
