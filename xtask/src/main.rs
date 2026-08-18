@@ -90,7 +90,11 @@ enum Task {
     /// Run bounded GitHub release-automation operations.
     Github(github::GithubArgs),
     /// Validate browser WebAssembly builds and runtime behavior without retaining artifacts.
-    Wasm,
+    Wasm {
+        /// Validate another repository checkout with this xtask implementation.
+        #[arg(long, value_name = "PATH")]
+        candidate_root: Option<PathBuf>,
+    },
 }
 
 #[derive(Args)]
@@ -141,7 +145,10 @@ fn execute() -> Result<ExitCode> {
                 .map(|outcome| ExitCode::from(release_exit_code(outcome)));
         }
         Task::Github(args) => github::run(&root, args).map_err(anyhow::Error::msg)?,
-        Task::Wasm => wasm::run(&root)?,
+        Task::Wasm { candidate_root } => {
+            let candidate = resolve_candidate_root(candidate_root.as_deref().unwrap_or(&root))?;
+            wasm::run(&candidate)?;
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
