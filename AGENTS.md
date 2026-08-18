@@ -206,6 +206,7 @@ Run from the repository root:
 
 ```shell
 cargo xtask ci
+cargo xtask wasm
 cargo xtask package-content
 cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
@@ -292,6 +293,31 @@ Keep the cargo-machete version aligned with hosted CI. The
 `--with-metadata` check resolves normal, development, and build dependency
 names across all features, but remains an unused-dependency heuristic; retain
 the all-target, all-feature Clippy and test checks as the compilation proof.
+
+### WebAssembly validation
+
+Install the pinned helper and Rust target before running WebAssembly checks.
+Node.js 20 or newer and Firefox must also be on `PATH`.
+
+```shell
+rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
+cargo install --locked wasm-pack --version 0.15.0
+cargo xtask wasm
+```
+
+`cargo xtask wasm` checks `yaml-sigil-core`, `yaml-sigil-transcription`,
+`yaml-sigil-signing`, `yaml-sigil-verification`, and `yaml-sigil-wasm` for
+`wasm32-unknown-unknown` with Rust 1.95.0. It checks the boundary with default
+features and `json-schema-validate`, runs the shared schema-enabled suite under
+Node.js and headless Firefox, and reports optimized raw `web` sizes for both
+feature sets.
+
+The task sets `CARGO_TARGET_DIR` to a temporary directory for every project
+Cargo and `wasm-pack` child process. It removes that directory on success or
+failure and rejects `.wasm` files retained anywhere in the workspace. Keep the
+tool version, install commands, test features, and documentation synchronized
+with `xtask/src/wasm.rs`. Do not add this task to provider-specific automation
+without a separate review of artifact retention and external Actions.
 
 Hosted CI declares these checks as independent steps. Keep its command coverage,
 `xtask/src/ci.rs`, and the exact-command documentation above aligned when
