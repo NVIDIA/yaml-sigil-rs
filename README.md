@@ -155,9 +155,10 @@ divergences.
 
 ## Release preparation
 
-Publishing is disabled in this prelaunch cleanup branch. Re-enable and validate
-crates.io metadata in a later release-preparation change. When preparing a
-workspace version change, align internal dependency versions with:
+We publish to crates.io now.
+
+When preparing a workspace version change, align internal dependency versions
+with:
 
 ```shell
 cargo xtask sync-workspace-versions

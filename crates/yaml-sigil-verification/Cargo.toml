@@ -11,7 +11,7 @@ description = "YamlSigil v1alpha1 verification API (YAML + protobuf)"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-publish = false
+publish = ["crates-io"]
 
 include = [
     "/src/**",

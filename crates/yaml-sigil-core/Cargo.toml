@@ -11,7 +11,7 @@ description = "Shared YamlSigil v1alpha1 decomposition, payload invariants, and 
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-publish = false
+publish = ["crates-io"]
 
 include = [
     "/src/**",

@@ -11,7 +11,7 @@ description = "YamlSigil v1alpha1 Transcription API (Compose / Decompose)"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-publish = false
+publish = ["crates-io"]
 
 include = [
     "/src/**",

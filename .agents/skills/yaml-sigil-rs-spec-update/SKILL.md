@@ -170,7 +170,7 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
 7. Coordinate release order after review:
 
-   Publishing is disabled in the current workspace configuration. When
-   publishing is re-enabled, update `yaml-sigil-traits` first when the public
-   contract changes, then update this workspace's `yaml-sigil-traits`
-   dependency.
+   Publish only the four implementation libraries as crates.io `.crate` source
+   packages. Keep conformance, test-key, and xtask packages unpublished. Update
+   `yaml-sigil-traits` first when the public contract changes, then update this
+   workspace's `yaml-sigil-traits` dependency.

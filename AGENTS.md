@@ -235,12 +235,20 @@ The static package-content stage runs
 each of the four publishable crates and compares Cargo's modeled paths with the
 committed exact inventory under `xtask/package-contents/`. `--allow-dirty`
 permits source-tree inspection without changing tracked files.
-`--exclude-lockfile` prevents the unpublished workspace's dependency graph
-from being resolved while paths are listed; the validator adds Cargo's
-generated package-local `Cargo.lock` path to the observed set before comparing
-it. The stage does not assemble a `.crate` archive or publish anything. Run
-`cargo xtask package-content` when you need only this check. Full
-`cargo package` validation remains release-sequenced.
+`--exclude-lockfile` prevents Cargo from resolving unpublished local
+dependencies while paths are listed; the validator adds Cargo's generated
+package-local `Cargo.lock` path to the observed set before comparing it. The
+stage does not assemble a `.crate` archive or publish anything. Run
+`cargo xtask package-content` when you need only this check. Full package
+validation with `cargo package` remains release-sequenced.
+
+Publish only `yaml-sigil-core`, `yaml-sigil-transcription`,
+`yaml-sigil-signing`, and `yaml-sigil-verification` as crates.io `.crate`
+source packages. Keep the workspace default, conformance, test-key, and xtask
+packages unpublished. Do not distribute compiled native executables,
+executable WebAssembly, installers, containers, retained CI or build outputs,
+GitHub Release assets, or separately generated source archives. Local and
+ephemeral compilation remains permitted for validation.
 
 The xtask resolves its Buf executable through the same pinned `buf-tools`
 version used by `yaml-sigil-core` at build time. A system `buf` or `protoc`
