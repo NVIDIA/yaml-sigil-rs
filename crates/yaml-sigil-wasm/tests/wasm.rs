@@ -36,6 +36,14 @@ fn p256_keys(scalar: u8) -> (Vec<u8>, Vec<u8>) {
     (signing.to_bytes().to_vec(), verifying.as_bytes().to_vec())
 }
 
+fn append_short_len_delimited(out: &mut Vec<u8>, field_number: u8, value: &[u8]) {
+    assert!(field_number < 16);
+    assert!(value.len() < 128);
+    out.push((field_number << 3) | 2);
+    out.push(value.len() as u8);
+    out.extend_from_slice(value);
+}
+
 #[wasm_bindgen_test]
 fn compose_and_decompose_yaml_and_protobuf() {
     init();
@@ -111,6 +119,136 @@ fn wrong_keys_and_algorithm_mismatches_have_stable_states() {
 
     let verified = verify(signed.artifact(), "yaml", ED25519, bytes(&ed_verifying));
     assert_eq!(verified.status(), "verified");
+}
+
+#[wasm_bindgen_test]
+fn unsigned_yaml_decomposes_and_verification_refuses_it() {
+    init();
+    let decomposed = decompose(bytes(PAYLOAD), "yaml", None);
+    assert_eq!(decomposed.status(), "unsigned");
+    assert!(!decomposed.has_payload());
+    assert!(!decomposed.has_signature_carrier());
+    assert!(decomposed.payload().to_vec().is_empty());
+    assert!(decomposed.signature_carrier().to_vec().is_empty());
+
+    let (_, verifying_key) = ed25519_keys(13);
+    let verified = verify(bytes(PAYLOAD), "yaml", ED25519, bytes(&verifying_key));
+    assert_eq!(verified.status(), "malformed_attempted_signed");
+    assert!(!verified.has_payload());
+    assert!(!verified.has_algorithm());
+    assert!(verified.payload().to_vec().is_empty());
+}
+
+#[wasm_bindgen_test]
+fn newline_repair_reports_modified_payload() {
+    init();
+    let payload_without_newline = b"name: browser";
+    let (signing_key, verifying_key) = ed25519_keys(14);
+
+    let refused = sign(
+        bytes(payload_without_newline),
+        ED25519,
+        bytes(&signing_key),
+        None,
+        false,
+        "yaml",
+    );
+    assert_eq!(refused.status(), "signer_error");
+    assert_eq!(
+        refused.code().as_deref(),
+        Some("payload_line_terminator_refusal")
+    );
+    assert!(!refused.has_artifact());
+    assert!(!refused.has_modified_payload());
+    assert!(refused.artifact().to_vec().is_empty());
+    assert!(refused.modified_payload().to_vec().is_empty());
+
+    let repaired = sign(
+        bytes(payload_without_newline),
+        ED25519,
+        bytes(&signing_key),
+        None,
+        true,
+        "yaml",
+    );
+    assert_eq!(repaired.status(), "success");
+    assert!(repaired.has_artifact());
+    assert!(repaired.has_modified_payload());
+    assert_eq!(repaired.modified_payload().to_vec(), PAYLOAD);
+
+    let verified = verify(repaired.artifact(), "yaml", ED25519, bytes(&verifying_key));
+    assert_eq!(verified.status(), "verified");
+    assert_eq!(verified.payload().to_vec(), PAYLOAD);
+}
+
+#[wasm_bindgen_test]
+fn invalid_keyids_and_p256_encodings_have_stable_codes() {
+    init();
+    let (ed25519_signing_key, _) = ed25519_keys(15);
+    for keyid in [String::new(), "bad\nid".to_string(), "x".repeat(1025)] {
+        let result = sign(
+            bytes(PAYLOAD),
+            ED25519,
+            bytes(&ed25519_signing_key),
+            Some(keyid),
+            false,
+            "yaml",
+        );
+        assert_eq!(result.status(), "invocation_error");
+        assert_eq!(result.code().as_deref(), Some("invalid_keyid"));
+    }
+
+    let zero_scalar = sign(bytes(PAYLOAD), P256, bytes(&[0; 32]), None, false, "yaml");
+    assert_eq!(zero_scalar.status(), "invocation_error");
+    assert_eq!(zero_scalar.code().as_deref(), Some("invalid_signing_key"));
+
+    let mut zero_point = vec![0; 65];
+    zero_point[0] = 4;
+    for (case, invalid_point) in [
+        ("invalid SEC1 tag", vec![1; 33]),
+        ("zero point", zero_point),
+    ] {
+        let result = verify(bytes(PAYLOAD), "yaml", P256, bytes(&invalid_point));
+        assert_eq!(result.status(), "invocation_error", "{case}");
+        assert_eq!(
+            result.code().as_deref(),
+            Some("key_resolution_failure"),
+            "{case}"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+fn ed25519_small_order_key_reaches_implementation_resolver() {
+    init();
+    // The compressed identity point has the required length and a canonical
+    // encoding, but it is small-order and must be rejected by the
+    // implementation-owned key resolver.
+    let mut identity = [0; 32];
+    identity[0] = 1;
+
+    let result = verify(bytes(PAYLOAD), "yaml", ED25519, bytes(&identity));
+    assert_eq!(result.status(), "invocation_error");
+    assert_eq!(result.code().as_deref(), Some("key_resolution_failure"));
+}
+
+#[wasm_bindgen_test]
+fn signature_strict_rejects_duplicate_signature_fields() {
+    init();
+    let carrier = b"signature carrier";
+    let composed = compose(bytes(PAYLOAD), bytes(carrier), "protobuf");
+    assert_eq!(composed.status(), "success");
+
+    let mut duplicate = composed.artifact().to_vec();
+    append_short_len_delimited(&mut duplicate, 2, b"duplicate");
+    let decomposed = decompose(
+        bytes(&duplicate),
+        "protobuf",
+        Some("signature_strict".to_string()),
+    );
+    assert_eq!(decomposed.status(), "malformed_attempted_signed");
+    assert!(!decomposed.has_payload());
+    assert!(!decomposed.has_signature_carrier());
 }
 
 #[wasm_bindgen_test]
@@ -231,4 +369,19 @@ fn embedded_schema_validates_without_runtime_filesystem_access() {
     )
     .expect("structurally valid document parses");
     assert!(signature_document_validates_tier_a_schema(&invalid).is_err());
+}
+
+#[cfg(feature = "json-schema-validate")]
+#[wasm_bindgen_test]
+fn schema_invalid_artifact_is_rejected_by_exported_verify() {
+    init();
+    let (_, verifying_key) = ed25519_keys(32);
+    let carrier = b"schema: YamlSigilSignature.v1alpha1\nalg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\nkeyid: \"\"\nsignature: AA\n";
+    let composed = compose(bytes(PAYLOAD), bytes(carrier), "yaml");
+    assert_eq!(composed.status(), "success");
+
+    let verified = verify(composed.artifact(), "yaml", ED25519, bytes(&verifying_key));
+    assert_eq!(verified.status(), "malformed_attempted_signed");
+    assert!(!verified.has_payload());
+    assert!(!verified.has_algorithm());
 }
