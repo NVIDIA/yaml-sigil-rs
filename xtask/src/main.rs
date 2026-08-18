@@ -77,7 +77,11 @@ enum Task {
     /// Manage provider-neutral release version transactions.
     ReleaseVersion(versions::ReleaseVersionArgs),
     /// Validate browser WebAssembly builds and runtime behavior without retaining artifacts.
-    Wasm,
+    Wasm {
+        /// Validate another repository checkout with this xtask implementation.
+        #[arg(long, value_name = "PATH")]
+        candidate_root: Option<PathBuf>,
+    },
 }
 
 #[derive(Args)]
@@ -116,7 +120,10 @@ fn main() -> Result<()> {
             Ok(())
         }
         Task::ReleaseVersion(args) => versions::release_version(&root, args),
-        Task::Wasm => wasm::run(&root),
+        Task::Wasm { candidate_root } => {
+            let candidate = resolve_candidate_root(candidate_root.as_deref().unwrap_or(&root))?;
+            wasm::run(&candidate)
+        }
     }
 }
 

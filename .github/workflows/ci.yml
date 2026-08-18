@@ -235,6 +235,41 @@ jobs:
       - name: Audit xtask dependencies
         run: cargo audit --file xtask/Cargo.lock
 
+  wasm:
+    name: WebAssembly
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check JavaScript runtimes
+        run: |
+          node --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
+          firefox --version
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache: false
+          target: wasm32-unknown-unknown
+          toolchain: 1.95.0
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          checksum: true
+          fallback: none
+          tool: wasm-pack@0.15.0
+
+      - name: Validate WebAssembly
+        run: cargo +1.95.0 xtask wasm
+
   required_ci:
     name: Required CI
     if: ${{ always() }}
@@ -243,6 +278,7 @@ jobs:
       - workflow_lint
       - static_checks
       - rust
+      - wasm
     permissions: {}
     runs-on: linux-amd64-cpu4
     timeout-minutes: 5
@@ -253,6 +289,7 @@ jobs:
           GITHUB_ACTIONS_RESULT: ${{ needs.workflow_lint.result }}
           STATIC_RESULT: ${{ needs.static_checks.result }}
           RUST_RESULT: ${{ needs.rust.result }}
+          WASM_RESULT: ${{ needs.wasm.result }}
         run: |
           require_success() {
             local job="$1"
@@ -269,3 +306,4 @@ jobs:
           require_success "GitHub Actions" "${GITHUB_ACTIONS_RESULT}"
           require_success "Documentation and Protobuf" "${STATIC_RESULT}"
           require_success "Rust matrix" "${RUST_RESULT}"
+          require_success "WebAssembly" "${WASM_RESULT}"

@@ -27,7 +27,8 @@
     "commit_policy",
     "workflow_lint",
     "static_checks",
-    "rust"
+    "rust",
+    "wasm"
   ],
   "sensitive_paths": [
     "CODEOWNERS",

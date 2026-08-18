@@ -386,6 +386,70 @@ jobs:
           cargo run --locked --manifest-path policy/xtask/Cargo.toml --
           ci --candidate-root "${GITHUB_WORKSPACE}/candidate"
 
+  wasm:
+    name: WebAssembly
+    needs:
+      - authorize
+      - start_check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.protected-ci/cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.protected-ci/cargo-target
+      RUSTUP_HOME: ${{ github.workspace }}/.protected-ci/rustup-home
+    steps:
+      - name: Check out protected policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          path: policy
+          persist-credentials: false
+          ref: ${{ needs.authorize.outputs.policy_sha }}
+
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          path: candidate
+          persist-credentials: false
+          ref: ${{ needs.authorize.outputs.head_sha }}
+          repository: ${{ needs.authorize.outputs.head_repository }}
+
+      - name: Check JavaScript runtimes
+        run: |
+          node --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
+          firefox --version
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache: false
+          target: wasm32-unknown-unknown
+          toolchain: 1.95.0
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          checksum: true
+          fallback: none
+          tool: wasm-pack@0.15.0
+
+      - name: Run protected WebAssembly validation against candidate
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: >-
+          cargo run --locked --manifest-path policy/xtask/Cargo.toml --
+          wasm --candidate-root "${GITHUB_WORKSPACE}/candidate"
+
   finish_check:
     name: Finalize protected Required CI check
     if: ${{ always() && needs.start_check.result == 'success' }}
@@ -396,6 +460,7 @@ jobs:
       - workflow_lint
       - static_checks
       - rust
+      - wasm
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: protected-automation
@@ -454,3 +519,4 @@ jobs:
           --result "workflow_lint=${{ needs.workflow_lint.result }}"
           --result "static_checks=${{ needs.static_checks.result }}"
           --result "rust=${{ needs.rust.result }}"
+          --result "wasm=${{ needs.wasm.result }}"
