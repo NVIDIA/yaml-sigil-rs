@@ -45,6 +45,7 @@ ed25519-dalek = { version = "2.1", default-features = false, features = [
     "alloc",
     "fast",
     "rand_core",
+    "zeroize",
 ] }
 jsonschema = { version = "0.46.5", default-features = false }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
