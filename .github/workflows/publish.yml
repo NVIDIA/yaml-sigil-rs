@@ -1,0 +1,162 @@
+name: Publish
+
+# This workflow distributes crates.io source packages and creates version tags
+# plus source-only GitHub Releases. release-plz does not build or attach binary
+# assets, and this workflow has no artifact-upload step.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Validate the current release or publish it to crates.io.
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - publish
+
+permissions: {}
+
+env:
+  # release-plz needs the named crates.io registry to resolve manifests whose
+  # publish allowlist is `["crates-io"]`.
+  CARGO_REGISTRIES_CRATES_IO_INDEX: https://github.com/rust-lang/crates.io-index
+
+# Publication is resumable, so never cancel a run that might have uploaded one
+# crate while a replacement waits for the same protected environment.
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validation:
+    name: Validate release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A manual dispatch may name another ref. Keep release authority on the
+      # protected default branch whose pull requests passed Required CI.
+      - name: Validate invocation
+        env:
+          EXPECTED_REPOSITORY: NVIDIA/yaml-sigil-rs
+        run: |
+          if [[ "${GITHUB_REPOSITORY}" != "${EXPECTED_REPOSITORY}" ]]; then
+            echo "This workflow runs only in ${EXPECTED_REPOSITORY}." >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "This workflow must be dispatched from main." >&2
+            exit 1
+          fi
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache: false
+
+      # `autobins = false` prevents implicit executable targets. Reject an
+      # explicit `[[bin]]` target in any publishable implementation crate too.
+      - name: Require library-only release packages
+        run: |
+          cargo metadata --no-deps --format-version 1 \
+            | jq --exit-status '
+                def product:
+                  .name == "yaml-sigil-core"
+                  or .name == "yaml-sigil-transcription"
+                  or .name == "yaml-sigil-signing"
+                  or .name == "yaml-sigil-verification";
+                [.packages[] | select(product)] as $packages
+                | ($packages | length) == 4
+                  and all($packages[];
+                    all(.targets[]; .kind | index("bin") | not))
+              ' >/dev/null
+
+      # These patches exist only so Cargo and release-plz can validate the
+      # unpublished intra-workspace dependency graph. Traits remains unpatched,
+      # so package verification requires its manifest version on crates.io.
+      - name: Prepare unpublished workspace dependencies
+        run: |
+          validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-release-cargo-home"
+          bash .github/scripts/prepare-unpublished-workspace-dependencies.sh \
+            "${validation_cargo_home}"
+          printf 'CARGO_HOME=%s\n' "${validation_cargo_home}" >>"${GITHUB_ENV}"
+
+      # Use Cargo's normal package assembly and verification instead of a
+      # repository-specific archive parser.
+      - name: Package with Cargo
+        run: |
+          cargo package --package yaml-sigil-core --all-features
+          cargo package --package yaml-sigil-transcription
+          cargo package --package yaml-sigil-signing --all-features
+          cargo package --package yaml-sigil-verification --all-features
+
+      # This exercises release-plz package selection, dependency ordering, and
+      # publication planning without requesting an OIDC token or uploading.
+      - name: Validate release-plz publication plan
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          command: release
+          config: .release-plz.toml
+          dry_run: true
+          manifest_path: Cargo.toml
+          version: "0.3.160"
+
+  publication:
+    name: Publish release
+    if: ${{ inputs.operation == 'publish' }}
+    needs: validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: crates-io
+    permissions:
+      # Create version tags and source-only GitHub Releases after publishing.
+      contents: write
+      pull-requests: read
+      id-token: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache: false
+
+      # release-plz exchanges the job's OIDC identity for a short-lived
+      # crates.io credential, then creates the configured version tags and
+      # source-only GitHub Releases. It does not build or attach binary assets.
+      # Deliberately omit both a registry token and the dry_run input; any
+      # nonempty dry_run value would enable dry-run mode.
+      - name: Publish with Trusted Publishing
+        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          command: release
+          config: .release-plz.toml
+          manifest_path: Cargo.toml
+          version: "0.3.160"
+
+      # Read each expected version from Cargo metadata, wait for crates.io to
+      # expose it as non-yanked, and confirm Cargo can resolve it.
+      - name: Verify crates.io publication
+        run: |
+          bash .github/scripts/verify-crates-io-packages.sh \
+            yaml-sigil-core \
+            yaml-sigil-transcription \
+            yaml-sigil-signing \
+            yaml-sigil-verification

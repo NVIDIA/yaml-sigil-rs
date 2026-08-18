@@ -27,8 +27,9 @@ publish = false
 # Members inherit via `{ workspace = true }` per https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]
 yaml-sigil-core = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-core", default-features = false }
-# External split crate; use the GitHub repository until it is published.
-yaml-sigil-traits = { version = "0.3.0-rc.1", git = "https://github.com/NVIDIA/yaml-sigil-traits.git", rev = "82a8d3f5671ba4c9afd1fbe4769d3c8aaf6624f7", default-features = false }
+# External split crate; publication validation resolves this exact prerelease
+# from crates.io before any implementation crate can be released.
+yaml-sigil-traits = { version = "0.3.0-rc.1", default-features = false }
 yaml-sigil-transcription = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-transcription", default-features = false }
 yaml-sigil-verification = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-verification", default-features = false }
 yaml-sigil-signing = { version = "0.4.0-rc.1", path = "crates/yaml-sigil-signing", default-features = false }

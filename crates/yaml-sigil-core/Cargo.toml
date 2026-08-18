@@ -6,6 +6,9 @@ name = "yaml-sigil-core"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+# Keep this package library-only. An executable target requires an explicit
+# manifest change and is also rejected by the release workflow.
+autobins = false
 rust-version.workspace = true
 description = "Shared YamlSigil v1alpha1 decomposition, payload invariants, and protobuf wire helpers"
 license.workspace = true
@@ -16,6 +19,7 @@ publish = ["crates-io"]
 include = [
     "/src/**",
     "/tests/**",
+    "/CHANGELOG.md",
     "/build.rs",
     "/buf.yaml",
     "/spec/proto/**",

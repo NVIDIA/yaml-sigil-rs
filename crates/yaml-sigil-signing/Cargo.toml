@@ -6,6 +6,9 @@ name = "yaml-sigil-signing"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+# Keep this package library-only. An executable target requires an explicit
+# manifest change and is also rejected by the release workflow.
+autobins = false
 rust-version.workspace = true
 description = "YamlSigil v1alpha1 signing API (YAML + protobuf)"
 license.workspace = true
@@ -15,6 +18,7 @@ publish = ["crates-io"]
 
 include = [
     "/src/**",
+    "/CHANGELOG.md",
     "/README.md",
     "/LICENSE",
     "/SECURITY.md",
