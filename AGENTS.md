@@ -91,6 +91,9 @@ When adding or changing third-party material:
   signed artifacts, parser inputs, or other exact-byte fixtures, put the
   provenance in the nearest `README.md`, a safe sidecar, and the authoritative
   generator source.
+- Keep the `.gitattributes` rule for
+  `crates/yaml-sigil-conformance/fixtures/**` marked `-text`; these are
+  exact-byte inputs and must not undergo checkout line-ending conversion.
 - Preserve applicable non-endorsement language. Do not present this workspace
   as an official publication of, or as affiliated with or endorsed by, a
   cited author, publisher, or standards organization.
@@ -282,6 +285,12 @@ shellcheck .github/scripts/check-pull-request-commits.sh
 
 Hosted CI runs its pinned ShellCheck Action for these provider-specific scripts.
 Keep this validation outside `cargo xtask ci`.
+
+Hosted CI additionally repeats `cargo test --workspace --all-features` on
+GitHub's moving `macos-latest` and `windows-latest` runner labels. That minimal
+platform matrix tests the root workspace; it does not repeat the complete
+`cargo xtask ci` sequence or imply that the local command launches other
+operating systems.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

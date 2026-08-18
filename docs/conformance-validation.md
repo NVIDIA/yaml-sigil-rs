@@ -82,6 +82,11 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-08-13: Marked `crates/yaml-sigil-conformance/fixtures/**` as `-text` in
+  `.gitattributes` so checkout preserves every fixture byte on Linux, macOS,
+  and Windows, including intentional CRLF and binary artifacts. No fixture
+  bytes, mappings, expected outcomes, runtime behavior, dependencies, or
+  notice obligations changed.
 - 2026-08-11: Consolidated the 11 imported fixture README files into
   `crates/yaml-sigil-conformance/README.md`, which links to the authoritative
   conformance documentation at the exact imported `yaml-sigil-spec` revision,

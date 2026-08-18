@@ -1,0 +1,2 @@
+# Conformance artifacts are byte-exact test inputs.
+crates/yaml-sigil-conformance/fixtures/** -text
