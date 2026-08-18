@@ -3,7 +3,6 @@
 
 //! Vendored JSON Schema validation for parsed [`SignatureDocument`] values.
 
-use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde_json::Value as JsonValue;
@@ -11,18 +10,13 @@ use serde_json::Value as JsonValue;
 use crate::error::CoreError;
 use crate::signature_doc::SignatureDocument;
 
-fn schema_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("spec/schema/YamlSigilSignature.v1alpha1.schema.json")
-}
+const TIER_A_SCHEMA: &str = include_str!("../spec/schema/YamlSigilSignature.v1alpha1.schema.json");
 
 fn compiled_schema() -> Result<&'static jsonschema::Validator, CoreError> {
     static SCHEMA: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
     let validator = SCHEMA.get_or_init(|| {
-        let schema_src =
-            std::fs::read_to_string(schema_path()).map_err(|e| format!("read schema: {e}"))?;
         let schema: JsonValue =
-            serde_json::from_str(&schema_src).map_err(|e| format!("parse schema JSON: {e}"))?;
+            serde_json::from_str(TIER_A_SCHEMA).map_err(|e| format!("parse schema JSON: {e}"))?;
         jsonschema::validator_for(&schema).map_err(|e| format!("compile schema: {e}"))
     });
     match validator {
