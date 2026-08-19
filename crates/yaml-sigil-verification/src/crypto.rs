@@ -245,6 +245,8 @@ mod tests {
         );
     }
 
+    // Resolution applies the implementation's complete point-encoding policy,
+    // including cases the underlying key constructor accepts.
     #[test]
     fn ed25519_key_resolution_enforces_canonical_field_encoding() {
         // y = p + 3 is not a canonical field encoding.
@@ -262,6 +264,8 @@ mod tests {
         assert!(resolve_ed25519_verifying_key(&canonical).is_ok());
     }
 
+    // Callers may supply an already typed key, so point-of-use verification
+    // must apply the same admissibility policy as byte-oriented resolution.
     #[test]
     fn ed25519_key_resolution_accepts_non_small_mixed_order_point() {
         let point = ED25519_BASEPOINT_POINT + EIGHT_TORSION[1];

@@ -41,6 +41,8 @@ fn keys_with_ed25519<'a>(vk: &'a EdVk) -> PublicKeys<'a> {
     }
 }
 
+/// Drive the Ed25519 fixture matrix through implementation-bound verifier and
+/// signer adapters.
 pub fn run_ed25519_suite<V: ConformanceVerifier, S: ConformanceSigner>(v: &V, s: &S) {
     happy_path_vectors(v);
     noncanonical_encodings(v);

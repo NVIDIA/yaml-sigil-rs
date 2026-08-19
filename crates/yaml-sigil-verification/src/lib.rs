@@ -30,7 +30,16 @@ pub use yaml_sigil_traits::verification::{
 pub type PublicKeys<'a> =
     GenericPublicKeys<'a, ed25519_dalek::VerifyingKey, p256::ecdsa::VerifyingKey>;
 
-/// Resolve raw Ed25519 public-key bytes into an admissible typed key.
+/// Resolve a 32-byte compressed Ed25519 public key into an admissible typed key.
+///
+/// The input must use a canonical point encoding and identify a key accepted
+/// by this implementation.
+///
+/// # Errors
+///
+/// Returns [`InvocationError::KeyResolutionFailure`] when the input has the
+/// wrong length, is not a canonical point encoding, or resolves to a key this
+/// implementation does not accept.
 pub fn resolve_ed25519_verifying_key(
     bytes: &[u8],
 ) -> Result<ed25519_dalek::VerifyingKey, InvocationError> {
@@ -43,6 +52,11 @@ pub fn resolve_ed25519_verifying_key(
 /// The SEC 1 encoding rule is third-party standards material, not material
 /// relicensed under this file's Apache-2.0 declaration. See the crate's
 /// `THIRD_PARTY_NOTICES.md` for the source notice and patent/IP caveat.
+///
+/// # Errors
+///
+/// Returns [`InvocationError::KeyResolutionFailure`] when the input is not an
+/// accepted SEC 1 encoding of a P-256 public key.
 pub fn resolve_p256_verifying_key(
     bytes: &[u8],
 ) -> Result<p256::ecdsa::VerifyingKey, InvocationError> {
@@ -432,6 +446,8 @@ mod trait_smoke_tests {
         assert_eq!(v.capabilities(), verifier_capabilities());
     }
 
+    // The concrete RustCrypto bindings must remain expressible on a
+    // synchronous trait object.
     #[test]
     fn default_verifier_supports_a_trait_object_with_explicit_bindings() {
         let verifier: &dyn Verifier<
