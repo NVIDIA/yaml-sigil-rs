@@ -10,10 +10,12 @@ edition.workspace = true
 # manifest change and is also rejected by the release workflow.
 autobins = false
 rust-version.workspace = true
-description = "YamlSigil v1alpha1 Transcription API (Compose / Decompose)"
+description = "Compose and decompose YAML and protobuf documents"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
+keywords = ["yaml", "protobuf", "in-toto", "serialization", "transcription"]
+categories = ["encoding", "parser-implementations"]
 publish = ["crates-io"]
 
 include = [

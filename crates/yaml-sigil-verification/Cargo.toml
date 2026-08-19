@@ -10,10 +10,12 @@ edition.workspace = true
 # manifest change and is also rejected by the release workflow.
 autobins = false
 rust-version.workspace = true
-description = "YamlSigil v1alpha1 verification API (YAML + protobuf)"
+description = "Verify documents and signatures"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
+keywords = ["yaml", "agent", "digital-signature", "verification", "cryptography"]
+categories = ["authentication", "cryptography"]
 publish = ["crates-io"]
 
 include = [

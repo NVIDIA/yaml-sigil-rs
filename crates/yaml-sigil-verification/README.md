@@ -1,11 +1,13 @@
 # yaml-sigil-verification
 
-`yaml-sigil-verification` implements YamlSigil v1alpha1 verification for YAML
-and protobuf artifact forms.
+`yaml-sigil-verification` verifies
+[`yaml-sigil`](https://github.com/NVIDIA/yaml-sigil-spec#tldr) documents and
+their signatures in YAML and protobuf forms.
 
-Use this crate when you need to classify artifacts into the YamlSigil verifier
-states, run structural pre-verification, or verify Ed25519 and ECDSA P-256
-SHA-256 signatures.
+Use this crate to check document structure, verify Ed25519 or ECDSA P-256
+SHA-256 signatures, and retrieve payload bytes only after successful
+verification. The public results classify each attempt into the `yaml-sigil`
+verifier states.
 
 ## API Surface
 
@@ -16,7 +18,8 @@ SHA-256 signatures.
   pre-verification results.
 - `DefaultVerifier` and `DefaultAsyncVerifier` delegate to the free functions.
 - `Verifier`, `AsyncVerifier`, request types, result types, key helpers, and
-  capability types are re-exported from `yaml-sigil-traits`.
+  capability types are re-exported from
+  [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits).
 
 `PublicKeys` contains caller-supplied verification keys indexed by algorithm.
 The artifact's unsigned `keyid` remains a deployment-specific lookup hint.
@@ -53,7 +56,7 @@ these implementation-specific hard bounds:
 | Merge keys | 8 |
 
 The parser rejects anchors, aliases, custom tags, and duplicate keys. These
-values describe this Rust implementation; they are not portable YamlSigil
+values describe this Rust implementation; they are not portable `yaml-sigil`
 limits except for the 16,384-octet markerless carrier limit.
 
 The verifier exposes parser observations when callers request them. It does not
@@ -64,4 +67,4 @@ provide RPC transport.
 NVIDIA-authored crate material is licensed under Apache-2.0. RFC 8032-derived
 constants, canonical-encoding rules, and a section 7.1 test-vector value in
 `src/crypto.rs` retain their source attribution and terms in
-[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
+[`THIRD_PARTY_NOTICES.md`](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md).

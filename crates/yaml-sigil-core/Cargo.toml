@@ -10,10 +10,12 @@ edition.workspace = true
 # manifest change and is also rejected by the release workflow.
 autobins = false
 rust-version.workspace = true
-description = "Shared YamlSigil v1alpha1 decomposition, payload invariants, and protobuf wire helpers"
+description = "Parsing, encoding, and shared document support for YAML Sigil"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
+keywords = ["yaml", "protobuf", "digital-signature", "in-toto", "parser"]
+categories = ["encoding", "parser-implementations"]
 publish = ["crates-io"]
 
 include = [

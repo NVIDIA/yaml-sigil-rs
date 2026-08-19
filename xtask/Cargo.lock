@@ -87,9 +87,9 @@ dependencies = [
 
 [[package]]
 name = "buf-tools"
-version = "1.72.0"
+version = "1.72.0-hotfix.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25b79c8a15622b93b77f0b316dbd0099161947342fa7dfe6a69543a5716bc07d"
+checksum = "fa9d1b2508fb498ef0dabb48c81bb8f4b2eafb08d45d95486c2681f1b26a92d7"
 dependencies = [
  "dirs",
  "flate2",
