@@ -331,6 +331,8 @@ fn verify_ed25519_rejects_direct_weak_public_key() {
     assert_eq!(error, InvocationError::KeyResolutionFailure);
 }
 
+// The public resolver must enforce canonical encoding in addition to the
+// underlying key constructor's acceptance rules.
 #[test]
 fn ed25519_resolver_rejects_noncanonical_compressed_key() {
     let mut noncanonical = [0xFF; 32];
@@ -346,6 +348,8 @@ fn ed25519_resolver_rejects_noncanonical_compressed_key() {
     );
 }
 
+// The public byte-oriented API reports all non-32-byte inputs as key
+// resolution failures without partial parsing.
 #[test]
 fn ed25519_resolver_rejects_wrong_key_lengths() {
     let short = [0u8; 31];

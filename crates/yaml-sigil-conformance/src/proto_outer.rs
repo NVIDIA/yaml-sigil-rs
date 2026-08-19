@@ -152,6 +152,8 @@ fn run_one<T: Transcriber>(t: &T, bytes: &[u8], mode: OuterConformance) -> Decom
     }
 }
 
+/// Drive the protobuf outer-conformance fixtures through a transcriber and an
+/// implementation-bound verifier adapter.
 pub fn run_protobuf_outer_suite<T: Transcriber, V: ConformanceVerifier>(t: &T, v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);

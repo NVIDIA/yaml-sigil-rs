@@ -358,6 +358,8 @@ mod tests {
         );
     }
 
+    // The concrete RustCrypto bindings must remain expressible on a
+    // synchronous trait object.
     #[test]
     fn default_signer_supports_a_trait_object_with_explicit_bindings() {
         let signer: &dyn Signer<

@@ -50,6 +50,8 @@ fn keys_with_p256<'a>(vk: &'a P256Vk) -> PublicKeys<'a> {
     }
 }
 
+/// Drive the ECDSA P-256 fixture matrix through implementation-bound verifier
+/// and signer adapters.
 pub fn run_ecdsa_suite<V: ConformanceVerifier, S: ConformanceSigner>(v: &V, s: &S) {
     happy_path_and_acvp(v);
     high_low_s(v);

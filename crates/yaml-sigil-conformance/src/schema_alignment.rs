@@ -114,6 +114,8 @@ const EMPTY_SIGNATURE_FIXTURES: &[SchemaFixture] = &[
     },
 ];
 
+/// Drive the schema-alignment fixture matrix through an implementation-bound
+/// verifier adapter.
 pub fn run_schema_alignment_suite<V: ConformanceVerifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
