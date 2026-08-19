@@ -89,6 +89,9 @@ fn pre_verify_response(input_bytes: &[u8], form: ArtifactForm) -> PreVerifyRespo
 }
 
 impl Verifier for FakeVerifier {
+    type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
+    type P256VerifyingKey = p256::ecdsa::VerifyingKey;
+
     fn capabilities(&self) -> VerifierCapabilities {
         capabilities(self.profile)
     }
@@ -139,6 +142,9 @@ impl Verifier for FakeVerifier {
 }
 
 impl AsyncVerifier for FakeVerifier {
+    type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
+    type P256VerifyingKey = p256::ecdsa::VerifyingKey;
+
     fn capabilities(&self) -> VerifierCapabilities {
         capabilities(self.profile)
     }

@@ -17,12 +17,17 @@ verifier states.
 - `verify_from_pre_verify` and its form-specific helpers reuse successful
   pre-verification results.
 - `DefaultVerifier` and `DefaultAsyncVerifier` delegate to the free functions.
-- `Verifier`, `AsyncVerifier`, request types, result types, key helpers, and
-  capability types are re-exported from
+- `Verifier`, `AsyncVerifier`, result types, and capability types are
+  re-exported from
   [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits).
+- `PublicKeys` binds the portable generic DTO to `ed25519-dalek` and `p256`
+  verifying-key types. The byte-oriented `resolve_ed25519_verifying_key` and
+  `resolve_p256_verifying_key` helpers are owned by this implementation.
 
 `PublicKeys` contains caller-supplied verification keys indexed by algorithm.
 The artifact's unsigned `keyid` remains a deployment-specific lookup hint.
+Ed25519 key admissibility is checked both when resolving raw key bytes and
+when a caller supplies an already constructed typed key.
 
 Bind each artifact source, route, or storage class to one `ArtifactForm` before
 calling the verifier. Do not infer the form from artifact bytes or retry the
@@ -65,6 +70,8 @@ provide RPC transport.
 ## Third-party material
 
 NVIDIA-authored crate material is licensed under Apache-2.0. RFC 8032-derived
-constants, canonical-encoding rules, and a section 7.1 test-vector value in
-`src/crypto.rs` retain their source attribution and terms in
+point-encoding and verification rules and a section 7.1 test-vector value in
+`src/crypto.rs` retain their source attribution and terms. The P-256 resolver
+follows point-encoding behavior from *Standards for Efficient Cryptography 1
+(SEC 1)*. The applicable notices and source terms are retained in
 [`THIRD_PARTY_NOTICES.md`](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md).

@@ -17,11 +17,10 @@ use yaml_sigil_transcription::{
     AsyncTranscriber, DecomposeOutcome, DecomposeRequest, DecomposeResponse, OuterConformance,
     Transcriber, TranscriptionForm,
 };
-use yaml_sigil_verification::{
-    ArtifactForm, AsyncVerifier, PublicKeys, Verifier, VerifierOptions, VerifierState,
-};
+use yaml_sigil_verification::{ArtifactForm, PublicKeys, VerifierOptions, VerifierState};
 
 use crate::fixtures::load_bytes;
+use crate::{ConformanceAsyncVerifier, ConformanceVerifier};
 
 const CATEGORY: &str = "protobuf-conformance";
 
@@ -153,7 +152,7 @@ fn run_one<T: Transcriber>(t: &T, bytes: &[u8], mode: OuterConformance) -> Decom
     }
 }
 
-pub fn run_protobuf_outer_suite<T: Transcriber, V: Verifier>(t: &T, v: &V) {
+pub fn run_protobuf_outer_suite<T: Transcriber, V: ConformanceVerifier>(t: &T, v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
         let got_strict = run_one(t, &bytes, OuterConformance::Strict);
@@ -184,7 +183,7 @@ pub fn run_protobuf_outer_suite<T: Transcriber, V: Verifier>(t: &T, v: &V) {
 /// `SignedButFailedVerification`. If a future change re-introduces a YAML
 /// envelope check on the protobuf path, this test flips back to
 /// `MalformedAttemptedSigned` and fails loudly.
-fn binary_payload_no_yaml_fit_reaches_crypto<V: Verifier>(v: &V) {
+fn binary_payload_no_yaml_fit_reaches_crypto<V: ConformanceVerifier>(v: &V) {
     let bytes = load_bytes(CATEGORY, "binary-payload-no-yaml-fit.binpb");
     let placeholder_vk: EdVk = EdSk::from_bytes(&[1u8; 32]).verifying_key();
     let keys = PublicKeys {
@@ -235,7 +234,10 @@ async fn run_one_async<T: AsyncTranscriber>(
 }
 
 /// Async sibling of [`run_protobuf_outer_suite`].
-pub async fn run_protobuf_outer_suite_async<T: AsyncTranscriber, V: AsyncVerifier>(t: &T, v: &V) {
+pub async fn run_protobuf_outer_suite_async<T: AsyncTranscriber, V: ConformanceAsyncVerifier>(
+    t: &T,
+    v: &V,
+) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
         let got_strict = run_one_async(t, &bytes, OuterConformance::Strict).await;
@@ -254,7 +256,7 @@ pub async fn run_protobuf_outer_suite_async<T: AsyncTranscriber, V: AsyncVerifie
     binary_payload_no_yaml_fit_reaches_crypto_async(v).await;
 }
 
-async fn binary_payload_no_yaml_fit_reaches_crypto_async<V: AsyncVerifier>(v: &V) {
+async fn binary_payload_no_yaml_fit_reaches_crypto_async<V: ConformanceAsyncVerifier>(v: &V) {
     let bytes = load_bytes(CATEGORY, "binary-payload-no-yaml-fit.binpb");
     let placeholder_vk: EdVk = EdSk::from_bytes(&[1u8; 32]).verifying_key();
     let keys = PublicKeys {

@@ -7,11 +7,11 @@
 //! empty-signature rejection before runtime algorithm-support classification.
 
 use yaml_sigil_verification::{
-    ArtifactForm, AsyncVerifier, PreVerifyOutcome, PublicKeys, Verifier, VerifierOptions,
-    VerifierState,
+    ArtifactForm, PreVerifyOutcome, PublicKeys, VerifierOptions, VerifierState,
 };
 
 use crate::fixtures::load_bytes;
+use crate::{ConformanceAsyncVerifier, ConformanceVerifier};
 
 const CATEGORY: &str = "schema-alignment";
 
@@ -114,7 +114,7 @@ const EMPTY_SIGNATURE_FIXTURES: &[SchemaFixture] = &[
     },
 ];
 
-pub fn run_schema_alignment_suite<V: Verifier>(v: &V) {
+pub fn run_schema_alignment_suite<V: ConformanceVerifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
         let pre = v.pre_verify(&bytes, fx.form, false, false);
@@ -142,7 +142,7 @@ pub fn run_schema_alignment_suite<V: Verifier>(v: &V) {
     assert_empty_signature_precedence(v);
 }
 
-fn assert_empty_signature_precedence<V: Verifier>(v: &V) {
+fn assert_empty_signature_precedence<V: ConformanceVerifier>(v: &V) {
     let keys = PublicKeys {
         ed25519: None,
         p256: None,
@@ -172,7 +172,7 @@ fn assert_empty_signature_precedence<V: Verifier>(v: &V) {
 }
 
 /// Async sibling of [`run_schema_alignment_suite`].
-pub async fn run_schema_alignment_suite_async<V: AsyncVerifier>(v: &V) {
+pub async fn run_schema_alignment_suite_async<V: ConformanceAsyncVerifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
         let pre = v.pre_verify(&bytes, fx.form, false, false).await;
@@ -200,7 +200,7 @@ pub async fn run_schema_alignment_suite_async<V: AsyncVerifier>(v: &V) {
     assert_empty_signature_precedence_async(v).await;
 }
 
-async fn assert_empty_signature_precedence_async<V: AsyncVerifier>(v: &V) {
+async fn assert_empty_signature_precedence_async<V: ConformanceAsyncVerifier>(v: &V) {
     let keys = PublicKeys {
         ed25519: None,
         p256: None,

@@ -8,11 +8,12 @@
 
 use yaml_sigil_core::AlgorithmId;
 use yaml_sigil_verification::{
-    ArtifactForm, AsyncVerifier, PreVerifyOutcome, PublicKeys, Verifier, VerifierOptions,
-    VerifierState,
+    ArtifactForm, PreVerifyOutcome, PublicKeys, VerifierOptions, VerifierState,
+    resolve_p256_verifying_key,
 };
 
 use crate::fixtures::{load_bytes, load_string, require_hex_field};
+use crate::{ConformanceAsyncVerifier, ConformanceVerifier};
 
 const CATEGORY: &str = "verification-runtime";
 const FORMS: &[(&str, ArtifactForm)] =
@@ -42,10 +43,9 @@ fn assert_verified(state: VerifierState, expected_payload: &[u8], context: &str)
 }
 
 /// Drive the runtime fixture matrix through a synchronous verifier.
-pub fn run_verification_runtime_suite<V: Verifier>(verifier: &V) {
+pub fn run_verification_runtime_suite<V: ConformanceVerifier>(verifier: &V) {
     let (public_key_bytes, expected_payload) = runtime_material();
-    let public_key = verifier
-        .resolve_p256_verifying_key(&public_key_bytes)
+    let public_key = resolve_p256_verifying_key(&public_key_bytes)
         .expect("resolve verification-runtime P-256 public key");
     let keys = PublicKeys {
         ed25519: None,
@@ -101,11 +101,9 @@ pub fn run_verification_runtime_suite<V: Verifier>(verifier: &V) {
 }
 
 /// Async sibling of [`run_verification_runtime_suite`].
-pub async fn run_verification_runtime_suite_async<V: AsyncVerifier>(verifier: &V) {
+pub async fn run_verification_runtime_suite_async<V: ConformanceAsyncVerifier>(verifier: &V) {
     let (public_key_bytes, expected_payload) = runtime_material();
-    let public_key = verifier
-        .resolve_p256_verifying_key(&public_key_bytes)
-        .await
+    let public_key = resolve_p256_verifying_key(&public_key_bytes)
         .expect("resolve verification-runtime P-256 public key");
     let keys = PublicKeys {
         ed25519: None,

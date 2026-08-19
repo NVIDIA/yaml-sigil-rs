@@ -12,9 +12,11 @@ each signing request.
 - `sign` is the unified in-process signing entry point.
 - `sign_yaml` and `sign_proto` provide form-specific convenience wrappers.
 - `DefaultSigner` and `DefaultAsyncSigner` delegate to the free functions.
-- `Signer`, `AsyncSigner`, request types, outcome types, capability types, and
-  `SigningKey` are re-exported from
+- `Signer`, `AsyncSigner`, outcome types, and capability types are re-exported
+  from
   [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits).
+- `SigningKey` and `SignRequest` are implementation aliases that bind the
+  portable generic DTOs to `ed25519-dalek` and `p256` signing-key types.
 
 `SigningKey` debug output is redacted by design. Do not log private keys, seed
 material, tokens, or raw signatures on trusted fact surfaces.
