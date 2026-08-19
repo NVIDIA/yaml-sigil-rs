@@ -347,6 +347,19 @@ fn ed25519_resolver_rejects_noncanonical_compressed_key() {
 }
 
 #[test]
+fn ed25519_resolver_rejects_wrong_key_lengths() {
+    let short = [0u8; 31];
+    let long = [0u8; 33];
+
+    for bytes in [short.as_slice(), long.as_slice()] {
+        assert_eq!(
+            resolve_ed25519_verifying_key(bytes),
+            Err(InvocationError::KeyResolutionFailure)
+        );
+    }
+}
+
+#[test]
 fn verify_ed25519_algorithm_disabled() {
     let (sk, vk) = ed25519_pair();
     let artifact = sign_yaml(&SignYamlParams {
