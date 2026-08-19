@@ -65,7 +65,11 @@ jobs:
 
       # `autobins = false` prevents implicit executable targets. Reject an
       # explicit `[[bin]]` target in any publishable implementation crate too.
-      - name: Require library-only release packages
+      # release-plz follows Cargo workspace order when no normal dependency
+      # edge distinguishes packages. Keep signing ahead of verification because
+      # Cargo also resolves verification's signing dev-dependency while
+      # preparing that package for publication.
+      - name: Require library-only release packages in publication order
         run: |
           cargo metadata --no-deps --format-version 1 \
             | jq --exit-status '
@@ -76,6 +80,12 @@ jobs:
                   or .name == "yaml-sigil-verification";
                 [.packages[] | select(product)] as $packages
                 | ($packages | length) == 4
+                  and ($packages | map(.name)) == [
+                    "yaml-sigil-core",
+                    "yaml-sigil-transcription",
+                    "yaml-sigil-signing",
+                    "yaml-sigil-verification"
+                  ]
                   and all($packages[];
                     all(.targets[]; .kind | index("bin") | not))
               ' >/dev/null

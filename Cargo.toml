@@ -3,11 +3,13 @@
 
 [workspace]
 resolver = "3"
+# Cargo package verification resolves development dependencies. Keep signing
+# before verification so release-plz publishes it before verifying the latter.
 members = [
     "crates/yaml-sigil-core",
     "crates/yaml-sigil-transcription",
-    "crates/yaml-sigil-verification",
     "crates/yaml-sigil-signing",
+    "crates/yaml-sigil-verification",
     "crates/yaml-sigil-test-keys",
     "crates/yaml-sigil-conformance",
 ]
