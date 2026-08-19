@@ -14,8 +14,9 @@ use yaml_sigil_signing::{SignProtoParams, SignYamlParams, SigningKey, sign_proto
 use yaml_sigil_verification::{
     AdvertisedConformanceProfile, ArtifactForm, InvocationError, PreVerifyOutcome,
     PreVerifyResponse, PublicKeys, UnverifiedSignature, VerifierOptions, VerifierState,
-    can_pre_verify, pre_verify_proto, pre_verify_yaml, verifier_capabilities, verify,
-    verify_from_pre_verify_proto, verify_from_pre_verify_yaml, verify_proto, verify_yaml,
+    can_pre_verify, pre_verify_proto, pre_verify_yaml, resolve_ed25519_verifying_key,
+    verifier_capabilities, verify, verify_from_pre_verify_proto, verify_from_pre_verify_yaml,
+    verify_proto, verify_yaml,
 };
 
 fn ed25519_pair() -> (EdSigningKey, ed25519_dalek::VerifyingKey) {
@@ -328,6 +329,21 @@ fn verify_ed25519_rejects_direct_weak_public_key() {
     )
     .expect_err("small-order keys must fail at key resolution");
     assert_eq!(error, InvocationError::KeyResolutionFailure);
+}
+
+#[test]
+fn ed25519_resolver_rejects_noncanonical_compressed_key() {
+    let mut noncanonical = [0xFF; 32];
+    noncanonical[0] = 0xF0;
+    noncanonical[31] = 0x7F;
+
+    let typed = ed25519_dalek::VerifyingKey::from_bytes(&noncanonical)
+        .expect("typed key construction for point-of-use check");
+    assert!(!typed.is_weak());
+    assert_eq!(
+        resolve_ed25519_verifying_key(&noncanonical),
+        Err(InvocationError::KeyResolutionFailure)
+    );
 }
 
 #[test]

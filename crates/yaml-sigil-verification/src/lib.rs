@@ -16,15 +16,38 @@ use yaml_sigil_core::{
     AlgorithmId, ProtobufWireDecodeAdvertisement, YamlSignatureDocumentDuplicateKeyPolicy,
 };
 
-// The `Verifier` / `AsyncVerifier` trait pair, the verifier DTOs, and the
-// key-resolution helpers now live in `yaml-sigil-traits`; re-exported here so
-// existing `yaml_sigil_verification::{Verifier, VerifierState, ...}` paths keep working.
+// The portable traits and DTOs live in `yaml-sigil-traits`. This implementation
+// binds the generic key-bearing DTO to its RustCrypto key types and owns key
+// parsing, retaining established `yaml_sigil_verification` paths.
+use yaml_sigil_traits::verification::PublicKeys as GenericPublicKeys;
 pub use yaml_sigil_traits::verification::{
     AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, InvocationError, PreVerifyOutcome,
-    PreVerifyResponse, PublicKeys, UnverifiedSignature, Verifier, VerifierCapabilities,
-    VerifierOptions, VerifierState, VerifyResult, resolve_ed25519_verifying_key,
-    resolve_p256_verifying_key,
+    PreVerifyResponse, UnverifiedSignature, Verifier, VerifierCapabilities, VerifierOptions,
+    VerifierState, VerifyResult,
 };
+
+/// Caller-supplied verification keys supported by this RustCrypto implementation.
+pub type PublicKeys<'a> =
+    GenericPublicKeys<'a, ed25519_dalek::VerifyingKey, p256::ecdsa::VerifyingKey>;
+
+/// Resolve raw Ed25519 public-key bytes into an admissible typed key.
+pub fn resolve_ed25519_verifying_key(
+    bytes: &[u8],
+) -> Result<ed25519_dalek::VerifyingKey, InvocationError> {
+    crypto::resolve_ed25519_verifying_key(bytes)
+}
+
+/// Resolve raw P-256 public-key bytes encoded according to
+/// *Standards for Efficient Cryptography 1 (SEC 1)* into a typed key.
+///
+/// The SEC 1 encoding rule is third-party standards material, not material
+/// relicensed under this file's Apache-2.0 declaration. See the crate's
+/// `THIRD_PARTY_NOTICES.md` for the source notice and patent/IP caveat.
+pub fn resolve_p256_verifying_key(
+    bytes: &[u8],
+) -> Result<p256::ecdsa::VerifyingKey, InvocationError> {
+    crypto::resolve_p256_verifying_key(bytes)
+}
 
 /// Returns the capability surface for this build.
 pub fn verifier_capabilities() -> VerifierCapabilities {
@@ -158,13 +181,9 @@ pub(crate) fn verify_extracted_signature(
             if !options.verify_ed25519 {
                 return Ok(VerifierState::SignedButAlgorithmUnsupported { algorithm: alg });
             }
-            // Strict-variant canonical-encoding pre-check (R y-coord < p, S < L).
-            // `ed25519-dalek`'s `VerifyingKey::verify` collapses non-canonical
-            // rejection and signature-equation failure into one `SignatureError`;
-            // wrapping it with the spec's two structural compares preserves the
-            // verifier-state distinction (malformed-artifact signal vs.
-            // tampering/wrong-key signal). See
-            // covered by the noncanonical Ed25519 fixtures.
+            // Apply the slot's canonical `R` point and `S` scalar requirements
+            // before the cofactored equation so malformed signature octets keep
+            // their specified verifier-state classification.
             if !crypto::ed25519_signature_is_canonical(sig_octets) {
                 return Ok(VerifierState::MalformedAttemptedSigned);
             }
@@ -172,7 +191,7 @@ pub(crate) fn verify_extracted_signature(
             // `PublicKeys` accepts an already constructed verifying key, so
             // callers are not required to use the byte-oriented resolver.
             // Enforce the same key-admissibility rule at the point of use.
-            if vk.is_weak() {
+            if !crypto::ed25519_verifying_key_is_admissible(vk) {
                 return Err(InvocationError::KeyResolutionFailure);
             }
             if crypto::verify_ed25519(vk, payload, sig_octets).is_ok() {
@@ -286,6 +305,9 @@ pub fn verify_from_pre_verify(
 pub struct DefaultVerifier;
 
 impl Verifier for DefaultVerifier {
+    type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
+    type P256VerifyingKey = p256::ecdsa::VerifyingKey;
+
     fn capabilities(&self) -> VerifierCapabilities {
         verifier_capabilities()
     }
@@ -345,6 +367,9 @@ impl Verifier for DefaultVerifier {
 pub struct DefaultAsyncVerifier;
 
 impl AsyncVerifier for DefaultAsyncVerifier {
+    type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
+    type P256VerifyingKey = p256::ecdsa::VerifyingKey;
+
     fn capabilities(&self) -> VerifierCapabilities {
         verifier_capabilities()
     }
@@ -405,6 +430,15 @@ mod trait_smoke_tests {
     fn default_verifier_capabilities_match_free_function() {
         let v = DefaultVerifier;
         assert_eq!(v.capabilities(), verifier_capabilities());
+    }
+
+    #[test]
+    fn default_verifier_supports_a_trait_object_with_explicit_bindings() {
+        let verifier: &dyn Verifier<
+            Ed25519VerifyingKey = ed25519_dalek::VerifyingKey,
+            P256VerifyingKey = p256::ecdsa::VerifyingKey,
+        > = &DefaultVerifier;
+        assert_eq!(verifier.capabilities(), verifier_capabilities());
     }
 
     #[test]

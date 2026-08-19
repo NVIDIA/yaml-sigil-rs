@@ -3,7 +3,7 @@
 
 //! Ed25519 suite — `fixtures/alg-ed25519/`.
 //! Covers RFC 8032 §7.1 Test 1/2, noncanonical encodings, small-order key
-//! rejection (via `Verifier::resolve_ed25519_verifying_key`), stable re-sign,
+//! rejection via the implementation resolver, stable re-sign,
 //! and `algorithm_parameters` rejection on both verify and sign.
 //!
 //! The RFC-derived fixture values and validation rules are third-party
@@ -12,15 +12,16 @@
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{
-    AsyncSigner, OutputForm, SignInvocationError, SignOutcome, SignRequest, Signer, SigningKey,
-};
+use yaml_sigil_signing::{OutputForm, SignInvocationError, SignOutcome, SignRequest, SigningKey};
 use yaml_sigil_verification::{
-    ArtifactForm, AsyncVerifier, InvocationError, PublicKeys, Verifier, VerifierOptions,
-    VerifierState,
+    ArtifactForm, InvocationError, PublicKeys, VerifierOptions, VerifierState,
+    resolve_ed25519_verifying_key,
 };
 
 use crate::fixtures::{data_lines, hex_decode, load_bytes, load_string, require_hex_field};
+use crate::{
+    ConformanceAsyncSigner, ConformanceAsyncVerifier, ConformanceSigner, ConformanceVerifier,
+};
 
 const CATEGORY: &str = "alg-ed25519";
 
@@ -40,15 +41,15 @@ fn keys_with_ed25519<'a>(vk: &'a EdVk) -> PublicKeys<'a> {
     }
 }
 
-pub fn run_ed25519_suite<V: Verifier, S: Signer>(v: &V, s: &S) {
+pub fn run_ed25519_suite<V: ConformanceVerifier, S: ConformanceSigner>(v: &V, s: &S) {
     happy_path_vectors(v);
     noncanonical_encodings(v);
-    small_order_keys(v);
+    small_order_keys();
     stable_resign(s);
     algorithm_parameters_rejection(v, s);
 }
 
-fn happy_path_vectors<V: Verifier>(v: &V) {
+fn happy_path_vectors<V: ConformanceVerifier>(v: &V) {
     // fixture: rfc8032-vec1-empty-message.{binpb,yaml} -> Verified
     let vec1_expected = load_string(CATEGORY, "rfc8032-vec1-empty-message.expected.txt");
     let vec1_vk = parse_ed25519_pubkey(&vec1_expected);
@@ -100,7 +101,7 @@ fn happy_path_vectors<V: Verifier>(v: &V) {
     );
 }
 
-fn noncanonical_encodings<V: Verifier>(v: &V) {
+fn noncanonical_encodings<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "noncanonical-encoding.expected.txt");
     let vk = parse_ed25519_pubkey(&expected);
     let keys = keys_with_ed25519(&vk);
@@ -135,7 +136,7 @@ fn noncanonical_encodings<V: Verifier>(v: &V) {
     }
 }
 
-fn small_order_keys<V: Verifier>(v: &V) {
+fn small_order_keys() {
     // fixture: configured-key-small-order.txt -> KeyResolutionFailure (8 lines)
     let body = load_string(CATEGORY, "configured-key-small-order.txt");
     let mut count = 0;
@@ -146,9 +147,8 @@ fn small_order_keys<V: Verifier>(v: &V) {
             32,
             "small-order pubkey line {line} should decode to 32 octets"
         );
-        let err = v
-            .resolve_ed25519_verifying_key(&bytes)
-            .expect_err("small-order pubkey must be rejected");
+        let err =
+            resolve_ed25519_verifying_key(&bytes).expect_err("small-order pubkey must be rejected");
         assert!(
             matches!(err, InvocationError::KeyResolutionFailure),
             "small-order pubkey {line}: expected KeyResolutionFailure, got {err:?}"
@@ -161,7 +161,7 @@ fn small_order_keys<V: Verifier>(v: &V) {
     );
 }
 
-fn stable_resign<S: Signer>(s: &S) {
+fn stable_resign<S: ConformanceSigner>(s: &S) {
     // fixture: stable-resign.txt -> two Sign invocations on (RFC seed, empty
     // message) MUST produce byte-identical signed artifacts.
     let body = load_string(CATEGORY, "stable-resign.txt");
@@ -204,7 +204,7 @@ fn stable_resign<S: Signer>(s: &S) {
     );
 }
 
-fn algorithm_parameters_rejection<V: Verifier, S: Signer>(v: &V, s: &S) {
+fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(v: &V, s: &S) {
     // fixture: algorithm-parameters-present.expected.txt -> InvalidAlgorithmParameters on both
     let vec1_expected = load_string(CATEGORY, "rfc8032-vec1-empty-message.expected.txt");
     let vk = parse_ed25519_pubkey(&vec1_expected);
@@ -242,16 +242,19 @@ fn algorithm_parameters_rejection<V: Verifier, S: Signer>(v: &V, s: &S) {
 }
 
 /// Async sibling of [`run_ed25519_suite`]. Drives the same fixtures through
-/// [`AsyncVerifier`] / [`AsyncSigner`].
-pub async fn run_ed25519_suite_async<V: AsyncVerifier, S: AsyncSigner>(v: &V, s: &S) {
+/// the async verifier and signer bindings.
+pub async fn run_ed25519_suite_async<V: ConformanceAsyncVerifier, S: ConformanceAsyncSigner>(
+    v: &V,
+    s: &S,
+) {
     happy_path_vectors_async(v).await;
     noncanonical_encodings_async(v).await;
-    small_order_keys_async(v).await;
+    small_order_keys();
     stable_resign_async(s).await;
     algorithm_parameters_rejection_async(v, s).await;
 }
 
-async fn happy_path_vectors_async<V: AsyncVerifier>(v: &V) {
+async fn happy_path_vectors_async<V: ConformanceAsyncVerifier>(v: &V) {
     let vec1_expected = load_string(CATEGORY, "rfc8032-vec1-empty-message.expected.txt");
     let vec1_vk = parse_ed25519_pubkey(&vec1_expected);
     let keys = keys_with_ed25519(&vec1_vk);
@@ -300,7 +303,7 @@ async fn happy_path_vectors_async<V: AsyncVerifier>(v: &V) {
     );
 }
 
-async fn noncanonical_encodings_async<V: AsyncVerifier>(v: &V) {
+async fn noncanonical_encodings_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "noncanonical-encoding.expected.txt");
     let vk = parse_ed25519_pubkey(&expected);
     let keys = keys_with_ed25519(&vk);
@@ -329,33 +332,7 @@ async fn noncanonical_encodings_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn small_order_keys_async<V: AsyncVerifier>(v: &V) {
-    let body = load_string(CATEGORY, "configured-key-small-order.txt");
-    let mut count = 0;
-    for line in data_lines(&body) {
-        let bytes = hex_decode(line);
-        assert_eq!(
-            bytes.len(),
-            32,
-            "small-order pubkey line {line} should decode to 32 octets"
-        );
-        let err = v
-            .resolve_ed25519_verifying_key(&bytes)
-            .await
-            .expect_err("small-order pubkey must be rejected");
-        assert!(
-            matches!(err, InvocationError::KeyResolutionFailure),
-            "small-order pubkey {line} (async): expected KeyResolutionFailure, got {err:?}"
-        );
-        count += 1;
-    }
-    assert_eq!(
-        count, 8,
-        "configured-key-small-order.txt should hold 8 entries, got {count}"
-    );
-}
-
-async fn stable_resign_async<S: AsyncSigner>(s: &S) {
+async fn stable_resign_async<S: ConformanceAsyncSigner>(s: &S) {
     let body = load_string(CATEGORY, "stable-resign.txt");
     let seed = require_hex_field(&body, "seed");
     let expected_sig = require_hex_field(&body, "expected signature");
@@ -391,7 +368,13 @@ async fn stable_resign_async<S: AsyncSigner>(s: &S) {
     );
 }
 
-async fn algorithm_parameters_rejection_async<V: AsyncVerifier, S: AsyncSigner>(v: &V, s: &S) {
+async fn algorithm_parameters_rejection_async<
+    V: ConformanceAsyncVerifier,
+    S: ConformanceAsyncSigner,
+>(
+    v: &V,
+    s: &S,
+) {
     let vec1_expected = load_string(CATEGORY, "rfc8032-vec1-empty-message.expected.txt");
     let vk = parse_ed25519_pubkey(&vec1_expected);
     let keys = keys_with_ed25519(&vk);

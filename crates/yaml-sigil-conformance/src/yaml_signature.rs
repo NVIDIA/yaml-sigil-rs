@@ -22,11 +22,12 @@
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_verification::{
-    AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, PreVerifyOutcome, PublicKeys,
-    Verifier, VerifierOptions, VerifierState,
+    AdvertisedConformanceProfile, ArtifactForm, PreVerifyOutcome, PublicKeys, VerifierOptions,
+    VerifierState,
 };
 
 use crate::fixtures::load_bytes;
+use crate::{ConformanceAsyncVerifier, ConformanceVerifier};
 
 const CATEGORY: &str = "yaml-signature-conformance";
 
@@ -55,7 +56,7 @@ fn placeholder_keys() -> EdVk {
     EdSk::from_bytes(&[1u8; 32]).verifying_key()
 }
 
-fn verify_with<V: Verifier>(v: &V, file: &str, opts: VerifierOptions) -> VerifierState {
+fn verify_with<V: ConformanceVerifier>(v: &V, file: &str, opts: VerifierOptions) -> VerifierState {
     let bytes = load_bytes(CATEGORY, file);
     let vk = placeholder_keys();
     let keys = PublicKeys {
@@ -74,7 +75,7 @@ fn verify_with<V: Verifier>(v: &V, file: &str, opts: VerifierOptions) -> Verifie
 /// Drive the sixteen `yaml-signature-conformance/` fixtures through the supplied
 /// [`Verifier`]; the assertion table depends on the verifier's advertised
 /// [`AdvertisedConformanceProfile`].
-pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
+pub fn run_yaml_signature_suite<V: ConformanceVerifier>(v: &V) {
     assert_universal_metadata_failures(v);
 
     let profile = v.capabilities().conformance_profile;
@@ -86,7 +87,7 @@ pub fn run_yaml_signature_suite<V: Verifier>(v: &V) {
     }
 }
 
-fn assert_universal_metadata_failures<V: Verifier>(v: &V) {
+fn assert_universal_metadata_failures<V: ConformanceVerifier>(v: &V) {
     for file in UNIVERSAL_METADATA_FAILURES {
         let bytes = load_bytes(CATEGORY, file);
         let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false);
@@ -112,7 +113,7 @@ fn assert_universal_metadata_failures<V: Verifier>(v: &V) {
 /// this directory. The pinned upstream fixture documentation's "Strict
 /// outcome" and "SignatureStrict outcome" columns are identical for all
 /// sixteen entries, so a single assertion routine covers both.
-fn assert_strict_column<V: Verifier>(v: &V) {
+fn assert_strict_column<V: ConformanceVerifier>(v: &V) {
     let strict_opts = VerifierOptions {
         reject_unknown_signature_document_fields: true,
         ..VerifierOptions::default()
@@ -139,7 +140,7 @@ fn assert_strict_column<V: Verifier>(v: &V) {
 }
 
 /// Drive the Permissive column of the fixture table.
-fn assert_permissive_column<V: Verifier>(v: &V) {
+fn assert_permissive_column<V: ConformanceVerifier>(v: &V) {
     // Both accepted carriers reach crypto, where the placeholder signature
     // fails to authenticate.
     for file in ["valid-baseline.yaml", "document-end-at-eof.yaml"] {
@@ -161,7 +162,7 @@ fn assert_permissive_column<V: Verifier>(v: &V) {
     );
 }
 
-async fn verify_with_async<V: AsyncVerifier>(
+async fn verify_with_async<V: ConformanceAsyncVerifier>(
     v: &V,
     file: &str,
     opts: VerifierOptions,
@@ -183,7 +184,7 @@ async fn verify_with_async<V: AsyncVerifier>(
 }
 
 /// Async sibling of [`run_yaml_signature_suite`].
-pub async fn run_yaml_signature_suite_async<V: AsyncVerifier>(v: &V) {
+pub async fn run_yaml_signature_suite_async<V: ConformanceAsyncVerifier>(v: &V) {
     assert_universal_metadata_failures_async(v).await;
 
     let profile = v.capabilities().conformance_profile;
@@ -195,7 +196,7 @@ pub async fn run_yaml_signature_suite_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn assert_universal_metadata_failures_async<V: AsyncVerifier>(v: &V) {
+async fn assert_universal_metadata_failures_async<V: ConformanceAsyncVerifier>(v: &V) {
     for file in UNIVERSAL_METADATA_FAILURES {
         let bytes = load_bytes(CATEGORY, file);
         let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false).await;
@@ -215,7 +216,7 @@ async fn assert_universal_metadata_failures_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn assert_strict_column_async<V: AsyncVerifier>(v: &V) {
+async fn assert_strict_column_async<V: ConformanceAsyncVerifier>(v: &V) {
     let strict_opts = VerifierOptions {
         reject_unknown_signature_document_fields: true,
         ..VerifierOptions::default()
@@ -238,7 +239,7 @@ async fn assert_strict_column_async<V: AsyncVerifier>(v: &V) {
     );
 }
 
-async fn assert_permissive_column_async<V: AsyncVerifier>(v: &V) {
+async fn assert_permissive_column_async<V: ConformanceAsyncVerifier>(v: &V) {
     for file in ["valid-baseline.yaml", "document-end-at-eof.yaml"] {
         let st = verify_with_async(v, file, VerifierOptions::default()).await;
         assert_eq!(

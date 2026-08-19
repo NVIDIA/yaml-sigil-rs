@@ -1,14 +1,14 @@
 # Third-Party Notices
 
 NVIDIA-authored `yaml-sigil-verification` material is licensed under the
-Apache License 2.0. The following notice applies only to the RFC 8032-derived
-constants, canonical-encoding rules, and section 7.1 test-vector value included
-in `src/crypto.rs`. That material remains subject to its source terms and is
+Apache License 2.0. The following notices apply only to the identified
+third-party material. That material remains subject to its source terms and is
 not relicensed under Apache-2.0.
 
 Identification of a source does not imply affiliation with or endorsement by
 its authors, publishers, standards organizations, or copyright holders.
-`yaml-sigil-verification` is not an IETF RFC or an IRTF publication.
+`yaml-sigil-verification` is not an IETF RFC, an IRTF publication, or a
+Standards for Efficient Cryptography Group (SECG) publication.
 
 ## RFC 8032 material
 
@@ -53,11 +53,48 @@ the IETF, the IETF Trust, and the RFC Editor are not used to endorse or promote
 `yaml-sigil-verification`. No affiliation, sponsorship, or endorsement is
 claimed or implied.
 
-This crate adapts RFC 8032 sections 5.1, 5.1.2, and 5.1.7 into Rust constants
-and canonical-encoding checks, and it reproduces one section 7.1 test-vector
-signature in a unit test. Section 3(c) of the IETF Trust Legal Provisions,
-version 5.0, addresses reproduction outside the IETF Standards Process.
-Section 5(a) states that no patent license is granted, and sections 7(b)
-through 7(d) provide the intellectual-property-rights caveat. The Rust
-representations and verifier-state mappings are identified
-`yaml-sigil-verification` adaptations.
+This crate adapts RFC 8032 sections 5.1, 5.1.2, and 5.1.7 into Rust constants,
+point decoding, canonical-encoding checks, challenge computation, and
+cofactored verification. It reproduces one section 7.1 test-vector signature
+in a unit test. Section 3(c) of the IETF Trust Legal Provisions, version 5.0,
+addresses reproduction outside the IETF Standards Process. Section 5(a)
+states that no patent license is granted, and sections 7(b) through 7(d)
+provide the intellectual-property-rights caveat. The Rust representations and
+verifier-state mappings are identified `yaml-sigil-verification` adaptations.
+
+## Standards for Efficient Cryptography
+
+The crate's P-256 public-key resolver follows point-encoding behavior from
+*Standards for Efficient Cryptography 1 (SEC 1)*, Version 2.0.
+
+The front page of *Standards for Efficient Cryptography 1 (SEC 1)* carries
+this notice:
+
+> Copyright © 2009 Certicom Corp.
+>
+> License to copy this document is granted provided it is identified as
+> "Standards for Efficient Cryptography 1 (SEC 1)", in all material mentioning
+> or referencing it.
+
+Section 1.5, "Intellectual Property," of *Standards for Efficient Cryptography
+1 (SEC 1)* states:
+
+> The reader's attention is called to the possibility that compliance with
+> this document may require use of an invention covered by patent rights. By
+> publication of this document, no position is taken with respect to the
+> validity of this claim or of any patent rights in connection therewith. The
+> patent holder(s) may have filed with the SECG a statement of willingness to
+> grant a license under these rights on reasonable and nondiscriminatory terms
+> and conditions to applicants desiring to obtain such a license. Additional
+> details may be obtained from the patent holder and from the SECG website,
+> <http://www.secg.org>.
+
+Source:
+
+- *Standards for Efficient Cryptography 1 (SEC 1): Elliptic Curve
+  Cryptography*, Version 2.0, May 21, 2009,
+  <https://www.secg.org/sec1-v2.pdf>.
+
+The SEC 1 material is not relicensed under Apache-2.0.
+`yaml-sigil-verification` is not affiliated with, sponsored by, or endorsed by
+SECG or Certicom Corp.

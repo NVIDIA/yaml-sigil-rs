@@ -3,8 +3,8 @@
 
 //! ECDSA P-256 / SHA-256 suite — `fixtures/alg-ecdsa/`.
 //! Happy path + ACVP vector, high-S / low-S acceptance, invalid component
-//! ranges, non-fixed-width signatures, bad-key rejection via
-//! `Verifier::resolve_p256_verifying_key`, two-nonce instability, and
+//! ranges, non-fixed-width signatures, bad-key rejection via the
+//! implementation resolver, two-nonce instability, and
 //! `algorithm_parameters` rejection on both verify and sign.
 //!
 //! The fixtures exercise encodings and operations from *Standards for
@@ -16,15 +16,16 @@
 
 use p256::ecdsa::{SigningKey as P256Sk, VerifyingKey as P256Vk};
 use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{
-    AsyncSigner, OutputForm, SignInvocationError, SignOutcome, SignRequest, Signer, SigningKey,
-};
+use yaml_sigil_signing::{OutputForm, SignInvocationError, SignOutcome, SignRequest, SigningKey};
 use yaml_sigil_verification::{
-    ArtifactForm, AsyncVerifier, InvocationError, PublicKeys, Verifier, VerifierOptions,
-    VerifierState,
+    ArtifactForm, InvocationError, PublicKeys, VerifierOptions, VerifierState,
+    resolve_p256_verifying_key,
 };
 
 use crate::fixtures::{load_bytes, load_string, require_hex_field};
+use crate::{
+    ConformanceAsyncSigner, ConformanceAsyncVerifier, ConformanceSigner, ConformanceVerifier,
+};
 
 const CATEGORY: &str = "alg-ecdsa";
 
@@ -49,17 +50,17 @@ fn keys_with_p256<'a>(vk: &'a P256Vk) -> PublicKeys<'a> {
     }
 }
 
-pub fn run_ecdsa_suite<V: Verifier, S: Signer>(v: &V, s: &S) {
+pub fn run_ecdsa_suite<V: ConformanceVerifier, S: ConformanceSigner>(v: &V, s: &S) {
     happy_path_and_acvp(v);
     high_low_s(v);
     invalid_component_ranges(v);
     non_fixed_width(v);
-    bad_keys(v);
+    bad_keys();
     two_nonce_instability(v);
     algorithm_parameters_rejection(v, s);
 }
 
-fn happy_path_and_acvp<V: Verifier>(v: &V) {
+fn happy_path_and_acvp<V: ConformanceVerifier>(v: &V) {
     // fixture: verify-happy-path.{binpb,yaml} -> Verified
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
@@ -111,7 +112,7 @@ fn happy_path_and_acvp<V: Verifier>(v: &V) {
     );
 }
 
-fn high_low_s<V: Verifier>(v: &V) {
+fn high_low_s<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -151,7 +152,7 @@ fn high_low_s<V: Verifier>(v: &V) {
     }
 }
 
-fn invalid_component_ranges<V: Verifier>(v: &V) {
+fn invalid_component_ranges<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -184,7 +185,7 @@ fn invalid_component_ranges<V: Verifier>(v: &V) {
     }
 }
 
-fn non_fixed_width<V: Verifier>(v: &V) {
+fn non_fixed_width<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -209,7 +210,7 @@ fn non_fixed_width<V: Verifier>(v: &V) {
     }
 }
 
-fn bad_keys<V: Verifier>(v: &V) {
+fn bad_keys() {
     // fixture: bad-key-identity.txt -> KeyResolutionFailure
     // Both encodings: SEC 1 single-byte 0x00 and the 65-octet all-zero string.
     let id_body = load_string(CATEGORY, "bad-key-identity.txt");
@@ -218,8 +219,7 @@ fn bad_keys<V: Verifier>(v: &V) {
     assert_eq!(single, vec![0x00]);
     assert_eq!(all_zero.len(), 65);
     for bytes in [single.as_slice(), all_zero.as_slice()] {
-        let err = v
-            .resolve_p256_verifying_key(bytes)
+        let err = resolve_p256_verifying_key(bytes)
             .expect_err("identity-point encoding must be rejected");
         assert!(
             matches!(err, InvocationError::KeyResolutionFailure),
@@ -231,9 +231,7 @@ fn bad_keys<V: Verifier>(v: &V) {
     let off_body = load_string(CATEGORY, "bad-key-off-curve.txt");
     let off_bytes = require_hex_field(&off_body, "public_key (hex)");
     assert_eq!(off_bytes.len(), 65);
-    let err = v
-        .resolve_p256_verifying_key(&off_bytes)
-        .expect_err("off-curve key must be rejected");
+    let err = resolve_p256_verifying_key(&off_bytes).expect_err("off-curve key must be rejected");
     assert!(
         matches!(err, InvocationError::KeyResolutionFailure),
         "bad-key-off-curve: expected KeyResolutionFailure, got {err:?}"
@@ -243,8 +241,7 @@ fn bad_keys<V: Verifier>(v: &V) {
     let wrong_body = load_string(CATEGORY, "bad-key-wrong-curve.txt");
     let wrong_bytes = require_hex_field(&wrong_body, "public_key (hex)");
     assert_eq!(wrong_bytes.len(), 65);
-    let err = v
-        .resolve_p256_verifying_key(&wrong_bytes)
+    let err = resolve_p256_verifying_key(&wrong_bytes)
         .expect_err("wrong-curve (secp256k1) key must be rejected by P-256 verifier");
     assert!(
         matches!(err, InvocationError::KeyResolutionFailure),
@@ -252,7 +249,7 @@ fn bad_keys<V: Verifier>(v: &V) {
     );
 }
 
-fn two_nonce_instability<V: Verifier>(v: &V) {
+fn two_nonce_instability<V: ConformanceVerifier>(v: &V) {
     // fixture: two-nonce-instability-k{1,2}.binpb -> both Verified; octets differ
     let body = load_string(CATEGORY, "two-nonce-instability.expected.txt");
     let vk = parse_p256_pubkey(&body);
@@ -299,7 +296,7 @@ fn two_nonce_instability<V: Verifier>(v: &V) {
     );
 }
 
-fn algorithm_parameters_rejection<V: Verifier, S: Signer>(v: &V, s: &S) {
+fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(v: &V, s: &S) {
     // fixture: algorithm-parameters-present.expected.txt -> InvalidAlgorithmParameters on both
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
@@ -340,17 +337,20 @@ fn algorithm_parameters_rejection<V: Verifier, S: Signer>(v: &V, s: &S) {
 }
 
 /// Async sibling of [`run_ecdsa_suite`].
-pub async fn run_ecdsa_suite_async<V: AsyncVerifier, S: AsyncSigner>(v: &V, s: &S) {
+pub async fn run_ecdsa_suite_async<V: ConformanceAsyncVerifier, S: ConformanceAsyncSigner>(
+    v: &V,
+    s: &S,
+) {
     happy_path_and_acvp_async(v).await;
     high_low_s_async(v).await;
     invalid_component_ranges_async(v).await;
     non_fixed_width_async(v).await;
-    bad_keys_async(v).await;
+    bad_keys();
     two_nonce_instability_async(v).await;
     algorithm_parameters_rejection_async(v, s).await;
 }
 
-async fn happy_path_and_acvp_async<V: AsyncVerifier>(v: &V) {
+async fn happy_path_and_acvp_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -399,7 +399,7 @@ async fn happy_path_and_acvp_async<V: AsyncVerifier>(v: &V) {
     );
 }
 
-async fn high_low_s_async<V: AsyncVerifier>(v: &V) {
+async fn high_low_s_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -441,7 +441,7 @@ async fn high_low_s_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn invalid_component_ranges_async<V: AsyncVerifier>(v: &V) {
+async fn invalid_component_ranges_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -472,7 +472,7 @@ async fn invalid_component_ranges_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn non_fixed_width_async<V: AsyncVerifier>(v: &V) {
+async fn non_fixed_width_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
@@ -497,49 +497,7 @@ async fn non_fixed_width_async<V: AsyncVerifier>(v: &V) {
     }
 }
 
-async fn bad_keys_async<V: AsyncVerifier>(v: &V) {
-    let id_body = load_string(CATEGORY, "bad-key-identity.txt");
-    let single = require_hex_field(&id_body, "Q-encoded-as-O-single-byte");
-    let all_zero = require_hex_field(&id_body, "Q-encoded-all-zero-65");
-    assert_eq!(single, vec![0x00]);
-    assert_eq!(all_zero.len(), 65);
-    for bytes in [single.as_slice(), all_zero.as_slice()] {
-        let err = v
-            .resolve_p256_verifying_key(bytes)
-            .await
-            .expect_err("identity-point encoding must be rejected");
-        assert!(
-            matches!(err, InvocationError::KeyResolutionFailure),
-            "bad-key-identity (async): expected KeyResolutionFailure, got {err:?}"
-        );
-    }
-
-    let off_body = load_string(CATEGORY, "bad-key-off-curve.txt");
-    let off_bytes = require_hex_field(&off_body, "public_key (hex)");
-    assert_eq!(off_bytes.len(), 65);
-    let err = v
-        .resolve_p256_verifying_key(&off_bytes)
-        .await
-        .expect_err("off-curve key must be rejected");
-    assert!(
-        matches!(err, InvocationError::KeyResolutionFailure),
-        "bad-key-off-curve (async): expected KeyResolutionFailure, got {err:?}"
-    );
-
-    let wrong_body = load_string(CATEGORY, "bad-key-wrong-curve.txt");
-    let wrong_bytes = require_hex_field(&wrong_body, "public_key (hex)");
-    assert_eq!(wrong_bytes.len(), 65);
-    let err = v
-        .resolve_p256_verifying_key(&wrong_bytes)
-        .await
-        .expect_err("wrong-curve key must be rejected by P-256 verifier");
-    assert!(
-        matches!(err, InvocationError::KeyResolutionFailure),
-        "bad-key-wrong-curve (async): expected KeyResolutionFailure, got {err:?}"
-    );
-}
-
-async fn two_nonce_instability_async<V: AsyncVerifier>(v: &V) {
+async fn two_nonce_instability_async<V: ConformanceAsyncVerifier>(v: &V) {
     let body = load_string(CATEGORY, "two-nonce-instability.expected.txt");
     let vk = parse_p256_pubkey(&body);
     let keys = keys_with_p256(&vk);
@@ -584,7 +542,13 @@ async fn two_nonce_instability_async<V: AsyncVerifier>(v: &V) {
     );
 }
 
-async fn algorithm_parameters_rejection_async<V: AsyncVerifier, S: AsyncSigner>(v: &V, s: &S) {
+async fn algorithm_parameters_rejection_async<
+    V: ConformanceAsyncVerifier,
+    S: ConformanceAsyncSigner,
+>(
+    v: &V,
+    s: &S,
+) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);

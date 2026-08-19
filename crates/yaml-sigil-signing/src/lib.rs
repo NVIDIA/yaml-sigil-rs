@@ -24,13 +24,23 @@ use yaml_sigil_traits::{
     YamlSignatureDocumentUnknownFieldPolicy,
 };
 
-// The `Signer` / `AsyncSigner` trait pair and the sign request/outcome/error
-// DTOs now live in `yaml-sigil-traits`; re-exported here so existing
-// `yaml_sigil_signing::{Signer, SignRequest, ...}` paths keep working.
+// The portable traits and DTOs live in `yaml-sigil-traits`. This implementation
+// binds the generic key-bearing DTOs to its RustCrypto key types while retaining
+// the established `yaml_sigil_signing::{SigningKey, SignRequest}` paths.
 pub use yaml_sigil_traits::signing::{
-    AsyncSigner, OutputForm, SignError, SignInvocationError, SignOutcome, SignRequest, SignSuccess,
-    Signer, SignerCapabilities, SigningKey,
+    AsyncSigner, OutputForm, SignError, SignInvocationError, SignOutcome, SignSuccess, Signer,
+    SignerCapabilities,
 };
+use yaml_sigil_traits::signing::{
+    SignRequest as GenericSignRequest, SigningKey as GenericSigningKey,
+};
+
+/// Signing keys supported by this RustCrypto implementation.
+pub type SigningKey<'a> = GenericSigningKey<'a, ed25519_dalek::SigningKey, p256::ecdsa::SigningKey>;
+
+/// Unified sign request specialized for this RustCrypto implementation.
+pub type SignRequest<'a> =
+    GenericSignRequest<'a, ed25519_dalek::SigningKey, p256::ecdsa::SigningKey>;
 
 /// Return the capability set for this crate build.
 pub fn signer_capabilities() -> SignerCapabilities {
@@ -293,6 +303,9 @@ fn sign_digest(
 pub struct DefaultSigner;
 
 impl Signer for DefaultSigner {
+    type Ed25519SigningKey = ed25519_dalek::SigningKey;
+    type P256SigningKey = p256::ecdsa::SigningKey;
+
     fn capabilities(&self) -> SignerCapabilities {
         signer_capabilities()
     }
@@ -310,6 +323,9 @@ impl Signer for DefaultSigner {
 pub struct DefaultAsyncSigner;
 
 impl AsyncSigner for DefaultAsyncSigner {
+    type Ed25519SigningKey = ed25519_dalek::SigningKey;
+    type P256SigningKey = p256::ecdsa::SigningKey;
+
     fn capabilities(&self) -> SignerCapabilities {
         signer_capabilities()
     }
@@ -340,6 +356,15 @@ mod tests {
             c.yaml_signature_unknown_field_policy,
             yaml_sigil_core::YamlSignatureDocumentUnknownFieldPolicy::RejectedAtParse
         );
+    }
+
+    #[test]
+    fn default_signer_supports_a_trait_object_with_explicit_bindings() {
+        let signer: &dyn Signer<
+            Ed25519SigningKey = ed25519_dalek::SigningKey,
+            P256SigningKey = p256::ecdsa::SigningKey,
+        > = &DefaultSigner;
+        assert_eq!(signer.capabilities(), signer_capabilities());
     }
 
     #[test]

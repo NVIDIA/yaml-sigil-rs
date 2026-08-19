@@ -45,6 +45,9 @@ Primary entry points:
 - `crates/yaml-sigil-conformance/tests/yaml_metadata_conformance.rs`
 
 The conformance tests exercise this workspace's implementation crates.
+Their verifier and signer bounds are specialized to this implementation's
+RustCrypto key bindings. Key-resolution cases call the implementation-owned
+free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
@@ -303,6 +306,16 @@ standardizes only the 16,384-octet markerless carrier limit.
 - Ed25519 verification rejects small-order public keys at the point of use,
   including typed keys supplied without the byte-oriented key-resolution
   helper.
+- Ed25519 verification also rejects noncanonical compressed public-key
+  encodings during byte resolution and when supplied as already constructed
+  typed keys.
+- Ed25519 signature validation requires `R` to decode from its exact canonical
+  compressed point form and `S` to be a canonical scalar. Verification uses
+  the slot's cofactored equation and accepts canonical `R` points outside the
+  prime-order subgroup when that equation holds.
+- The independently packaged `yaml-sigil-verification` crate retains its
+  applicable RFC 8032 and *Standards for Efficient Cryptography 1 (SEC 1)*
+  source terms in its crate-local `THIRD_PARTY_NOTICES.md`.
 - ECDSA verification classifies raw signatures with `r` or `s` outside
   `(0, n)` as `MalformedAttemptedSigned`. Structurally valid signatures that
   fail the signature equation remain `SignedButFailedVerification`.
