@@ -41,19 +41,27 @@ The workflow remains a successful no-op while the GitHub App configuration is
 absent. It also waits without advancing the train until the shared version on
 `main` is available and non-yanked for all four crates on crates.io.
 
-### Temporary manual release proposals
+### Manual release-proposal fallback
 
 > [!IMPORTANT]
-> Use this procedure only while the GitHub App configuration is absent. Remove
-> this subsection after an App-authored release proposal passes its activation
-> checks.
+> This fallback changes proposal authorship only. It does not authorize local
+> publication, a crates.io token, a protected-environment bypass, or binary
+> artifacts. Official publication still uses the protected Trusted Publishing
+> workflow.
 
-Until the App is available, a repository writer may prepare the same release
-transaction on a human-authored branch. Use release-plz `0.3.160`. Create a
-same-repository branch named `release-plz-manual-<target>` from the exact
-current `main`; do not reuse the workflow-owned `release-plz-next` branch.
-Confirm that the shared version currently in `Cargo.toml` is available and
-non-yanked for all four crates on crates.io before advancing it.
+Use this procedure when the App is unavailable or cannot safely update its
+owned proposal. A repository writer may prepare the same release transaction
+on a human-authored branch. Use release-plz `0.3.160`. Create a same-repository
+branch named `release-plz-manual-<target>` from the exact current `main`; do
+not reuse the workflow-owned `release-plz-next` branch. Confirm that the shared
+version currently in `Cargo.toml` is available and non-yanked for all four
+crates on crates.io before advancing it.
+
+Before creating the manual branch, inspect any existing `release-plz-next`
+proposal. Do not append a human commit to it or replace its App-owned head.
+Finish or close that proposal and verify current `main` and crates.io state, or
+leave it intact while using the distinctly named manual branch. Do not run the
+two proposal paths concurrently.
 
 For the next substantive RC proposal, run:
 
@@ -92,7 +100,7 @@ version. Leave `bump` as `auto` unless the reviewed change requires an explicit
 
 For stable promotion, first apply every provenance check in
 "Promote an RC to stable" and confirm all four published RC tags resolve to
-the exact current `main` commit. Then create the temporary branch and run:
+the exact current `main` commit. Then create the manual branch and run:
 
 ```shell
 release_date="$(date -u +%F)"
@@ -117,12 +125,13 @@ git status --short
 
 The complete diff must contain only the intended root `Cargo.toml` and four
 crate changelogs. It must include every version and internal dependency change
-from `cargo xtask sync-workspace-versions`. Do not commit a generated
-`Cargo.lock` or package archive. Commit the complete transaction with both a
-cryptographic signature and DCO sign-off, then confirm that the exact commit
-leaves the worktree clean. Push the branch and open its pull request against
-`main`. The pull request association is required for a useful release-plz dry
-run because `release_always = false` authorizes only commits from a
+from `cargo xtask sync-workspace-versions`. The release-package helper is the
+Cargo metadata, ordered-package, and library-only gate. Do not commit a
+generated `Cargo.lock` or package archive. Commit the complete transaction with
+an SSH signature and DCO sign-off, then confirm that the exact commit leaves
+the worktree clean. Push the branch and open its pull request against `main`.
+The pull request association is required for a useful release-plz dry run
+because `release_always = false` authorizes only commits from a
 `release-plz-*` branch. After the pull request exists, run:
 
 ```shell
@@ -145,6 +154,12 @@ with lease, and repeat the clean-commit and dry-run checks. Merging that
 official publication workflow, whose `validate` job confirms all four crates
 again before publishing them in dependency order. Do not run a local
 non-dry-run release command.
+
+After the manual proposal is integrated or closed, delete only its manual
+branch, confirm the exact current `main` and crates.io state, and dispatch a
+fresh `Release proposal` run. Let the workflow recreate or update its own
+branch from that state. Do not copy the human-authored commit onto
+`release-plz-next`.
 
 ## RC progression and synchronized versions
 
