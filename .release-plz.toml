@@ -13,6 +13,7 @@ publish_timeout = "5m"
 
 [[package]]
 name = "yaml-sigil-core"
+version_group = "yaml-sigil-rs"
 release = true
 publish = true
 publish_all_features = true
@@ -24,6 +25,7 @@ git_release_type = "auto"
 
 [[package]]
 name = "yaml-sigil-transcription"
+version_group = "yaml-sigil-rs"
 release = true
 publish = true
 changelog_update = true
@@ -34,6 +36,7 @@ git_release_type = "auto"
 
 [[package]]
 name = "yaml-sigil-signing"
+version_group = "yaml-sigil-rs"
 release = true
 publish = true
 publish_all_features = true
@@ -45,6 +48,7 @@ git_release_type = "auto"
 
 [[package]]
 name = "yaml-sigil-verification"
+version_group = "yaml-sigil-rs"
 release = true
 publish = true
 publish_all_features = true

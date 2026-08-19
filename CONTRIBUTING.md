@@ -25,6 +25,40 @@ documentation that you cannot defend without the agent open.
 - **Do not** use agents as a substitute for reading the relevant code, specs,
   and maintainer guidance.
 
+## Express release-version intent
+
+Use an accurate Conventional Commit type and breaking-change marker when the
+change itself establishes its release impact. Do not edit workspace or crate
+versions on an ordinary feature or fix branch. The release-proposal workflow
+calculates and commits versions on its dedicated `release-plz-*` branch.
+
+When the required `major`, `minor`, or `patch` advance is not discoverable from
+the commits, state the intended impact in the contribution pull request. A
+repository writer can dispatch the `Release proposal` workflow with
+`next-candidate` and the matching bump override. The workflow records an
+explicit override in the release pull request so later updates preserve it.
+Dispatch `auto` to clear that override and return to automatic calculation.
+
+While the release-proposal GitHub App is unavailable, repository writers use
+the temporary manual release-proposal procedure in `RELEASING.md`. Contributors
+still express version intent here and do not edit versions on their change
+branches.
+
+All four published crates share `[workspace.package].version`. Never change a
+member version independently. A release-version change is complete only after
+running both commands and committing every resulting tracked change in the
+same release pull request:
+
+```shell
+cargo xtask sync-workspace-versions
+cargo xtask sync-workspace-versions --check
+```
+
+Official RC and stable publication rejects an unsynchronized or dirty source
+tree. Pull-request snapshots are different. Their `0.pr` versions are applied
+only in an ephemeral checkout and may be published from that intentionally
+dirty tree without mutating the contributor's branch.
+
 #### Signing Off Your Work
 
 * We require that all contributors "sign-off" on their commits. This certifies that the contribution is your original work, or you have rights to submit it under the same license, or a compatible license.

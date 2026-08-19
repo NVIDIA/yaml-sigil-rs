@@ -8,7 +8,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::{package_content, require_success, require_tool, run as run_command};
+use super::{package_content, require_success, require_tool, run as run_command, versions};
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
 
@@ -134,6 +134,7 @@ pub(crate) fn run(root: &Path) -> Result<()> {
     for step in BEFORE_PACKAGE_CONTENT {
         require_success(run_command(step.command(root))?, step.label)?;
     }
+    versions::sync_workspace_dependency_versions(root, true)?;
     package_content::run(root)?;
     for step in AFTER_PACKAGE_CONTENT {
         require_success(run_command(step.command(root))?, step.label)?;

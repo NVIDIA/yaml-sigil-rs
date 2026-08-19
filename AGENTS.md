@@ -217,6 +217,7 @@ buf lint crates/yaml-sigil-core
 buf format crates/yaml-sigil-core --diff --exit-code
 cargo fmt --all --check
 cargo fmt --manifest-path xtask/Cargo.toml --all --check
+cargo xtask release-version check
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-core
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-transcription
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signing
@@ -294,11 +295,13 @@ shellcheck .github/scripts/check-pull-request-commits.sh
 Hosted CI runs its pinned ShellCheck Action for these provider-specific scripts.
 Keep this validation outside `cargo xtask ci`.
 
-Hosted CI additionally repeats `cargo test --workspace --all-features` on
-GitHub's moving `macos-latest` and `windows-latest` runner labels. That minimal
-platform matrix tests the root workspace; it does not repeat the complete
-`cargo xtask ci` sequence or imply that the local command launches other
-operating systems.
+Hosted CI runs the provider-neutral Rust and Cargo portion of this sequence on
+GitHub's moving `ubuntu-latest`, `macos-latest`, and `windows-latest` runner
+labels. Every matrix leg checks formatting, synchronized release versions,
+package contents, Clippy, tests, unused dependencies, and both dependency
+audits against that platform's resolved dependency graph. Markdown, Protobuf,
+and provider workflow validation remain single-platform hosted checks. The
+local command does not launch other operating systems.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

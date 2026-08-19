@@ -62,7 +62,13 @@ enum Task {
     /// Refresh local proto/schema/conformance artifacts from yaml-sigil-spec.
     UpdateSpec(UpdateSpecArgs),
     /// Align `[workspace.dependencies]` versions with `[workspace.package].version`.
-    SyncWorkspaceVersions,
+    SyncWorkspaceVersions {
+        /// Validate alignment without changing the manifest.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Manage provider-neutral release version transactions.
+    ReleaseVersion(versions::ReleaseVersionArgs),
 }
 
 #[derive(Args)]
@@ -93,10 +99,11 @@ fn main() -> Result<()> {
             spec_update::update_spec(&root, spec_ref)?;
             Ok(())
         }
-        Task::SyncWorkspaceVersions => {
-            versions::sync_workspace_dependency_versions(&root)?;
+        Task::SyncWorkspaceVersions { check } => {
+            versions::sync_workspace_dependency_versions(&root, check)?;
             Ok(())
         }
+        Task::ReleaseVersion(args) => versions::release_version(&root, args),
     }
 }
 

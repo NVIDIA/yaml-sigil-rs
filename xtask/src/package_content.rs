@@ -103,7 +103,7 @@ fn check_package(root: &Path, package: PackageSpec) -> Result<usize, String> {
             package.name
         )
     })?;
-    let mut actual = parse_inventory(&actual_text, "cargo package --list output")
+    let mut actual = parse_cargo_list(&actual_text, "cargo package --list output")
         .map_err(|error| format!("{}: {error}", package.name))?;
     actual.insert(SYNTHETIC_LOCKFILE.to_owned());
 
@@ -181,6 +181,15 @@ fn parse_inventory(text: &str, label: &str) -> io::Result<BTreeSet<String>> {
         previous = Some(path);
     }
     Ok(paths)
+}
+
+fn parse_cargo_list(text: &str, label: &str) -> io::Result<BTreeSet<String>> {
+    let normalized = normalize_platform_separators(text, std::path::MAIN_SEPARATOR);
+    parse_inventory(&normalized, label)
+}
+
+fn normalize_platform_separators(text: &str, separator: char) -> String {
+    text.replace(separator, "/")
 }
 
 fn inventory_difference(
@@ -273,6 +282,18 @@ mod tests {
                 .to_string();
             assert!(error.contains(message), "unexpected error: {error}");
         }
+    }
+
+    #[test]
+    fn cargo_output_normalizes_only_the_platform_separator() {
+        assert_eq!(
+            normalize_platform_separators("src\\lib.rs\n", '\\'),
+            "src/lib.rs\n"
+        );
+        assert_eq!(
+            normalize_platform_separators("src\\lib.rs\n", '/'),
+            "src\\lib.rs\n"
+        );
     }
 
     #[test]

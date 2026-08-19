@@ -8,6 +8,7 @@
 
 set -euo pipefail
 
+# Require a dedicated Cargo home so validation cannot mutate the runner default.
 if [[ "$#" -ne 1 ]]; then
   echo "usage: $0 CARGO_HOME" >&2
   exit 2

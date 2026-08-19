@@ -14,3 +14,4 @@ license = "Apache-2.0"
 anyhow = "1.0"
 buf-tools = "=1.72.0"
 clap = { version = "4.5", features = ["derive"] }
+semver = "1.0"
