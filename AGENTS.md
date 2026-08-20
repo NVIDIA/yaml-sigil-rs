@@ -308,12 +308,13 @@ Hosted CI runs its pinned ShellCheck Action for these provider-specific scripts.
 Keep this validation outside `cargo xtask ci`.
 
 Hosted CI runs the provider-neutral Rust and Cargo portion of this sequence on
-GitHub's moving `ubuntu-latest`, `macos-latest`, and `windows-latest` runner
-labels. Every matrix leg checks formatting, synchronized release versions,
-package contents, Clippy, tests, unused dependencies, and both dependency
-audits against that platform's resolved dependency graph. Markdown, Protobuf,
-and provider workflow validation remain single-platform hosted checks. The
-local command does not launch other operating systems.
+NVIDIA's `linux-amd64-cpu8` runner and GitHub's moving `macos-latest` and
+`windows-latest` labels. Every matrix leg checks formatting, synchronized
+release versions, package contents, Clippy, tests, unused dependencies, and
+both dependency audits against that platform's resolved dependency graph.
+Linux commit-policy, Markdown, Protobuf, provider-workflow, and aggregation
+jobs run on `linux-amd64-cpu4`. The local command does not launch other
+operating systems.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a
