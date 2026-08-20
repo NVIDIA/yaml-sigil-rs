@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-signing-v0.4.0-rc.1...yaml-sigil-signing-v0.4.0-rc.2) - 2026-08-20
+
+### Other
+
+- improve crate discovery and reader guidance
+
 ## [0.4.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/releases/tag/yaml-sigil-signing-v0.4.0-rc.1) - 2026-08-18
 
 ### Fixed
