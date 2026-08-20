@@ -6,7 +6,7 @@ have implementation context. It is not a user-facing support matrix.
 
 ## Current Implementation
 
-`yaml-sigil-core` uses `noyalib` `0.0.13` for
+`yaml-sigil-core` uses `noyalib` `0.0.26` for
 `YamlSigilSignature.v1alpha1` YAML signature documents. The root `Cargo.toml`
 declares the workspace dependency, and `crates/yaml-sigil-core` inherits it with
 `noyalib = { workspace = true }`.
