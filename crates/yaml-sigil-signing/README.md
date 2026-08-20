@@ -15,8 +15,13 @@ each signing request.
 - `Signer`, `AsyncSigner`, outcome types, and capability types are re-exported
   from
   [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits).
-- `SigningKey` and `SignRequest` are implementation aliases that bind the
-  portable generic DTOs to `ed25519-dalek` and `p256` signing-key types.
+- `SigningKey` accepts signing keys from
+  [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) and
+  [`p256`](https://crates.io/crates/p256). `SignRequest` uses those same key
+  types with the request shape defined by `yaml-sigil-traits`.
+
+The shared traits allow implementations to choose different key types. This
+crate's free functions and default signers use the RustCrypto types above.
 
 `SigningKey` debug output is redacted by design. Do not log private keys, seed
 material, tokens, or raw signatures on trusted fact surfaces.

@@ -20,13 +20,16 @@ verifier states.
 - `Verifier`, `AsyncVerifier`, result types, and capability types are
   re-exported from
   [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits).
-- `PublicKeys` binds the portable generic DTO to `ed25519-dalek` and `p256`
-  verifying-key types. The byte-oriented `resolve_ed25519_verifying_key` and
-  `resolve_p256_verifying_key` helpers are owned by this implementation.
+- `PublicKeys` accepts verifying keys from
+  [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) and
+  [`p256`](https://crates.io/crates/p256).
+- `resolve_ed25519_verifying_key` and `resolve_p256_verifying_key` turn raw
+  public-key bytes into those key types.
 
 `PublicKeys` contains caller-supplied verification keys indexed by algorithm.
 The artifact's unsigned `keyid` remains a deployment-specific lookup hint.
-Ed25519 key admissibility is checked both when resolving raw key bytes and
+The shared traits leave key parsing to each implementation. This crate applies
+its Ed25519 key-admissibility checks both when it resolves raw key bytes and
 when a caller supplies an already constructed typed key.
 
 Bind each artifact source, route, or storage class to one `ArtifactForm` before
