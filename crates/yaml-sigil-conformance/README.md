@@ -4,6 +4,24 @@
 YamlSigil conformance fixtures through the Rust implementation's public trait
 surfaces and byte-level helpers.
 
+## Implementation key bindings
+
+The shared traits let each implementation choose its signing and verification
+key types. This harness tests the RustCrypto implementation in this workspace,
+so its fixture runners use key types from
+[`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) and
+[`p256`](https://crates.io/crates/p256). These are the same types accepted by
+[`yaml-sigil-signing`](https://crates.io/crates/yaml-sigil-signing) and
+[`yaml-sigil-verification`](https://crates.io/crates/yaml-sigil-verification).
+The internal `ConformanceSigner`, `ConformanceAsyncSigner`,
+`ConformanceVerifier`, and `ConformanceAsyncVerifier` adapter traits express
+those bindings for the synchronous and asynchronous runners.
+
+Key-resolution fixtures call the public resolver functions from
+`yaml-sigil-verification`. Parsing raw key bytes belongs to the implementation,
+not the portable contract in
+[`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits).
+
 ## Conformance fixtures
 
 The artifacts under `fixtures/` are curated imports from the
