@@ -210,5 +210,12 @@ jobs:
           cargo xtask release-version check
           test -z "$(git status --porcelain --untracked-files=no)"
           cargo metadata --no-deps --format-version 1 >/dev/null
+          # Resolve unpublished workspace crates only inside the dry-run
+          # Cargo home.
+          validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-proposal-cargo-home"
+          bash .github/scripts/prepare-unpublished-workspace-dependencies.sh \
+            "${validation_cargo_home}"
           # The read-only job token permits forge checks; dry-run cannot publish.
-          release-plz release --dry-run --forge github --config .release-plz.toml
+          CARGO_HOME="${validation_cargo_home}" \
+            release-plz release --dry-run --forge github --config .release-plz.toml
+          test -z "$(git status --porcelain --untracked-files=no)"

@@ -132,12 +132,19 @@ an SSH signature and DCO sign-off, then confirm that the exact commit leaves
 the worktree clean. Push the branch and open its pull request against `main`.
 The pull request association is required for a useful release-plz dry run
 because `release_always = false` authorizes only commits from a
-`release-plz-*` branch. After the pull request exists, run:
+`release-plz-*` branch. The validation-only Cargo home patches the unpublished
+implementation crates to their reviewed workspace paths; never use it for
+publication. After the pull request exists, run:
 
 ```shell
-# Supply the existing gh credential only for read-only forge discovery.
-GIT_TOKEN="$(gh auth token)" \
-  release-plz release --dry-run --config .release-plz.toml
+validation_cargo_home="$(mktemp -d)"
+bash .github/scripts/prepare-unpublished-workspace-dependencies.sh \
+  "${validation_cargo_home}"
+# Use the existing gh credential only for read-only forge discovery.
+CARGO_HOME="${validation_cargo_home}" \
+  CARGO_REGISTRIES_CRATES_IO_INDEX=https://github.com/rust-lang/crates.io-index \
+  GIT_TOKEN="$(gh auth token)" \
+  release-plz release --dry-run --forge github --config .release-plz.toml
 git status --short
 ```
 
