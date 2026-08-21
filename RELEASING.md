@@ -109,6 +109,10 @@ cargo xtask sync-workspace-versions
 cargo xtask sync-workspace-versions --check
 ```
 
+Stable promotion also removes `rc.N` from the exact split-crate requirement,
+changing `yaml-sigil-traits = "=X.Y.Z-rc.N"` to `"=X.Y.Z"`. It preserves an
+already-stable exact pin and rejects any other prerelease form.
+
 For either path, review the generated transaction and run:
 
 ```shell
@@ -125,11 +129,12 @@ git status --short
 
 The complete diff must contain only the intended root `Cargo.toml` and four
 crate changelogs. It must include every version and internal dependency change
-from `cargo xtask sync-workspace-versions`. The release-package helper is the
-Cargo metadata, ordered-package, and library-only gate. Do not commit a
-generated `Cargo.lock` or package archive. Commit the complete transaction with
-an SSH signature and DCO sign-off, then confirm that the exact commit leaves
-the worktree clean. Push the branch and open its pull request against `main`.
+from `cargo xtask sync-workspace-versions` and, for stable promotion, the exact
+stable `yaml-sigil-traits` requirement. The release-package helper is the Cargo
+metadata, ordered-package, and library-only gate. Do not commit a generated
+`Cargo.lock` or package archive. Commit the complete transaction with an SSH
+signature and DCO sign-off, then confirm that the exact commit leaves the
+worktree clean. Push the branch and open its pull request against `main`.
 The pull request association is required for a useful release-plz dry run
 because `release_always = false` authorizes only commits from a
 `release-plz-*` branch. The validation-only Cargo home patches the unpublished
@@ -207,8 +212,10 @@ four RC crates from `main`. Every `yaml-sigil-<crate>-vMAJOR.MINOR.PATCH-rc.N`
 tag must resolve to the exact current `main` commit. Then dispatch
 `Release proposal` with mode `promote-stable`. The workflow creates a pull
 request that removes the prerelease component, synchronizes internal dependency
-requirements, and copies each reviewed RC changelog section to the stable
-version.
+requirements, promotes the exact `yaml-sigil-traits` RC requirement to its
+stable version, and copies each reviewed RC changelog section to the stable
+version. The release-version check rejects a stable implementation workspace
+that retains a prerelease traits requirement.
 
 Review and merge that exact proposal before publishing the stable version. Do
 not edit a contributor branch to remove `rc.N`, and do not promote source that

@@ -17,6 +17,8 @@ const WORKSPACE_INTERNAL_DEPS: &[&str] = &[
     "yaml-sigil-signing",
 ];
 
+const EXTERNAL_TRAITS_DEP: &str = "yaml-sigil-traits";
+
 const CHANGELOGS: &[(&str, &str)] = &[
     ("yaml-sigil-core", "crates/yaml-sigil-core/CHANGELOG.md"),
     (
@@ -93,6 +95,7 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
         ReleaseVersionCommand::Check => {
             let version = read_workspace_version(root)?;
             sync_workspace_dependency_versions(root, true)?;
+            validate_stable_traits_dependency(root, &version)?;
             eprintln!("release-version: workspace version is {version}");
         }
         ReleaseVersionCommand::Snapshot { pr, sha } => {
@@ -121,8 +124,10 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
             validate_date(&date)?;
             let current = read_workspace_version(root)?;
             let stable = stable_version(&current)?;
+            validate_promotable_traits_dependency(root)?;
             promote_changelogs(root, &current, &stable, &date)?;
             write_workspace_version(root, &stable)?;
+            promote_traits_dependency_to_stable(root)?;
             sync_workspace_dependency_versions(root, false)?;
             println!("{stable}");
         }
@@ -331,6 +336,118 @@ fn with_rc(version: &Version, rc: u64) -> Result<Version> {
 fn stable_version(version: &Version) -> Result<Version> {
     require_rc(version)?;
     Ok(Version::new(version.major, version.minor, version.patch))
+}
+
+/// Require stable workspaces to depend on an exact stable traits release.
+fn validate_stable_traits_dependency(root: &Path, workspace_version: &Version) -> Result<()> {
+    if !workspace_version.pre.is_empty() {
+        return Ok(());
+    }
+
+    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+        .context("read workspace Cargo.toml for traits version validation")?;
+    let (_, requirement) = workspace_traits_dependency(&manifest)?;
+    let traits_version = exact_traits_version(&requirement)?;
+    if !traits_version.pre.is_empty() {
+        bail!(
+            "stable workspace {workspace_version} cannot retain prerelease {EXTERNAL_TRAITS_DEP} requirement {requirement}"
+        );
+    }
+    Ok(())
+}
+
+/// Validate the exact split-crate pin before stable promotion mutates files.
+fn validate_promotable_traits_dependency(root: &Path) -> Result<()> {
+    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+        .context("read workspace Cargo.toml for traits stable promotion")?;
+    let (_, requirement) = workspace_traits_dependency(&manifest)?;
+    let traits_version = exact_traits_version(&requirement)?;
+    if !traits_version.pre.is_empty() {
+        require_rc(&traits_version).with_context(|| {
+            format!("{EXTERNAL_TRAITS_DEP} requirement {requirement} is not an rc.N release")
+        })?;
+    }
+    Ok(())
+}
+
+/// Strip an `rc.N` suffix from the exact split-crate requirement.
+fn promote_traits_dependency_to_stable(root: &Path) -> Result<bool> {
+    let path = root.join("Cargo.toml");
+    let manifest = fs::read_to_string(&path)
+        .context("read workspace Cargo.toml for traits stable promotion")?;
+    let (line_index, requirement) = workspace_traits_dependency(&manifest)?;
+    let traits_version = exact_traits_version(&requirement)?;
+    if traits_version.pre.is_empty() {
+        return Ok(false);
+    }
+    require_rc(&traits_version).with_context(|| {
+        format!("{EXTERNAL_TRAITS_DEP} requirement {requirement} is not an rc.N release")
+    })?;
+
+    let stable = Version::new(
+        traits_version.major,
+        traits_version.minor,
+        traits_version.patch,
+    );
+    let mut lines: Vec<String> = manifest.lines().map(str::to_owned).collect();
+    lines[line_index] = set_dependency_version_on_line(&lines[line_index], &format!("={stable}"));
+    let mut updated = lines.join("\n");
+    updated.push('\n');
+    fs::write(path, updated).context("write stable traits requirement to workspace Cargo.toml")?;
+    eprintln!("release-version: promoted {EXTERNAL_TRAITS_DEP} requirement to ={stable}");
+    Ok(true)
+}
+
+/// Locate the one canonical inline-table traits entry in workspace dependencies.
+fn workspace_traits_dependency(cargo_toml: &str) -> Result<(usize, String)> {
+    let prefix = format!("{EXTERNAL_TRAITS_DEP} = ");
+    let mut in_section = false;
+    let mut found = None;
+    for (line_index, line) in cargo_toml.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed == "[workspace.dependencies]" {
+            in_section = true;
+            continue;
+        }
+        if in_section && trimmed.starts_with('[') {
+            in_section = false;
+        }
+        if !in_section || !trimmed.starts_with(&prefix) {
+            continue;
+        }
+        if found.is_some() {
+            bail!("multiple [workspace.dependencies] entries for {EXTERNAL_TRAITS_DEP}");
+        }
+
+        let inline = trimmed
+            .strip_prefix(&prefix)
+            .and_then(|value| value.strip_prefix('{'))
+            .ok_or_else(|| {
+                anyhow!("[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must use an inline table")
+            })?;
+        let marker = "version = ";
+        let version_start = inline.find(marker).ok_or_else(|| {
+            anyhow!("missing version in [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}")
+        })?;
+        let requirement = parse_toml_string_value(&inline[version_start + marker.len()..])
+            .ok_or_else(|| {
+                anyhow!(
+                    "invalid version in [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}"
+                )
+            })?;
+        found = Some((line_index, requirement));
+    }
+
+    found.ok_or_else(|| anyhow!("missing [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}"))
+}
+
+/// Parse only a single exact Cargo requirement such as `=0.4.0-rc.1`.
+fn exact_traits_version(requirement: &str) -> Result<Version> {
+    let version = requirement
+        .strip_prefix('=')
+        .ok_or_else(|| anyhow!("{EXTERNAL_TRAITS_DEP} requirement {requirement} must be exact"))?;
+    Version::parse(version)
+        .with_context(|| format!("invalid exact {EXTERNAL_TRAITS_DEP} requirement {requirement}"))
 }
 
 fn validate_date(date: &str) -> Result<()> {
@@ -556,6 +673,56 @@ mod tests {
         assert!(sync_workspace_dependency_versions(&root, true).is_err());
         assert_eq!(fs::read_to_string(root.join("Cargo.toml")).unwrap(), before);
         cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn stable_promotion_rewrites_exact_traits_rc() {
+        let root = temp_test_root("promote-traits-rc");
+        write_test_workspace_manifest(&root, "0.5.0-rc.1", "0.5.0-rc.1", "=0.4.0-rc.1");
+
+        assert!(promote_traits_dependency_to_stable(&root).unwrap());
+
+        let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+        assert_eq!(
+            workspace_dependency_version(&cargo_toml, EXTERNAL_TRAITS_DEP).as_deref(),
+            Some("=0.4.0")
+        );
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn stable_promotion_preserves_exact_stable_traits() {
+        let root = temp_test_root("preserve-stable-traits");
+        write_test_workspace_manifest(&root, "0.5.0-rc.1", "0.5.0-rc.1", "=0.4.0");
+        let before = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+
+        assert!(!promote_traits_dependency_to_stable(&root).unwrap());
+        assert_eq!(fs::read_to_string(root.join("Cargo.toml")).unwrap(), before);
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn stable_workspace_rejects_prerelease_traits() {
+        let root = temp_test_root("reject-prerelease-traits");
+        write_test_workspace_manifest(&root, "0.5.0", "0.5.0", "=0.4.0-rc.1");
+
+        assert!(
+            validate_stable_traits_dependency(&root, &Version::parse("0.5.0").unwrap()).is_err()
+        );
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn stable_promotion_rejects_nonexact_or_non_rc_traits() {
+        for (case, requirement) in [("nonexact", "0.4.0-rc.1"), ("non-rc", "=0.4.0-beta.1")] {
+            let root = temp_test_root(case);
+            write_test_workspace_manifest(&root, "0.5.0-rc.1", "0.5.0-rc.1", requirement);
+            let before = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+
+            assert!(validate_promotable_traits_dependency(&root).is_err());
+            assert_eq!(fs::read_to_string(root.join("Cargo.toml")).unwrap(), before);
+            cleanup_temp_test_root(root);
+        }
     }
 
     #[test]
