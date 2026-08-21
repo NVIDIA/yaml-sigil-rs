@@ -96,13 +96,13 @@ and headless Firefox, and creates temporary optimized `web` builds with and
 without schema validation. It rejects any `.wasm` file retained in the
 workspace.
 
-On 2026-08-18, Rust 1.95.0 and `wasm-pack` 0.15.0 produced these optimized raw
+On 2026-08-21, Rust 1.95.0 and `wasm-pack` 0.15.0 produced these optimized raw
 WebAssembly sizes before temporary cleanup:
 
 | Feature set | Raw bytes |
 |------------|----------:|
-| Default features. | 507,224. |
-| `json-schema-validate`. | 3,366,788. |
+| Default features. | 556,217. |
+| `json-schema-validate`. | 3,427,629. |
 
 These measurements describe one toolchain run. They are not a compatibility,
 performance, or future size guarantee.
