@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0-rc.3](https://github.com/NVIDIA/yaml-sigil-rs/releases/tag/yaml-sigil-core-v0.4.0-rc.3) - 2026-08-21
+
+### Other
+
+- No crate-specific changes.
+
 ## [0.4.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.4.0-rc.1...yaml-sigil-core-v0.4.0-rc.2) - 2026-08-20
 
 ### Other
