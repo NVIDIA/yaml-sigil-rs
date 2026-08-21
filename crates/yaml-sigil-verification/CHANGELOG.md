@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-verification-v0.4.0-rc.2...yaml-sigil-verification-v0.5.0-rc.1) - 2026-08-21
+
+### Fixed
+
+- *(transcoding)* parse markerless carriers
+- *(yaml)* bound signature document parsing
+
+### Other
+
+- *(api)* explain implementation key bindings
+- *(api)* explain key binding coverage
+- *(crypto)* cover resolver input bounds
+- *(api)* [**breaking**] bind and validate configured keys
+
 ## [0.4.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-verification-v0.4.0-rc.1...yaml-sigil-verification-v0.4.0-rc.2) - 2026-08-20
 
 ### Other
