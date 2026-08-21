@@ -97,9 +97,7 @@ pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>,
     let (payload, carrier) = yaml_decompose(yaml_artifact)?;
     validate_payload_stream(&payload).map_err(|_| TranscodeError::PayloadInvariant)?;
 
-    let mut doc_bytes = b"---\n".to_vec();
-    doc_bytes.extend_from_slice(&carrier);
-    let doc = parse_signature_document(&doc_bytes)?;
+    let doc = parse_signature_document(&carrier)?;
     doc.validate_schema()
         .map_err(|_| TranscodeError::SchemaMismatch)?;
 

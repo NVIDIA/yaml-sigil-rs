@@ -7,10 +7,14 @@ use ed25519_dalek::SigningKey as EdSigningKey;
 use p256::ecdsa::SigningKey as P256SigningKey;
 use rand_core::OsRng;
 use yaml_sigil_core::{
-    AlgorithmId, ProtobufWireDecodeAdvertisement, YamlSignatureDocumentDuplicateKeyPolicy,
-    YamlSignatureDocumentUnknownFieldPolicy,
+    AlgorithmId, CoreError, DecompositionOutcome, ProtobufWireDecodeAdvertisement,
+    YamlSignatureDocumentDuplicateKeyPolicy, YamlSignatureDocumentUnknownFieldPolicy,
+    decode_signed_yaml_artifact, decompose_artifact, view_signed_yaml_artifact,
 };
-use yaml_sigil_signing::{SignProtoParams, SignYamlParams, SigningKey, sign_proto, sign_yaml};
+use yaml_sigil_signing::{
+    SignProtoParams, SignYamlParams, SigningKey, TranscodeError, sign_proto, sign_yaml,
+    signed_yaml_stream_to_proto_wire,
+};
 use yaml_sigil_verification::{
     AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, DefaultAsyncVerifier,
     InvocationError, PreVerifyOutcome, PreVerifyResponse, PublicKeys, UnverifiedSignature,
@@ -99,6 +103,25 @@ fn yaml_with_too_many_signature_fields() -> Vec<u8> {
         artifact.extend_from_slice(format!("extra_{index}: value\n").as_bytes());
     }
     artifact
+}
+
+fn yaml_with_signature_carrier_length(artifact: &[u8], target_len: usize) -> Vec<u8> {
+    let DecompositionOutcome::Signed(ranges) = decompose_artifact(artifact) else {
+        panic!("expected signed YAML artifact");
+    };
+    let carrier_len = ranges.signature_carrier.len();
+    assert!(carrier_len + 2 <= target_len);
+
+    let mut padded = artifact.to_vec();
+    padded.push(b'#');
+    padded.extend(std::iter::repeat_n(b'x', target_len - carrier_len - 2));
+    padded.push(b'\n');
+
+    let DecompositionOutcome::Signed(ranges) = decompose_artifact(&padded) else {
+        panic!("expected padded signed YAML artifact");
+    };
+    assert_eq!(ranges.signature_carrier.len(), target_len);
+    padded
 }
 
 #[test]
@@ -303,6 +326,61 @@ async fn async_strict_verify_matches_sync_for_metadata_budget_failures() {
         assert_eq!(asynchronous, sync);
         assert_eq!(sync.unwrap(), VerifierState::MalformedAttemptedSigned);
     }
+}
+
+#[test]
+fn yaml_to_proto_uses_markerless_carrier_byte_limit() {
+    const PAYLOAD: &[u8] = b"carrier-boundary: test\n";
+    let (sk, vk) = ed25519_pair();
+    let baseline = sign_yaml(&SignYamlParams {
+        payload: PAYLOAD,
+        algorithm: AlgorithmId::Ed25519,
+        key: SigningKey::Ed25519(&sk),
+        keyid: Some("carrier-boundary"),
+        append_missing_final_newline: false,
+    })
+    .unwrap();
+    let keys = PublicKeys {
+        ed25519: Some(&vk),
+        p256: None,
+    };
+    let expected_wire = signed_yaml_stream_to_proto_wire(&baseline).unwrap();
+    let expected_artifact = decode_signed_yaml_artifact(&expected_wire).unwrap();
+    let expected = view_signed_yaml_artifact(&expected_artifact).unwrap();
+
+    assert_eq!(expected.payload, PAYLOAD);
+    assert_eq!(expected.alg_wire, 1);
+    assert_eq!(expected.signature.len(), 64);
+    assert_eq!(expected.keyid.as_deref(), Some("carrier-boundary"));
+
+    for carrier_len in [16_380, 16_381, SIGNATURE_CARRIER_MAX_BYTES] {
+        let artifact = yaml_with_signature_carrier_length(&baseline, carrier_len);
+        assert_eq!(
+            verify_yaml(&artifact, &keys, strict_verifier_options()).unwrap(),
+            VerifierState::Verified {
+                payload: PAYLOAD.to_vec(),
+                algorithm: AlgorithmId::Ed25519,
+            }
+        );
+
+        let wire = signed_yaml_stream_to_proto_wire(&artifact).unwrap();
+        let decoded = decode_signed_yaml_artifact(&wire).unwrap();
+        let actual = view_signed_yaml_artifact(&decoded).unwrap();
+        assert_eq!(actual.payload, expected.payload);
+        assert_eq!(actual.alg_wire, expected.alg_wire);
+        assert_eq!(actual.signature, expected.signature);
+        assert_eq!(actual.keyid, expected.keyid);
+    }
+
+    let oversized = yaml_with_signature_carrier_length(&baseline, SIGNATURE_CARRIER_MAX_BYTES + 1);
+    assert_eq!(
+        verify_yaml(&oversized, &keys, strict_verifier_options()).unwrap(),
+        VerifierState::MalformedAttemptedSigned
+    );
+    assert!(matches!(
+        signed_yaml_stream_to_proto_wire(&oversized),
+        Err(TranscodeError::Core(CoreError::SignatureYaml(_)))
+    ));
 }
 
 #[test]
