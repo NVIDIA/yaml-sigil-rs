@@ -12,12 +12,14 @@ use yaml_sigil_core::{
 };
 use yaml_sigil_signing::{SignProtoParams, SignYamlParams, SigningKey, sign_proto, sign_yaml};
 use yaml_sigil_verification::{
-    AdvertisedConformanceProfile, ArtifactForm, InvocationError, PreVerifyOutcome,
-    PreVerifyResponse, PublicKeys, UnverifiedSignature, VerifierOptions, VerifierState,
-    can_pre_verify, pre_verify_proto, pre_verify_yaml, resolve_ed25519_verifying_key,
-    verifier_capabilities, verify, verify_from_pre_verify_proto, verify_from_pre_verify_yaml,
-    verify_proto, verify_yaml,
+    AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, DefaultAsyncVerifier,
+    InvocationError, PreVerifyOutcome, PreVerifyResponse, PublicKeys, UnverifiedSignature,
+    VerifierOptions, VerifierState, can_pre_verify, pre_verify_proto, pre_verify_yaml,
+    resolve_ed25519_verifying_key, verifier_capabilities, verify, verify_from_pre_verify_proto,
+    verify_from_pre_verify_yaml, verify_proto, verify_yaml,
 };
+
+const SIGNATURE_CARRIER_MAX_BYTES: usize = 16 * 1024;
 
 fn ed25519_pair() -> (EdSigningKey, ed25519_dalek::VerifyingKey) {
     let sk = EdSigningKey::from_bytes(&[11u8; 32]);
@@ -62,6 +64,41 @@ fn quote_signature_with_whitespace(artifact: &[u8], leading: &str, trailing: &st
     mutated.push('"');
     mutated.push_str(&text[value_end..]);
     mutated.into_bytes()
+}
+
+fn strict_verifier_options() -> VerifierOptions {
+    VerifierOptions {
+        reject_unknown_signature_document_fields: true,
+        ..VerifierOptions::default()
+    }
+}
+
+fn signed_yaml_for_metadata_budget_tests() -> Vec<u8> {
+    let (sk, _) = ed25519_pair();
+    sign_yaml(&SignYamlParams {
+        payload: b"metadata-budget: test\n",
+        algorithm: AlgorithmId::Ed25519,
+        key: SigningKey::Ed25519(&sk),
+        keyid: None,
+        append_missing_final_newline: false,
+    })
+    .unwrap()
+}
+
+fn yaml_with_oversized_signature_carrier() -> Vec<u8> {
+    let mut artifact = signed_yaml_for_metadata_budget_tests();
+    artifact.push(b'#');
+    artifact.extend(std::iter::repeat_n(b'x', SIGNATURE_CARRIER_MAX_BYTES));
+    artifact.push(b'\n');
+    artifact
+}
+
+fn yaml_with_too_many_signature_fields() -> Vec<u8> {
+    let mut artifact = signed_yaml_for_metadata_budget_tests();
+    for index in 0..9 {
+        artifact.extend_from_slice(format!("extra_{index}: value\n").as_bytes());
+    }
+    artifact
 }
 
 #[test]
@@ -200,6 +237,72 @@ fn verify_yaml_malformed_unsigned_disallowed() {
     let st = verify_yaml(b"unsigned: only\n", &keys, VerifierOptions::default()).unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
     assert_eq!(st.to_string(), "MalformedAttemptedSigned");
+}
+
+#[test]
+fn strict_verify_rejects_oversized_carrier_before_key_resolution() {
+    let artifact = yaml_with_oversized_signature_carrier();
+    assert_eq!(
+        pre_verify_yaml(&artifact, false).outcome,
+        PreVerifyOutcome::MetadataParseFailure
+    );
+
+    let state = verify_yaml(
+        &artifact,
+        &PublicKeys {
+            ed25519: None,
+            p256: None,
+        },
+        strict_verifier_options(),
+    )
+    .expect("metadata failure must not reach key resolution");
+    assert_eq!(state, VerifierState::MalformedAttemptedSigned);
+}
+
+#[test]
+fn strict_verify_rejects_excess_mapping_keys_before_key_resolution() {
+    let artifact = yaml_with_too_many_signature_fields();
+    assert_eq!(
+        pre_verify_yaml(&artifact, false).outcome,
+        PreVerifyOutcome::MetadataParseFailure
+    );
+
+    let state = verify_yaml(
+        &artifact,
+        &PublicKeys {
+            ed25519: None,
+            p256: None,
+        },
+        strict_verifier_options(),
+    )
+    .expect("metadata failure must not reach key resolution");
+    assert_eq!(state, VerifierState::MalformedAttemptedSigned);
+}
+
+#[tokio::test]
+async fn async_strict_verify_matches_sync_for_metadata_budget_failures() {
+    let artifacts = [
+        yaml_with_oversized_signature_carrier(),
+        yaml_with_too_many_signature_fields(),
+    ];
+    let keys = PublicKeys {
+        ed25519: None,
+        p256: None,
+    };
+
+    for artifact in artifacts {
+        let sync = verify_yaml(&artifact, &keys, strict_verifier_options());
+        let asynchronous = AsyncVerifier::verify(
+            &DefaultAsyncVerifier,
+            &artifact,
+            ArtifactForm::Yaml,
+            &keys,
+            strict_verifier_options(),
+        )
+        .await;
+        assert_eq!(asynchronous, sync);
+        assert_eq!(sync.unwrap(), VerifierState::MalformedAttemptedSigned);
+    }
 }
 
 #[test]

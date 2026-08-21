@@ -52,6 +52,7 @@ impl SignatureDocument {
 /// aliases, and custom tags.
 #[tracing::instrument(level = "debug", skip(bytes), fields(len = bytes.len()))]
 pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreError> {
+    ensure_signature_document_byte_budget(bytes)?;
     let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
     let config = signature_document_parser_config();
     let documents = noyalib::load_all_with_config(text, &config)
@@ -84,13 +85,23 @@ fn signature_document_parser_config() -> noyalib::ParserConfig {
         .with_policy(noyalib::policy::DenyTags)
 }
 
+fn ensure_signature_document_byte_budget(bytes: &[u8]) -> Result<(), CoreError> {
+    if bytes.len() > SIGNATURE_DOCUMENT_MAX_BYTES {
+        return Err(CoreError::SignatureYaml(
+            "signature carrier exceeds the maximum supported byte length".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Enumerate top-level mapping keys in a signature-document YAML fragment (UTF-8).
 ///
-/// Used for verifier-option preflight checks and diagnostic policy code. The
+/// The scan is bounded by the same byte budget as the default parser. The
 /// default parser also rejects unknown fields through [`SignatureDocument`].
 pub fn signature_document_top_level_keys(
     bytes: &[u8],
 ) -> Result<std::collections::BTreeSet<String>, CoreError> {
+    ensure_signature_document_byte_budget(bytes)?;
     let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
     Ok(top_level_keys_flat_line_scan(text))
 }
@@ -234,8 +245,21 @@ mod tests {
             config.max_alias_expansions,
             super::SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS
         );
+        assert_eq!(
+            config.max_mapping_keys,
+            super::SIGNATURE_DOCUMENT_MAX_MAPPING_KEYS
+        );
         assert_eq!(config.max_nodes, super::SIGNATURE_DOCUMENT_MAX_NODES);
         assert_eq!(config.max_documents, 1);
+    }
+
+    #[test]
+    fn parse_checks_byte_budget_before_utf8() {
+        let mut oversized = vec![b'x'; super::SIGNATURE_DOCUMENT_MAX_BYTES + 1];
+        oversized[super::SIGNATURE_DOCUMENT_MAX_BYTES] = 0xff;
+
+        let err = super::parse_signature_document(&oversized).unwrap_err();
+        assert!(matches!(err, CoreError::SignatureYaml(_)));
     }
 
     #[test]
@@ -248,6 +272,27 @@ mod tests {
         );
         let err = super::parse_signature_document(oversized.as_bytes()).unwrap_err();
         assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn top_level_key_scan_rejects_input_over_byte_budget() {
+        let oversized = vec![b'x'; super::SIGNATURE_DOCUMENT_MAX_BYTES + 1];
+        let err = super::signature_document_top_level_keys(&oversized).unwrap_err();
+        assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn parse_rejects_document_over_mapping_key_budget() {
+        let mut carrier = String::new();
+        for index in 0..=super::SIGNATURE_DOCUMENT_MAX_MAPPING_KEYS {
+            carrier.push_str(&format!("field_{index}: value\n"));
+        }
+
+        let err = super::parse_signature_document(carrier.as_bytes()).unwrap_err();
+        let CoreError::SignatureYaml(message) = err else {
+            panic!("expected YAML parser error");
+        };
+        assert!(message.contains("max_mapping_keys budget exceeded"));
     }
 
     #[test]

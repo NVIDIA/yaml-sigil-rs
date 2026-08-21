@@ -246,12 +246,9 @@ pub fn pre_verify(
     include_parser_observations: bool,
 ) -> PreVerifyResponse {
     match form {
-        ArtifactForm::Yaml => yaml_verify::pre_verify_yaml(
-            input_bytes,
-            allow_unsigned,
-            include_parser_observations,
-            &VerifierOptions::default(),
-        ),
+        ArtifactForm::Yaml => {
+            yaml_verify::pre_verify_yaml(input_bytes, allow_unsigned, include_parser_observations)
+        }
         ArtifactForm::Proto => {
             let _ = allow_unsigned;
             proto_verify::pre_verify_proto(input_bytes, include_parser_observations)
