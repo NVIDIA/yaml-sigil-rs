@@ -95,10 +95,12 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
         ReleaseVersionCommand::Check => {
             let version = read_workspace_version(root)?;
             sync_workspace_dependency_versions(root, true)?;
+            validate_crates_io_traits_dependency(root)?;
             validate_stable_traits_dependency(root, &version)?;
             eprintln!("release-version: workspace version is {version}");
         }
         ReleaseVersionCommand::Snapshot { pr, sha } => {
+            validate_crates_io_traits_dependency(root)?;
             let version = snapshot_version(&read_workspace_version(root)?, pr, &sha)?;
             write_workspace_version(root, &version)?;
             sync_workspace_dependency_versions(root, false)?;
@@ -111,6 +113,7 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
             release_notes,
         } => {
             validate_date(&date)?;
+            validate_crates_io_traits_dependency(root)?;
             let current = read_workspace_version(root)?;
             let target = candidate_version(&published, &current, bump)?;
             write_workspace_version(root, &target)?;
@@ -122,6 +125,7 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
         }
         ReleaseVersionCommand::PromoteStable { date } => {
             validate_date(&date)?;
+            validate_crates_io_traits_dependency(root)?;
             let current = read_workspace_version(root)?;
             let stable = stable_version(&current)?;
             validate_promotable_traits_dependency(root)?;
@@ -336,6 +340,56 @@ fn with_rc(version: &Version, rc: u64) -> Result<Version> {
 fn stable_version(version: &Version) -> Result<Version> {
     require_rc(version)?;
     Ok(Version::new(version.major, version.minor, version.patch))
+}
+
+/// Require the external traits crate to have one exact crates.io identity.
+///
+/// Cargo treats equal names and versions from registry, Git, and path sources
+/// as different crates. A source override here can therefore make packaged
+/// workspace crates exchange incompatible Rust types even when both copies
+/// display the same semantic version.
+fn validate_crates_io_traits_dependency(root: &Path) -> Result<()> {
+    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+        .context("read workspace Cargo.toml for traits source validation")?;
+    let document: toml::Value = toml::from_str(&manifest)
+        .context("parse workspace Cargo.toml for traits source validation")?;
+    let dependency = document
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(|dependencies| dependencies.get(EXTERNAL_TRAITS_DEP))
+        .ok_or_else(|| {
+            anyhow!("missing [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}")
+        })?;
+    let details = dependency.as_table().ok_or_else(|| {
+        anyhow!("[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must use an inline table")
+    })?;
+
+    for source_key in ["git", "path", "branch", "tag", "rev", "package"] {
+        if details.contains_key(source_key) {
+            bail!(
+                "[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must resolve only from crates.io; remove {source_key}"
+            );
+        }
+    }
+    if let Some(registry) = details.get("registry") {
+        let registry = registry.as_str().ok_or_else(|| {
+            anyhow!("[workspace.dependencies] {EXTERNAL_TRAITS_DEP} registry must be a string")
+        })?;
+        if registry != "crates-io" {
+            bail!(
+                "[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must resolve from crates.io, not registry {registry}"
+            );
+        }
+    }
+
+    let requirement = details
+        .get("version")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| {
+            anyhow!("missing version in [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}")
+        })?;
+    exact_traits_version(requirement)?;
+    Ok(())
 }
 
 /// Require stable workspaces to depend on an exact stable traits release.
@@ -726,6 +780,81 @@ mod tests {
     }
 
     #[test]
+    fn release_traits_dependency_accepts_crates_io_sources() {
+        // Both Cargo's implicit default registry and its explicit canonical
+        // name represent the same crates.io package identity.
+        for (case, source) in [("implicit", ""), ("named", r#"registry = "crates-io""#)] {
+            let root = temp_test_root(case);
+            write_test_workspace_manifest_with_traits_source(
+                &root,
+                "0.5.0-rc.1",
+                "0.5.0-rc.1",
+                "=0.4.0-rc.1",
+                source,
+            );
+
+            validate_crates_io_traits_dependency(&root).unwrap();
+            cleanup_temp_test_root(root);
+        }
+    }
+
+    #[test]
+    fn release_traits_dependency_rejects_other_package_identities() {
+        // Each source selector below could create a second traits crate whose
+        // Rust types are incompatible with the registry package's types.
+        for (case, source) in [
+            (
+                "git",
+                r#"git = "https://github.com/NVIDIA/yaml-sigil-traits.git""#,
+            ),
+            ("path", r#"path = "../yaml-sigil-traits""#),
+            ("registry", r#"registry = "internal""#),
+            ("renamed", r#"package = "other-traits""#),
+        ] {
+            let root = temp_test_root(case);
+            write_test_workspace_manifest_with_traits_source(
+                &root,
+                "0.5.0-rc.1",
+                "0.5.0-rc.1",
+                "=0.4.0-rc.1",
+                source,
+            );
+
+            assert!(validate_crates_io_traits_dependency(&root).is_err());
+            cleanup_temp_test_root(root);
+        }
+    }
+
+    #[test]
+    fn snapshot_rejects_git_traits_without_writing() {
+        // Snapshot version mutation must fail closed before touching the PR
+        // manifest when a review-only Git source remains present.
+        let root = temp_test_root("snapshot-git-traits");
+        write_test_workspace_manifest_with_traits_source(
+            &root,
+            "0.5.0-rc.1",
+            "0.5.0-rc.1",
+            "=0.4.0-rc.1",
+            r#"git = "https://github.com/NVIDIA/yaml-sigil-traits.git""#,
+        );
+        let before = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+
+        let result = release_version(
+            &root,
+            ReleaseVersionArgs {
+                command: ReleaseVersionCommand::Snapshot {
+                    pr: 10,
+                    sha: "e573f163a0749ac59ee95dfe2551ebde9f5620f8".to_owned(),
+                },
+            },
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(root.join("Cargo.toml")).unwrap(), before);
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
     fn snapshot_uses_core_and_twelve_hex_characters() {
         let current = Version::parse("0.4.0-rc.3").unwrap();
         assert_eq!(
@@ -795,13 +924,34 @@ mod tests {
         internal_version: &str,
         traits_version: &str,
     ) {
+        write_test_workspace_manifest_with_traits_source(
+            root,
+            workspace_version,
+            internal_version,
+            traits_version,
+            "",
+        );
+    }
+
+    fn write_test_workspace_manifest_with_traits_source(
+        root: &Path,
+        workspace_version: &str,
+        internal_version: &str,
+        traits_version: &str,
+        traits_source: &str,
+    ) {
+        let traits_source = if traits_source.is_empty() {
+            String::new()
+        } else {
+            format!("{traits_source}, ")
+        };
         let cargo_toml = format!(
             r#"[workspace.package]
 version = "{workspace_version}"
 
 [workspace.dependencies]
 yaml-sigil-core = {{ version = "{internal_version}", path = "crates/yaml-sigil-core", default-features = false }}
-yaml-sigil-traits = {{ version = "{traits_version}", git = "https://github.com/NVIDIA/yaml-sigil-traits.git", default-features = false }}
+yaml-sigil-traits = {{ version = "{traits_version}", {traits_source}default-features = false }}
 yaml-sigil-transcription = {{ version = "{internal_version}", path = "crates/yaml-sigil-transcription", default-features = false }}
 yaml-sigil-verification = {{ version = "{internal_version}", path = "crates/yaml-sigil-verification", default-features = false }}
 yaml-sigil-signing = {{ version = "{internal_version}", path = "crates/yaml-sigil-signing", default-features = false }}
