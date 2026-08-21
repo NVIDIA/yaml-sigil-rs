@@ -7,6 +7,7 @@ mod ci;
 mod package_content;
 mod spec_update;
 mod versions;
+mod wasm;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,8 @@ const PROFILE_JSON: &str = "target/profile/profile.json";
 const DEFAULT_PROFILE_ITERATIONS: u32 = 100;
 const CARGO_LLVM_COV_INSTALL: &str = "cargo install cargo-llvm-cov";
 const SAMPLY_INSTALL: &str = "cargo install --locked samply";
+const WASM_PACK_INSTALL: &str = "cargo install --locked wasm-pack --version 0.15.0";
+const WASM_TARGET_INSTALL: &str = "rustup target add --toolchain 1.95.0 wasm32-unknown-unknown";
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "yaml-sigil-rs workspace tasks")]
@@ -69,6 +72,8 @@ enum Task {
     },
     /// Manage provider-neutral release version transactions.
     ReleaseVersion(versions::ReleaseVersionArgs),
+    /// Validate browser WebAssembly builds and runtime behavior without retaining artifacts.
+    Wasm,
 }
 
 #[derive(Args)]
@@ -104,6 +109,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Task::ReleaseVersion(args) => versions::release_version(&root, args),
+        Task::Wasm => wasm::run(&root),
     }
 }
 
@@ -325,7 +331,12 @@ mod tests {
 
     #[test]
     fn report_tool_install_guidance_is_synchronized() {
-        for install_command in [CARGO_LLVM_COV_INSTALL, SAMPLY_INSTALL] {
+        for install_command in [
+            CARGO_LLVM_COV_INSTALL,
+            SAMPLY_INSTALL,
+            WASM_PACK_INSTALL,
+            WASM_TARGET_INSTALL,
+        ] {
             assert!(AGENT_GUIDANCE.contains(install_command));
             assert!(README.contains(install_command));
         }

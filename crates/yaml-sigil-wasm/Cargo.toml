@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "yaml-sigil-wasm"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Browser WebAssembly boundary for YamlSigil v1alpha1"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[features]
+browser-tests = []
+json-schema-validate = [
+    "yaml-sigil-core/json-schema-validate",
+    "yaml-sigil-signing/json-schema-validate",
+    "yaml-sigil-verification/json-schema-validate",
+]
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+js-sys = { workspace = true }
+p256 = { workspace = true }
+wasm-bindgen = { workspace = true }
+yaml-sigil-core = { workspace = true }
+yaml-sigil-signing = { workspace = true }
+yaml-sigil-transcription = { workspace = true }
+yaml-sigil-verification = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+console_error_panic_hook = "0.1"
+wasm-bindgen-test = { workspace = true }
