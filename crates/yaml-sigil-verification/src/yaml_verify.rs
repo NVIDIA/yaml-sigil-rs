@@ -3,9 +3,7 @@
 
 use base64::Engine;
 use tracing::instrument;
-use yaml_sigil_core::{
-    has_unknown_signature_document_fields, parse_signature_document, validate_payload_stream,
-};
+use yaml_sigil_core::{parse_signature_document, validate_payload_stream};
 use yaml_sigil_traits::AlgorithmId;
 use yaml_sigil_transcription::{DecomposeOutcome, DecomposeRequest, TranscriptionForm, decompose};
 
@@ -26,17 +24,7 @@ fn preverify_outcome_from_decompose(
     }
 }
 
-fn extract_yaml_metadata(
-    payload: Vec<u8>,
-    carrier: Vec<u8>,
-    options: &VerifierOptions,
-) -> Result<UnverifiedSignature, PreVerifyOutcome> {
-    if options.reject_unknown_signature_document_fields {
-        match has_unknown_signature_document_fields(&carrier) {
-            Ok(true) | Err(_) => return Err(PreVerifyOutcome::MetadataParseFailure),
-            Ok(false) => {}
-        }
-    }
+fn extract_yaml_metadata(carrier: Vec<u8>) -> Result<UnverifiedSignature, PreVerifyOutcome> {
     let doc = match parse_signature_document(&carrier) {
         Ok(d) => d,
         Err(_) => return Err(PreVerifyOutcome::MetadataParseFailure),
@@ -57,7 +45,6 @@ fn extract_yaml_metadata(
         Ok(o) => o,
         Err(()) => return Err(PreVerifyOutcome::MetadataParseFailure),
     };
-    let _ = payload;
     Ok(UnverifiedSignature {
         algorithm: alg,
         keyid: doc.keyid,
@@ -75,7 +62,6 @@ pub(crate) fn pre_verify_yaml(
     artifact: &[u8],
     allow_unsigned: bool,
     _include_parser_observations: bool,
-    options: &VerifierOptions,
 ) -> PreVerifyResponse {
     let resp = decompose(&DecomposeRequest {
         artifact,
@@ -115,7 +101,7 @@ pub(crate) fn pre_verify_yaml(
             parser_observations: Vec::new(),
         };
     }
-    match extract_yaml_metadata(payload.clone(), carrier, options) {
+    match extract_yaml_metadata(carrier) {
         Ok(sig) => PreVerifyResponse {
             outcome: PreVerifyOutcome::Ok,
             form: ArtifactForm::Yaml,
@@ -140,7 +126,7 @@ pub(crate) fn verify_yaml(
     options: &VerifierOptions,
     include_parser_observations: bool,
 ) -> Result<(VerifierState, Vec<String>), InvocationError> {
-    let pre = pre_verify_yaml(artifact, false, include_parser_observations, options);
+    let pre = pre_verify_yaml(artifact, false, include_parser_observations);
     let obs = if include_parser_observations {
         pre.parser_observations.clone()
     } else {
