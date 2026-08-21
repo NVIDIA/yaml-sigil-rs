@@ -74,6 +74,7 @@ pub struct SignProtoParams<'a> {
     pub algorithm: AlgorithmId,
     pub key: SigningKey<'a>,
     pub keyid: Option<&'a str>,
+    /// Ignored for protobuf output; payload bytes are always preserved exactly.
     pub append_missing_final_newline: bool,
 }
 
@@ -101,7 +102,7 @@ fn validate_invocation(req: &SignRequest<'_>) -> Result<(), SignInvocationError>
     }
 }
 
-fn normalize_payload(
+fn normalize_yaml_payload(
     payload: &[u8],
     append_missing_final_newline: bool,
 ) -> Result<Vec<u8>, SignError> {
@@ -125,7 +126,10 @@ fn normalize_payload(
     Err(SignError::PayloadLineTerminatorRefusal)
 }
 
-/// Unified entry point (IDL `Sign`); in-process only — no gRPC.
+/// Unified signing entry point corresponding to the IDL `Sign` operation.
+///
+/// For protobuf output, `append_missing_final_newline` is
+/// ignored and the payload bytes are signed and emitted without modification.
 #[instrument(level = "info", skip(req), fields(alg = ?req.algorithm, form = ?req.output_form))]
 pub fn sign(req: &SignRequest<'_>) -> SignOutcome {
     sign_inner(req)
@@ -136,19 +140,23 @@ fn sign_inner(req: &SignRequest<'_>) -> SignOutcome {
         return SignOutcome::Invocation(e);
     }
 
-    let payload = match normalize_payload(req.payload, req.append_missing_final_newline) {
-        Ok(p) => p,
-        Err(e) => return SignOutcome::Signer(e),
+    // Only YAML output applies the YAML envelope rules: valid UTF-8, no BOM,
+    // and a final line terminator. Protobuf payloads are opaque bytes and must
+    // bypass both normalization and validation.
+    let payload = match req.output_form {
+        OutputForm::Yaml => {
+            let payload =
+                match normalize_yaml_payload(req.payload, req.append_missing_final_newline) {
+                    Ok(p) => p,
+                    Err(e) => return SignOutcome::Signer(e),
+                };
+            if validate_payload_stream(&payload).is_err() {
+                return SignOutcome::Signer(SignError::InvalidPayloadBytes);
+            }
+            payload
+        }
+        OutputForm::Protobuf => req.payload.to_vec(),
     };
-
-    // YAML-form payload-envelope checks (UTF-8, no BOM, line-terminator) per
-    // signing-api.md "Payload Preconditions" only run for YAML output. For
-    // protobuf output the signer accepts arbitrary octets and MUST NOT modify
-    // them. See docs/conformance-validation.md §3f (consumer-side resolution
-    // of §5b).
-    if matches!(req.output_form, OutputForm::Yaml) && validate_payload_stream(&payload).is_err() {
-        return SignOutcome::Signer(SignError::InvalidPayloadBytes);
-    }
 
     let modified_payload = if req.payload == payload.as_slice() {
         Vec::new()

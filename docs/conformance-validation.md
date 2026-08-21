@@ -51,7 +51,7 @@ free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
-The current fixture set covers:
+The current fixture and regression set covers:
 
 - YAML decomposition marker handling, unsigned artifacts, malformed carrier
   ranges, constant-memory final-marker selection, marker-dense payloads, UTF-8
@@ -59,6 +59,8 @@ The current fixture set covers:
 - Protobuf outer-envelope duplicate and unknown-field handling plus malformed
   field numbers, tags, wire types, truncated varints, overflowing varints, and
   lengths under both supported `OuterConformance` modes.
+- Protobuf signing preserves arbitrary caller payload octets exactly and does
+  not apply YAML-specific UTF-8, BOM, or final-line-terminator handling.
 - YAML ↔ protobuf transcoding for empty, Boolean-like, null-like, and
   numeric-looking base64url signature strings.
 - Verification runtime classification for successful ECDSA verification,
@@ -85,6 +87,12 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-08-21: Added signing and verification round-trip regressions for
+  arbitrary protobuf payload octets. Protobuf signing now passes caller bytes
+  unchanged into the signature and artifact even when newline appending is
+  enabled. YAML output retains its existing authorized newline-appending
+  behavior. Specification inputs, schemas, fixture bytes, public API shapes,
+  dependencies, and notices are unchanged.
 - 2026-08-13: Marked `crates/yaml-sigil-conformance/fixtures/**` as `-text` in
   `.gitattributes` so checkout preserves every fixture byte on Linux, macOS,
   and Windows, including intentional CRLF and binary artifacts. No fixture
