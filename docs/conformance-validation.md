@@ -59,8 +59,8 @@ The current fixture and regression set covers:
 - Protobuf outer-envelope duplicate and unknown-field handling plus malformed
   field numbers, tags, wire types, truncated varints, overflowing varints, and
   lengths under both supported `OuterConformance` modes.
-- Protobuf signing preserves arbitrary caller payload octets exactly and does
-  not apply YAML-specific UTF-8, BOM, or final-line-terminator handling.
+- Protobuf Compose and signing preserve arbitrary caller payload octets exactly
+  and do not apply YAML-specific UTF-8, BOM, or final-line-terminator handling.
 - YAML ↔ protobuf transcoding for empty, Boolean-like, null-like, and
   numeric-looking base64url signature strings.
 - Verification runtime classification for successful ECDSA verification,
@@ -87,6 +87,10 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-08-24: Scoped Compose payload-stream validation to YAML form and added
+  protobuf round-trip regressions for invalid UTF-8, BOM-prefixed, and
+  non-line-terminated payload bytes. Specification inputs, schemas, fixture
+  bytes, public API shapes, dependencies, and notices are unchanged.
 - 2026-08-21: Added signing and verification round-trip regressions for
   arbitrary protobuf payload octets. Protobuf signing now passes caller bytes
   unchanged into the signature and artifact even when newline appending is
