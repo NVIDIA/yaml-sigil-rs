@@ -16,6 +16,8 @@ const TOOLCHAIN: &str = "1.95.0";
 const TARGET: &str = "wasm32-unknown-unknown";
 const WASM_PACK_VERSION: &str = "0.15.0";
 const WASM_CRATE: &str = "crates/yaml-sigil-wasm";
+const GENERATED_API_SMOKE: &str = "crates/yaml-sigil-wasm/tests/generated_api.cjs";
+const GENERATED_NODE_MODULE: &str = "yaml_sigil_wasm.js";
 const RUNTIME_PACKAGES: &[&str] = &[
     "yaml-sigil-core",
     "yaml-sigil-transcription",
@@ -31,26 +33,56 @@ pub(super) fn run(root: &Path) -> Result<()> {
         .prefix("yaml-sigil-wasm-")
         .tempdir()
         .context("create temporary WASM validation directory")?;
-    make_browser_accessible(&temp)?;
-    prepare_firefox(&temp)?;
+
+    let validation = run_in_temporary_directory(root, &temp);
+    let cleanup = temp
+        .close()
+        .context("remove temporary WASM validation directory");
+    let validation =
+        preserve_primary_error(validation, cleanup, "temporary WASM cleanup also failed");
+    let workspace_check = ensure_no_workspace_wasm(root);
+    preserve_primary_error(
+        validation,
+        workspace_check,
+        "workspace executable-artifact check also failed",
+    )
+}
+
+fn preserve_primary_error(
+    primary: Result<()>,
+    secondary: Result<()>,
+    secondary_context: &str,
+) -> Result<()> {
+    match (primary, secondary) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(primary), Err(secondary)) => {
+            Err::<(), _>(primary).with_context(|| format!("{secondary_context}: {secondary:#}"))
+        }
+    }
+}
+
+fn run_in_temporary_directory(root: &Path, temp: &TempDir) -> Result<()> {
+    make_browser_accessible(temp)?;
+    prepare_firefox(temp)?;
 
     for package in RUNTIME_PACKAGES {
         run_cargo(
             root,
-            &temp,
+            temp,
             ["check", "--target", TARGET, "--package", package],
             &format!("check {package} for {TARGET}"),
         )?;
     }
     run_cargo(
         root,
-        &temp,
+        temp,
         ["check", "--target", TARGET, "--package", "yaml-sigil-wasm"],
         "check yaml-sigil-wasm default features",
     )?;
     run_cargo(
         root,
-        &temp,
+        temp,
         [
             "check",
             "--target",
@@ -65,7 +97,7 @@ pub(super) fn run(root: &Path) -> Result<()> {
 
     run_isolated(
         root,
-        &temp,
+        temp,
         "wasm-pack",
         [
             "test",
@@ -76,15 +108,16 @@ pub(super) fn run(root: &Path) -> Result<()> {
         ],
         "run WASM tests in Node.js",
     )?;
-    if let Err(first_error) = run_firefox_tests(root, &temp) {
+    run_generated_api_smoke(root, temp)?;
+    if let Err(first_error) = run_firefox_tests(root, temp) {
         eprintln!("Headless Firefox failed once ({first_error:#}); retrying once.");
-        run_firefox_tests(root, &temp)?;
+        run_firefox_tests(root, temp)?;
     }
 
-    let default_size = build_and_measure(root, &temp, "default", None)?;
+    let default_size = build_and_measure(root, temp, "default", None)?;
     let schema_size = build_and_measure(
         root,
-        &temp,
+        temp,
         "json-schema-validate",
         Some("json-schema-validate"),
     )?;
@@ -93,9 +126,7 @@ pub(super) fn run(root: &Path) -> Result<()> {
     );
     eprintln!("  default: {default_size}");
     eprintln!("  json-schema-validate: {schema_size}");
-
-    drop(temp);
-    ensure_no_workspace_wasm(root)
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -227,6 +258,38 @@ fn run_firefox_tests(root: &Path, temp: &TempDir) -> Result<()> {
     )
 }
 
+fn run_generated_api_smoke(root: &Path, temp: &TempDir) -> Result<()> {
+    let out_dir = temp.path().join("node").join("generated-api");
+    build_package(
+        root,
+        temp,
+        "nodejs",
+        &out_dir,
+        None,
+        "generated Node.js API",
+    )?;
+
+    let module = out_dir.join(GENERATED_NODE_MODULE);
+    ensure!(
+        module.is_file(),
+        "generated Node.js module is missing: {}",
+        module.display()
+    );
+    let script = root.join(GENERATED_API_SMOKE);
+    ensure!(
+        script.is_file(),
+        "generated API smoke test is missing: {}",
+        script.display()
+    );
+    run_isolated(
+        root,
+        temp,
+        "node",
+        [script.as_os_str(), module.as_os_str()],
+        "exercise generated JavaScript API",
+    )
+}
+
 fn run_isolated(
     root: &Path,
     temp: &TempDir,
@@ -265,10 +328,22 @@ fn build_and_measure(
     feature: Option<&str>,
 ) -> Result<u64> {
     let out_dir = temp.path().join("web").join(label);
+    build_package(root, temp, "web", &out_dir, feature, label)?;
+    wasm_file_size(&out_dir)
+}
+
+fn build_package(
+    root: &Path,
+    temp: &TempDir,
+    target: &str,
+    out_dir: &Path,
+    feature: Option<&str>,
+    label: &str,
+) -> Result<()> {
     let mut args = vec![
         "build".to_string(),
         "--target".to_string(),
-        "web".to_string(),
+        target.to_string(),
         "--release".to_string(),
         "--no-pack".to_string(),
         "--out-dir".to_string(),
@@ -283,9 +358,8 @@ fn build_and_measure(
         temp,
         "wasm-pack",
         &args,
-        &format!("build optimized {label} web WASM"),
-    )?;
-    wasm_file_size(&out_dir)
+        &format!("build optimized {label} WASM"),
+    )
 }
 
 fn wasm_file_size(out_dir: &Path) -> Result<u64> {
@@ -337,4 +411,40 @@ fn collect_wasm_files(dir: &Path, matches: &mut Vec<PathBuf>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+
+    use super::preserve_primary_error;
+
+    #[test]
+    fn validation_and_cleanup_errors_are_both_reported() {
+        let primary = preserve_primary_error(
+            Err(anyhow!("validation failed")),
+            Ok(()),
+            "cleanup also failed",
+        )
+        .expect_err("validation error must be retained");
+        assert_eq!(format!("{primary:#}"), "validation failed");
+
+        let secondary = preserve_primary_error(
+            Ok(()),
+            Err(anyhow!("cleanup failed")),
+            "cleanup also failed",
+        )
+        .expect_err("cleanup error must be reported");
+        assert_eq!(format!("{secondary:#}"), "cleanup failed");
+
+        let combined = preserve_primary_error(
+            Err(anyhow!("validation failed")),
+            Err(anyhow!("cleanup failed")),
+            "cleanup also failed",
+        )
+        .expect_err("both errors must be reported");
+        let combined = format!("{combined:#}");
+        assert!(combined.contains("validation failed"));
+        assert!(combined.contains("cleanup also failed: cleanup failed"));
+    }
 }

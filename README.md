@@ -171,9 +171,10 @@ cargo xtask wasm
 ```
 
 The task checks the runtime crates and both boundary feature sets, runs the
-schema-enabled suite under Node.js and headless Firefox, reports optimized raw
-sizes, and deletes all temporary project build output. It fails if a `.wasm`
-file is retained in the workspace. Read the
+schema-enabled suite under Node.js and headless Firefox, exercises the
+generated JavaScript API, and reports optimized raw sizes. It explicitly
+removes all temporary project build output and reports cleanup failures. It
+also fails if a `.wasm` file is retained in the workspace. Read the
 [`yaml-sigil-wasm` README](crates/yaml-sigil-wasm/README.md) for selectors,
 result classes, key encodings, copy semantics, and cryptographic limitations.
 
