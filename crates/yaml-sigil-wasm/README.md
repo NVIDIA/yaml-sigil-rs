@@ -8,7 +8,8 @@ crates in this workspace.
 This crate is a source-only, unpublished workspace boundary. The repository
 does not provide an npm package, prebuilt WebAssembly, or another executable
 artifact. Use `cargo xtask wasm` for local validation; the task places all
-project build output in a temporary directory and removes it before returning.
+project build output in a temporary directory and reports a failure if it
+cannot remove that directory before returning.
 
 ## JavaScript API
 
@@ -58,10 +59,10 @@ Algorithm selectors are the canonical v1alpha1 strings:
 
 Ed25519 signing keys are 32-byte seeds, and Ed25519 verification keys are
 32-byte encoded public keys. P-256 signing keys are 32-byte big-endian secret
-scalars. P-256 verification keys use compressed or uncompressed point
-encoding from *Standards for Efficient Cryptography 1 (SEC 1)*. Invalid
-lengths, scalars, encodings, and points return stable invocation codes without
-including key material.
+scalars. P-256 verification keys use the 65-byte uncompressed `0x04 || X || Y`
+point encoding from *Standards for Efficient Cryptography 1 (SEC 1)*.
+Compressed point encodings are rejected. Invalid lengths, scalars, encodings,
+and points return stable invocation codes without including key material.
 
 The boundary copies a supplied private key into temporary Rust storage that
 uses best-effort zeroization. It cannot clear the caller's JavaScript
@@ -92,17 +93,18 @@ cargo xtask wasm
 
 The task checks all four runtime crates and this boundary for
 `wasm32-unknown-unknown`, runs the shared schema-enabled suite under Node.js
-and headless Firefox, and creates temporary optimized `web` builds with and
-without schema validation. It rejects any `.wasm` file retained in the
-workspace.
+and headless Firefox, exercises the generated Node.js bindings under
+Node.js, and creates temporary optimized `web` builds with and without schema
+validation. It rejects any `.wasm` file retained in the workspace and reports
+temporary-directory cleanup failures.
 
-On 2026-08-21, Rust 1.95.0 and `wasm-pack` 0.15.0 produced these optimized raw
+On 2026-08-24, Rust 1.95.0 and `wasm-pack` 0.15.0 produced these optimized raw
 WebAssembly sizes before temporary cleanup:
 
 | Feature set | Raw bytes |
 |------------|----------:|
-| Default features. | 556,217. |
-| `json-schema-validate`. | 3,427,629. |
+| Default features. | 548,492. |
+| `json-schema-validate`. | 3,411,426. |
 
 These measurements describe one toolchain run. They are not a compatibility,
 performance, or future size guarantee.

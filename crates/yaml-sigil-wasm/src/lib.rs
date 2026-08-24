@@ -363,6 +363,9 @@ pub fn sign(
             )
         }
         AlgorithmId::EcdsaP256Sha256 => {
+            if key_bytes.len() != 32 {
+                return SignResult::invocation("invalid_signing_key");
+            }
             let Ok(key) = P256SigningKey::from_slice(&key_bytes) else {
                 return SignResult::invocation("invalid_signing_key");
             };

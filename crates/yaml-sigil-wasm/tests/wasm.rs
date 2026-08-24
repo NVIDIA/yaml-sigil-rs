@@ -31,8 +31,11 @@ fn ed25519_keys(seed: u8) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn p256_keys(scalar: u8) -> (Vec<u8>, Vec<u8>) {
+    // These point encodings follow *Standards for Efficient Cryptography 1
+    // (SEC 1)*. That standards material is not relicensed under this file's
+    // Apache-2.0 declaration.
     let signing = P256SigningKey::from_slice(&[scalar; 32]).expect("valid test scalar");
-    let verifying = signing.verifying_key().to_encoded_point(true);
+    let verifying = signing.verifying_key().to_encoded_point(false);
     (signing.to_bytes().to_vec(), verifying.as_bytes().to_vec())
 }
 
@@ -59,6 +62,26 @@ fn compose_and_decompose_yaml_and_protobuf() {
         assert!(decomposed.has_payload());
         assert!(decomposed.has_signature_carrier());
         assert_eq!(decomposed.payload().to_vec(), PAYLOAD);
+        assert_eq!(decomposed.signature_carrier().to_vec(), carrier);
+    }
+}
+
+#[wasm_bindgen_test]
+fn protobuf_compose_preserves_arbitrary_payload_bytes() {
+    init();
+    let carrier = b"signature carrier";
+
+    for payload in [
+        &[0xff, 0x00][..],
+        b"no final newline".as_slice(),
+        b"\xef\xbb\xbfleading BOM\n".as_slice(),
+    ] {
+        let composed = compose(bytes(payload), bytes(carrier), "protobuf");
+        assert_eq!(composed.status(), "success");
+
+        let decomposed = decompose(composed.artifact(), "protobuf", Some("strict".to_string()));
+        assert_eq!(decomposed.status(), "ok");
+        assert_eq!(decomposed.payload().to_vec(), payload);
         assert_eq!(decomposed.signature_carrier().to_vec(), carrier);
     }
 }
@@ -201,6 +224,36 @@ fn invalid_keyids_and_p256_encodings_have_stable_codes() {
     let zero_scalar = sign(bytes(PAYLOAD), P256, bytes(&[0; 32]), None, false, "yaml");
     assert_eq!(zero_scalar.status(), "invocation_error");
     assert_eq!(zero_scalar.code().as_deref(), Some("invalid_signing_key"));
+
+    for length in 24..32 {
+        let wrong_length = sign(
+            bytes(PAYLOAD),
+            P256,
+            bytes(&vec![1; length]),
+            None,
+            false,
+            "yaml",
+        );
+        assert_eq!(wrong_length.status(), "invocation_error");
+        assert_eq!(wrong_length.code().as_deref(), Some("invalid_signing_key"));
+    }
+
+    let (_, uncompressed_point) = p256_keys(16);
+    let compressed_point = P256SigningKey::from_slice(&[16; 32])
+        .expect("valid test scalar")
+        .verifying_key()
+        .to_encoded_point(true);
+    let compressed = verify(
+        bytes(PAYLOAD),
+        "yaml",
+        P256,
+        bytes(compressed_point.as_bytes()),
+    );
+    assert_eq!(compressed.status(), "invocation_error");
+    assert_eq!(compressed.code().as_deref(), Some("key_resolution_failure"));
+
+    let unsigned = verify(bytes(PAYLOAD), "yaml", P256, bytes(&uncompressed_point));
+    assert_eq!(unsigned.status(), "malformed_attempted_signed");
 
     let mut zero_point = vec![0; 65];
     zero_point[0] = 4;
