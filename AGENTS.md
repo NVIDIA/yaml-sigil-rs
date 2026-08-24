@@ -243,6 +243,16 @@ cargo audit
 cargo audit --file xtask/Cargo.lock
 ```
 
+To apply the validator from the current checkout to another repository
+checkout, pass its root explicitly:
+
+```shell
+cargo xtask ci --candidate-root PATH
+```
+
+The command still builds and runs the xtask from the current checkout; only
+the repository content being validated comes from `PATH`.
+
 The static package-content stage runs
 `cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
 each of the four publishable crates and compares Cargo's modeled paths with the

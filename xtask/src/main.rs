@@ -36,7 +36,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Task {
     /// Run the repository's provider-neutral non-release validation sequence.
-    Ci,
+    Ci {
+        /// Validate another repository checkout with this xtask implementation.
+        #[arg(long, value_name = "PATH")]
+        candidate_root: Option<PathBuf>,
+    },
     /// Compare modeled source-package paths with committed exact inventories.
     PackageContent,
     /// Record the E2E test with samply into `target/profile/profile.json`.
@@ -82,7 +86,10 @@ fn main() -> Result<()> {
     let root = workspace_root();
     let cli = Cli::parse();
     match cli.command {
-        Task::Ci => ci::run(&root),
+        Task::Ci { candidate_root } => {
+            let candidate = resolve_candidate_root(candidate_root.as_deref().unwrap_or(&root))?;
+            ci::run(&candidate)
+        }
         Task::PackageContent => {
             package_content::run(&root)?;
             Ok(())
@@ -112,6 +119,16 @@ fn workspace_root() -> PathBuf {
         .parent()
         .expect("xtask manifest lives in xtask/")
         .to_path_buf()
+}
+
+fn resolve_candidate_root(root: &Path) -> Result<PathBuf> {
+    let candidate = root
+        .canonicalize()
+        .with_context(|| format!("resolve candidate root {}", root.display()))?;
+    if !candidate.join("Cargo.toml").is_file() {
+        bail!("candidate root {} lacks Cargo.toml", candidate.display());
+    }
+    Ok(candidate)
 }
 
 fn run(mut cmd: Command) -> Result<ExitStatus> {
@@ -322,6 +339,16 @@ mod tests {
 
     const AGENT_GUIDANCE: &str = include_str!("../../AGENTS.md");
     const README: &str = include_str!("../../README.md");
+
+    #[test]
+    fn ci_candidate_root_is_repository_scoped() {
+        let root = workspace_root();
+        assert_eq!(
+            resolve_candidate_root(&root).unwrap(),
+            root.canonicalize().unwrap()
+        );
+        assert!(resolve_candidate_root(&root.join("missing-candidate")).is_err());
+    }
 
     #[test]
     fn report_tool_install_guidance_is_synchronized() {
