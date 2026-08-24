@@ -363,13 +363,26 @@ fn open_in_browser(path: &Path) -> Result<()> {
     require_success(status, "open browser")
 }
 
-fn which(program: &str) -> Result<PathBuf> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    for dir in std::env::split_paths(&path) {
+fn which_in_path(program: &str, path: &OsStr, executable_suffix: &str) -> Option<PathBuf> {
+    for dir in std::env::split_paths(path) {
         let candidate = dir.join(program);
         if candidate.is_file() {
-            return Ok(candidate);
+            return Some(candidate);
         }
+        if !executable_suffix.is_empty() && !program.ends_with(executable_suffix) {
+            let candidate = dir.join(format!("{program}{executable_suffix}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn which(program: &str) -> Result<PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(candidate) = which_in_path(program, &path, std::env::consts::EXE_SUFFIX) {
+        return Ok(candidate);
     }
     bail!("{program} not found on PATH");
 }
@@ -425,6 +438,20 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains(CARGO_LLVM_COV_INSTALL));
+    }
+
+    #[test]
+    fn tool_lookup_honors_platform_executable_suffix() {
+        let root = test_dir("executable-suffix");
+        let executable = root.join("cargo-example.exe");
+        std::fs::write(&executable, b"fixture").expect("write executable fixture");
+        let path = std::env::join_paths([root.as_os_str()]).expect("join test PATH");
+
+        assert_eq!(
+            which_in_path("cargo-example", &path, ".exe"),
+            Some(executable)
+        );
+        std::fs::remove_dir_all(root).expect("remove test root");
     }
 
     #[test]
