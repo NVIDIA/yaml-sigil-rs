@@ -10,7 +10,7 @@ mod versions;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
@@ -166,41 +166,87 @@ fn cargo(root: &Path, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Comm
 }
 
 fn build_e2e_profile(root: &Path) -> Result<PathBuf> {
-    require_success(
-        run(cargo(
-            root,
-            [
-                "test",
-                "-p",
-                E2E_PACKAGE,
-                "--test",
-                E2E_TEST,
-                "--no-run",
-                "--profile",
-                PROFILE_BUILD_PROFILE,
-            ],
-        ))?,
-        "build E2E test binary (profiling)",
-    )?;
-    find_e2e_binary(root, PROFILE_BUILD_PROFILE)
+    let mut build = cargo(
+        root,
+        [
+            "test",
+            "-p",
+            E2E_PACKAGE,
+            "--test",
+            E2E_TEST,
+            "--no-run",
+            "--profile",
+            PROFILE_BUILD_PROFILE,
+            "--message-format=json-render-diagnostics",
+        ],
+    );
+    eprintln!("+ {}", format_cmd(&build));
+    let output = build
+        .stderr(Stdio::inherit())
+        .output()
+        .context("run Cargo profiling build")?;
+    let artifact = profile_test_artifact(&output.stdout)?;
+    require_success(output.status, "build E2E test binary (profiling)")?;
+
+    let artifact = artifact.context("Cargo did not report the E2E test artifact")?;
+    if !artifact.is_file() {
+        bail!(
+            "Cargo-reported test artifact is not a file: {}",
+            artifact.display()
+        );
+    }
+    Ok(artifact)
 }
 
-fn find_e2e_binary(root: &Path, profile: &str) -> Result<PathBuf> {
-    let deps = root.join("target").join(profile).join("deps");
-    let mut matches: Vec<PathBuf> = std::fs::read_dir(&deps)
-        .with_context(|| format!("read {}", deps.display()))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            name.starts_with(&format!("{E2E_TEST}-")) && !name.ends_with(".d") && p.is_file()
-        })
-        .collect();
-    matches.sort();
-    matches.pop().context(format!(
-        "no {E2E_TEST} test binary under {} (run the profiling build first)",
-        deps.display()
-    ))
+fn profile_test_artifact(messages: &[u8]) -> Result<Option<PathBuf>> {
+    let mut artifact = None;
+    for line in messages
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        let message: serde_json::Value =
+            serde_json::from_slice(line).context("parse Cargo JSON message")?;
+
+        if let Some(rendered) = message
+            .get("message")
+            .and_then(|diagnostic| diagnostic.get("rendered"))
+            .and_then(serde_json::Value::as_str)
+        {
+            eprint!("{rendered}");
+        }
+
+        let is_e2e_test = message.get("reason").and_then(serde_json::Value::as_str)
+            == Some("compiler-artifact")
+            && message
+                .get("target")
+                .and_then(|target| target.get("name"))
+                .and_then(serde_json::Value::as_str)
+                == Some(E2E_TEST)
+            && message
+                .get("target")
+                .and_then(|target| target.get("kind"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind.as_str() == Some("test")));
+        if !is_e2e_test {
+            continue;
+        }
+
+        let Some(executable) = message
+            .get("executable")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let executable = PathBuf::from(executable);
+        if artifact
+            .as_ref()
+            .is_some_and(|existing| existing != &executable)
+        {
+            bail!("Cargo reported multiple E2E test artifacts");
+        }
+        artifact = Some(executable);
+    }
+    Ok(artifact)
 }
 
 fn profile(root: &Path, open: bool, iterations: u32) -> Result<()> {
@@ -336,9 +382,21 @@ fn require_tool(program: &str, install_command: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     const AGENT_GUIDANCE: &str = include_str!("../../AGENTS.md");
     const README: &str = include_str!("../../README.md");
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn test_dir(label: &str) -> PathBuf {
+        let sequence = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "yaml-sigil-xtask-{label}-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).expect("create test directory");
+        path
+    }
 
     #[test]
     fn ci_candidate_root_is_repository_scoped() {
@@ -367,5 +425,31 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains(CARGO_LLVM_COV_INSTALL));
+    }
+
+    #[test]
+    fn profiling_uses_cargo_reported_artifact_among_stale_matches() {
+        let root = test_dir("profile-artifact");
+        let deps = root.join("target/profiling/deps");
+        std::fs::create_dir_all(&deps).expect("create profiling directory");
+        std::fs::write(deps.join(format!("{E2E_TEST}-00000000")), b"stale")
+            .expect("write stale artifact");
+        let intended = deps.join(format!("{E2E_TEST}-11111111"));
+        std::fs::write(&intended, b"current").expect("write current artifact");
+        std::fs::write(deps.join(format!("{E2E_TEST}-zzzzzzzz")), b"planted")
+            .expect("write planted artifact");
+
+        let message = serde_json::json!({
+            "reason": "compiler-artifact",
+            "target": { "kind": ["test"], "name": E2E_TEST },
+            "executable": intended.to_str().expect("UTF-8 test path"),
+        });
+        let output = serde_json::to_vec(&message).expect("serialize Cargo message");
+
+        assert_eq!(
+            profile_test_artifact(&output).expect("parse Cargo message"),
+            Some(intended)
+        );
+        std::fs::remove_dir_all(root).expect("remove test root");
     }
 }
