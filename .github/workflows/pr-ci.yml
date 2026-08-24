@@ -328,6 +328,12 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.authorize.outputs.policy_sha }}
 
+      # Keep exact repository bytes intact for provider-neutral validators.
+      - name: Preserve candidate line endings
+        if: ${{ runner.os == 'Windows' }}
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Check out exact candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
