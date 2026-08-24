@@ -107,16 +107,16 @@ pub(crate) fn resolve_ed25519_verifying_key(bytes: &[u8]) -> Result<EdVk, Invoca
     Ok(vk)
 }
 
-/// Resolve P-256 public-key bytes encoded according to
+/// Resolve the required 65-byte uncompressed P-256 public-key encoding from
 /// *Standards for Efficient Cryptography 1 (SEC 1)* into a typed key.
+///
+/// That point-encoding rule is not relicensed under this file's Apache-2.0
+/// declaration.
 ///
 /// See this crate's `THIRD_PARTY_NOTICES.md` for the source notice and patent/IP
 /// caveat.
 pub(crate) fn resolve_p256_verifying_key(bytes: &[u8]) -> Result<P256Vk, InvocationError> {
-    if bytes == [0u8].as_slice() {
-        return Err(InvocationError::KeyResolutionFailure);
-    }
-    if bytes.len() == 65 && bytes.iter().all(|&byte| byte == 0) {
+    if bytes.len() != 65 || bytes.first() != Some(&0x04) {
         return Err(InvocationError::KeyResolutionFailure);
     }
     P256Vk::from_sec1_bytes(bytes).map_err(|_| InvocationError::KeyResolutionFailure)

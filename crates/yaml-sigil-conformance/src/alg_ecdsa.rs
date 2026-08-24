@@ -40,7 +40,7 @@ fn parse_p256_pubkey(expected_txt: &str) -> P256Vk {
     .into_iter()
     .find_map(|p| crate::fixtures::read_hex_field(expected_txt, p))
     .expect("no pubkey field in expected.txt");
-    P256Vk::from_sec1_bytes(&bytes).expect("happy-path pubkey is on the curve")
+    resolve_p256_verifying_key(&bytes).expect("happy-path pubkey uses the required encoding")
 }
 
 fn keys_with_p256<'a>(vk: &'a P256Vk) -> PublicKeys<'a> {
@@ -213,6 +213,30 @@ fn non_fixed_width<V: ConformanceVerifier>(v: &V) {
 }
 
 fn bad_keys() {
+    // The attributed happy-path fixture supplies the accepted uncompressed
+    // point. Derive the other SEC 1 point forms from that same point so the
+    // resolver boundary is checked without introducing another test vector.
+    let valid_body = load_string(CATEGORY, "verify-happy-path.expected.txt");
+    let uncompressed = require_hex_field(&valid_body, "public key Q (uncompressed)");
+    let valid_key =
+        resolve_p256_verifying_key(&uncompressed).expect("uncompressed fixture key must resolve");
+    let compressed = valid_key.to_encoded_point(true);
+    let mut hybrid = uncompressed;
+    hybrid[0] = 0x06 | (hybrid[64] & 1);
+    for (case, bytes) in [
+        ("compressed point", compressed.as_bytes()),
+        ("hybrid point", hybrid.as_slice()),
+    ] {
+        let err = match resolve_p256_verifying_key(bytes) {
+            Ok(_) => panic!("{case} encoding must be rejected"),
+            Err(err) => err,
+        };
+        assert!(
+            matches!(err, InvocationError::KeyResolutionFailure),
+            "{case}: expected KeyResolutionFailure, got {err:?}"
+        );
+    }
+
     // fixture: bad-key-identity.txt -> KeyResolutionFailure
     // Both encodings: SEC 1 single-byte 0x00 and the 65-octet all-zero string.
     let id_body = load_string(CATEGORY, "bad-key-identity.txt");

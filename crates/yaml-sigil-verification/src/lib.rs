@@ -46,7 +46,7 @@ pub fn resolve_ed25519_verifying_key(
     crypto::resolve_ed25519_verifying_key(bytes)
 }
 
-/// Resolve raw P-256 public-key bytes encoded according to
+/// Resolve a 65-byte uncompressed P-256 public key encoded according to
 /// *Standards for Efficient Cryptography 1 (SEC 1)* into a typed key.
 ///
 /// The SEC 1 encoding rule is third-party standards material, not material
@@ -55,8 +55,8 @@ pub fn resolve_ed25519_verifying_key(
 ///
 /// # Errors
 ///
-/// Returns [`InvocationError::KeyResolutionFailure`] when the input is not an
-/// accepted SEC 1 encoding of a P-256 public key.
+/// Returns [`InvocationError::KeyResolutionFailure`] when the input is not the
+/// required `0x04 || X || Y` encoding of an admissible P-256 public key.
 pub fn resolve_p256_verifying_key(
     bytes: &[u8],
 ) -> Result<p256::ecdsa::VerifyingKey, InvocationError> {
