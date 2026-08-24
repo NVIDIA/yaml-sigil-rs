@@ -81,11 +81,11 @@ pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
     if let Err(e) = validate_compose_invocation(req) {
         return ComposeOutcome::Invocation(e);
     }
-    if validate_payload_stream(req.payload).is_err() {
-        return ComposeOutcome::Error(TranscriberError::InvalidPayloadBytes);
-    }
     let artifact = match req.form {
         TranscriptionForm::Yaml => {
+            if validate_payload_stream(req.payload).is_err() {
+                return ComposeOutcome::Error(TranscriberError::InvalidPayloadBytes);
+            }
             if contains_constrained_marker(req.signature_carrier) {
                 return ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier);
             }
@@ -324,6 +324,65 @@ mod tests {
             outcome,
             ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier)
         ));
+    }
+
+    #[test]
+    fn yaml_compose_rejects_invalid_payload_bytes() {
+        let invalid_payloads: [&[u8]; 3] = [
+            &[0xff, 0x00, 0x80],
+            b"\xef\xbb\xbfkey: value\n",
+            b"missing final line terminator",
+        ];
+
+        for payload in invalid_payloads {
+            let outcome = compose(&ComposeRequest {
+                payload,
+                signature_carrier: b"signature carrier",
+                form: TranscriptionForm::Yaml,
+            });
+            assert!(matches!(
+                outcome,
+                ComposeOutcome::Error(TranscriberError::InvalidPayloadBytes)
+            ));
+        }
+    }
+
+    #[test]
+    fn protobuf_compose_preserves_arbitrary_payload_bytes() {
+        let payloads: [&[u8]; 3] = [
+            &[0xff, 0x00, 0x80],
+            b"\xef\xbb\xbfkey: value\n",
+            b"missing final line terminator",
+        ];
+        let signature_carrier = b"opaque signature carrier";
+
+        for payload in payloads {
+            let artifact = match compose(&ComposeRequest {
+                payload,
+                signature_carrier,
+                form: TranscriptionForm::Protobuf,
+            }) {
+                ComposeOutcome::Success(success) => success.artifact,
+                outcome => panic!("{outcome:?}"),
+            };
+            let response = decompose(&DecomposeRequest {
+                artifact: &artifact,
+                form: TranscriptionForm::Protobuf,
+                outer_conformance: Some(OuterConformance::Strict),
+            });
+
+            match response {
+                DecomposeResponse::Structural(result) => {
+                    assert_eq!(result.outcome, DecomposeOutcome::Ok);
+                    assert_eq!(result.payload.as_deref(), Some(payload));
+                    assert_eq!(
+                        result.signature_carrier.as_deref(),
+                        Some(signature_carrier.as_slice())
+                    );
+                }
+                DecomposeResponse::Invocation(error) => panic!("{error:?}"),
+            }
+        }
     }
 
     fn write_varint(out: &mut Vec<u8>, mut v: u64) {

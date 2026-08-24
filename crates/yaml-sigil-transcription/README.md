@@ -12,6 +12,10 @@ structure only. They do not verify a signature or authenticate the payload. Use
 [`yaml-sigil-verification`](https://crates.io/crates/yaml-sigil-verification)
 for signature verification.
 
+YAML Compose requires payload bytes that form a valid UTF-8 stream without a
+BOM and with a final line terminator when non-empty. Protobuf Compose treats
+payload bytes as opaque and preserves every accepted byte unchanged.
+
 ## API Surface
 
 - `compose` and `decompose` perform the byte operations.
