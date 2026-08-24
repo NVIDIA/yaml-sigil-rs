@@ -40,8 +40,10 @@ base64 = "0.22"
 buf-tools = "=1.72.0-hotfix.1"
 buffa = "0.5"
 buffa-build = "0.5"
+# Keep precomputed tables explicit for workspace consumers with defaults off.
 ed25519-dalek = { version = "2.1", default-features = false, features = [
     "alloc",
+    "fast",
     "rand_core",
 ] }
 jsonschema = { version = "0.46.5", default-features = false }
