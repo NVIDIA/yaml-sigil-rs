@@ -32,6 +32,10 @@ The shared traits leave key parsing to each implementation. This crate applies
 its Ed25519 key-admissibility checks both when it resolves raw key bytes and
 when a caller supplies an already constructed typed key.
 
+`resolve_p256_verifying_key` accepts only the 65-byte uncompressed
+`0x04 || X || Y` encoding from
+*Standards for Efficient Cryptography 1 (SEC 1)*.
+
 Bind each artifact source, route, or storage class to one `ArtifactForm` before
 calling the verifier. Do not infer the form from artifact bytes or retry the
 other form after structural or verification failure.
