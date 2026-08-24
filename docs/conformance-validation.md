@@ -324,6 +324,9 @@ standardizes only the 16,384-octet markerless carrier limit.
 - The independently packaged `yaml-sigil-verification` crate retains its
   applicable RFC 8032 and *Standards for Efficient Cryptography 1 (SEC 1)*
   source terms in its crate-local `THIRD_PARTY_NOTICES.md`.
+- P-256 byte-oriented key resolution accepts only the slot's 65-octet
+  uncompressed `0x04 || X || Y` point encoding. Compressed point encodings and
+  malformed or inadmissible points produce `KeyResolutionFailure`.
 - ECDSA verification classifies raw signatures with `r` or `s` outside
   `(0, n)` as `MalformedAttemptedSigned`. Structurally valid signatures that
   fail the signature equation remain `SignedButFailedVerification`.
