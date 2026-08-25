@@ -103,6 +103,14 @@ pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
 }
 
 /// Recover abstract Artifact bytes from an envelope.
+///
+/// # Resource usage
+///
+/// For [`TranscriptionForm::Protobuf`], this function has the resource behavior documented on
+/// [`yaml_sigil_core::decompose_proto_outer`]. It imposes no universal artifact, payload, or
+/// signature-carrier size limit, and it copies recognized fields into owned buffers with
+/// allocation and copying linear in field size. Callers handling untrusted data must enforce
+/// deployment-appropriate size limits before invocation.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]
 pub fn decompose(req: &DecomposeRequest<'_>) -> DecomposeResponse {
     let outer = match validate_decompose_invocation(req) {
@@ -116,6 +124,8 @@ pub fn decompose(req: &DecomposeRequest<'_>) -> DecomposeResponse {
 }
 
 /// In-process default transcriber that delegates to the crate's free functions.
+///
+/// Protobuf decomposition has the resource behavior documented on [`decompose`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultTranscriber;
 
@@ -134,6 +144,8 @@ impl Transcriber for DefaultTranscriber {
 /// In-process default async transcriber that delegates to the crate's free
 /// functions. Bodies are `async { sync_fn(...) }` — the work is structural,
 /// CPU-bound, and short.
+///
+/// Protobuf decomposition has the resource behavior documented on [`decompose`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultAsyncTranscriber;
 

@@ -97,6 +97,13 @@ pub fn compose_proto_outer(payload: &[u8], signature_carrier: &[u8]) -> Vec<u8> 
 }
 
 /// Decompose outer wire bytes under the selected outer-envelope conformance mode.
+///
+/// # Resource usage
+///
+/// The library imposes no universal artifact, payload, or signature-carrier size limit.
+/// Recognized fields are copied into owned buffers. Allocation and copying are linear in the
+/// total size of those fields. Callers handling untrusted data must enforce
+/// deployment-appropriate size limits before invoking this function.
 #[tracing::instrument(level = "debug", skip(wire), fields(len = wire.len(), ?mode))]
 pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterDecomposeOutcome {
     let mut payload: Option<Vec<u8>> = None;
@@ -169,6 +176,12 @@ pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterD
 }
 
 /// Decode inner `YamlSigilSignature` from opaque carrier bytes (verification metadata stage).
+///
+/// # Resource usage
+///
+/// This decoder imposes no universal signature-carrier size limit. It copies recognized fields
+/// into owned buffers, so allocation and copying are linear in field size. Callers handling
+/// untrusted data must enforce deployment-appropriate size limits before invocation.
 pub fn decode_signature_carrier(
     carrier: &[u8],
 ) -> Result<crate::pb::YamlSigilSignature, CoreError> {
