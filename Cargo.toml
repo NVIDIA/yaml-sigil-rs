@@ -36,7 +36,7 @@ yaml-sigil-transcription = { version = "0.5.0-rc.1", path = "crates/yaml-sigil-t
 yaml-sigil-verification = { version = "0.5.0-rc.1", path = "crates/yaml-sigil-verification", default-features = false }
 yaml-sigil-signing = { version = "0.5.0-rc.1", path = "crates/yaml-sigil-signing", default-features = false }
 
-base64 = "0.22"
+base64 = "0.23.1"
 buf-tools = "=1.72.0-hotfix.1"
 buffa = "0.9.1"
 buffa-build = "0.9.1"
@@ -46,12 +46,12 @@ ed25519-dalek = { version = "2.1", default-features = false, features = [
     "fast",
     "rand_core",
 ] }
-jsonschema = { version = "0.46.5", default-features = false }
+jsonschema = { version = "0.51.0", default-features = false }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 rand = "0.8"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde_json = "1.0"
-noyalib = { version = "0.0.26", default-features = false, features = ["std"] }
+noyalib = { version = "0.0.28", default-features = false, features = ["std"] }
 tracing = "0.1"
 tokio = { version = "1", default-features = false }
 
