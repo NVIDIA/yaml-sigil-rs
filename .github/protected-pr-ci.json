@@ -64,7 +64,7 @@
     ".release-plz.toml",
     "release-plz.toml",
     ".gitmodules",
-    "source-spec",
+    "source-spec/**",
     "crates/yaml-sigil-core/buf.yaml",
     "crates/yaml-sigil-core/buf.lock",
     "crates/yaml-sigil-core/buf.gen.yaml",
