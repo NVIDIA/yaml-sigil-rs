@@ -10,7 +10,6 @@ exceptions = [
     { allow = ["Unicode-3.0"], crate = "icu_properties_data@2.3.0" },
     { allow = ["Unicode-3.0"], crate = "icu_provider@2.3.1" },
     { allow = ["Unicode-3.0"], crate = "litemap@0.8.3" },
-    { allow = ["MPL-2.0"], crate = "option-ext@0.2.0" },
     { allow = ["Unicode-3.0"], crate = "potential_utf@0.1.6" },
     { allow = ["Unicode-3.0"], crate = "tinystr@0.8.4" },
     { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.24" },
