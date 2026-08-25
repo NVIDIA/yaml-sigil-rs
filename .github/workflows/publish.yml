@@ -1,35 +1,28 @@
 name: Publish
 
-# This workflow distributes crates.io source packages and creates version tags
-# plus source-only GitHub Releases for official releases. PR snapshots create
-# neither tags nor Releases. No path builds or uploads executable artifacts.
+# This workflow distributes four crates.io source packages and creates
+# annotated package tags plus source-only GitHub Releases. It builds, uploads,
+# and retains no executable artifact.
 on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Validate or publish an official release or tested PR snapshot.
+        description: Validate or publish an official release.
         required: true
         default: validate
         type: choice
         options:
           - validate
           - publish
-          - validate-pr
-          - publish-pr
-      pr_number:
-        description: Pull-request number for validate-pr or publish-pr.
-        required: false
-        type: string
 
 permissions: {}
 
 env:
-  # release-plz needs the named crates.io registry to resolve manifests whose
-  # publish allowlist is `["crates-io"]`.
+  # Resolve the manifests' explicit `crates-io` publish allowlists by name.
   CARGO_REGISTRIES_CRATES_IO_INDEX: https://github.com/rust-lang/crates.io-index
 
-# Publication is resumable, so never cancel a run that might have uploaded one
-# crate while a replacement waits for a publication environment.
+# Publication is resumable, so never cancel a run that may already have
+# uploaded a source package while a replacement waits for approval.
 concurrency:
   group: publish-${{ github.repository }}
   cancel-in-progress: false
@@ -50,8 +43,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # A manual dispatch may name another ref. Keep official release authority
-      # on the protected default branch whose pull requests passed Required CI.
       - name: Validate invocation
         env:
           EXPECTED_REPOSITORY: NVIDIA/yaml-sigil-rs
@@ -61,9 +52,10 @@ jobs:
             echo "This workflow runs only in ${EXPECTED_REPOSITORY}." >&2
             exit 1
           fi
-          # Official tags and Releases may originate only from protected main.
-          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
-            echo "Official release operations must be dispatched from main." >&2
+          # Official release authority belongs only to exact protected main.
+          if [[ "${GITHUB_REF}" != "refs/heads/main" \
+            || "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
+            echo "Official release operations must use exact main." >&2
             exit 1
           fi
 
@@ -71,34 +63,86 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache: false
+          toolchain: 1.95.0
 
-      - name: Require committed synchronized release versions
+      - name: Install exact cargo-binstall
+        uses: cargo-bins/cargo-binstall@732870f031d2fb36309d0deaf36abcc704a7be65 # v1.20.1
+        with:
+          version: 1.20.1
+
+      - name: Install and verify release analyzers
+        run: cargo xtask release install-tools
+
+      - name: Configure read-only release forge identity
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/configure-release-git-user.sh
+
+      - name: Require a committed synchronized release version
         run: |
           cargo xtask release-version check
           git diff --exit-code
 
-      # `autobins = false` prevents implicit executable targets. Reject an
-      # explicit `[[bin]]` target in any publishable implementation crate too.
-      # Keep signing ahead of verification because Cargo resolves the latter's
-      # signing development dependency during publication preparation.
-      - name: Require library-only release packages in publication order
-        run: |
-          bash .github/scripts/check-release-packages.sh \
-            yaml-sigil-core \
-            yaml-sigil-transcription \
-            yaml-sigil-signing \
-            yaml-sigil-verification
+      - name: Require exact traits availability and source
+        run: cargo xtask release verify-traits
 
-      # These patches exist only so Cargo and release-plz can validate the
-      # unpublished intra-workspace dependency graph. Traits remains unpatched,
-      # so verification requires its manifest version on crates.io.
-      - name: Prepare unpublished workspace dependencies
+      - name: Prepare the official tagged baseline
+        id: baseline
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: remote.origin.pushurl
+          GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-proposal
+        run: |
+          current_version="$(cargo xtask release-version show)"
+          python3 .github/scripts/prepare_release_baseline.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --head "${GITHUB_SHA}" \
+            --exclude-version "${current_version}" \
+            --output "${RUNNER_TEMP}/official-release-baseline" \
+            --expected-fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+
+      - name: Require the tagged baseline on crates.io
+        run: >-
+          cargo xtask release verify-registry
+          --check-version "${{ steps.baseline.outputs.version }}"
+          yaml-sigil-core
+          yaml-sigil-transcription
+          yaml-sigil-signing
+          yaml-sigil-verification
+
+      - name: Check release API compatibility
+        run: |
+          current_version="$(cargo xtask release-version show)"
+          intent="$(cargo xtask release-version intent \
+            --published "${{ steps.baseline.outputs.version }}")"
+          cargo xtask release-version check-compatibility \
+            --baseline-manifest "${{ steps.baseline.outputs.manifest }}" \
+            --current-manifest Cargo.toml \
+            --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
+            --expected-current-version "${current_version}" \
+            --intent "${intent}"
+
+      # Require the exact dependency-safe package order and reject executable
+      # targets before any release-plz invocation.
+      - name: Require the exact source-package inventory
+        run: >-
+          cargo xtask release check-packages
+          yaml-sigil-core
+          yaml-sigil-transcription
+          yaml-sigil-signing
+          yaml-sigil-verification
+
+      # Patch only unpublished workspace dependencies in a dedicated Cargo
+      # home so Cargo and release-plz can validate the current source train.
+      - name: Prepare validation-only Cargo configuration
         run: |
           validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-release-cargo-home"
-          bash .github/scripts/prepare-unpublished-workspace-dependencies.sh \
-            "${validation_cargo_home}"
+          cargo xtask release prepare-validation-cargo-home \
+            --output "${validation_cargo_home}"
           printf 'CARGO_HOME=%s\n' "${validation_cargo_home}" >>"${GITHUB_ENV}"
 
+      # Keep signing ahead of verification because Cargo resolves the latter's
+      # signing development dependency during publication preparation.
       - name: Package with Cargo
         run: |
           cargo package --package yaml-sigil-core --all-features
@@ -106,16 +150,38 @@ jobs:
           cargo package --package yaml-sigil-signing --all-features
           cargo package --package yaml-sigil-verification --all-features
 
-      - name: Validate release-plz publication plan
-        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+      - name: Require exact merged release authorization
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          command: release
-          config: .release-plz.toml
-          dry_run: true
-          manifest_path: Cargo.toml
-          version: "0.3.160"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/verify_release_publication_source.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --commit "${GITHUB_SHA}" \
+            --baseline-version "${{ steps.baseline.outputs.version }}" \
+            --baseline-commit "${{ steps.baseline.outputs.commit }}"
+
+      # Change only release-plz's publication switch and impossible branch
+      # prefix so it cannot replace the already authorized current checkout.
+      - name: Prepare checkout-bound release configuration
+        run: |
+          cargo xtask release prepare-publication-config \
+            --output "${RUNNER_TEMP}/release-plz-publication.toml"
+
+      - name: Validate release-plz publication plan
+        env:
+          GIT_TOKEN: ${{ github.token }}
+        run: |
+          cargo xtask release require-current-main \
+            --head "${GITHUB_SHA}" \
+            --fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          # Exercise package selection and forge discovery without OIDC or writes.
+          release-plz release \
+            --dry-run \
+            --forge github \
+            --config "${RUNNER_TEMP}/release-plz-publication.toml" \
+            --manifest-path Cargo.toml
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
 
   publication:
     name: Publish release
@@ -125,7 +191,7 @@ jobs:
     timeout-minutes: 60
     environment: crates-io
     permissions:
-      # Create version tags and source-only GitHub Releases after publishing.
+      # Create annotated package tags and source-only Releases after publication.
       contents: write
       pull-requests: read
       id-token: write
@@ -140,33 +206,180 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache: false
+          toolchain: 1.95.0
 
-      - name: Recheck committed synchronized release versions
+      - name: Install exact cargo-binstall
+        uses: cargo-bins/cargo-binstall@732870f031d2fb36309d0deaf36abcc704a7be65 # v1.20.1
+        with:
+          version: 1.20.1
+
+      - name: Install and verify release analyzers
+        run: cargo xtask release install-tools
+
+      - name: Configure protected publication forge identity
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/configure-release-git-user.sh
+
+      - name: Recheck the committed synchronized release version
         run: |
           cargo xtask release-version check
           git diff --exit-code
 
-      # release-plz exchanges the job's OIDC identity for a short-lived
-      # crates.io credential, then creates configured version tags and
-      # source-only GitHub Releases. It does not build or attach binary assets.
-      # Deliberately omit both a registry token and the dry_run input.
-      - name: Publish with Trusted Publishing
-        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          command: release
-          config: .release-plz.toml
-          manifest_path: Cargo.toml
-          version: "0.3.160"
+      - name: Recheck exact traits availability and source
+        run: cargo xtask release verify-traits
 
-      - name: Verify crates.io publication
+      - name: Prepare the official tagged baseline
+        id: baseline
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: remote.origin.pushurl
+          GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-proposal
         run: |
-          bash .github/scripts/verify-crates-io-packages.sh \
+          current_version="$(cargo xtask release-version show)"
+          python3 .github/scripts/prepare_release_baseline.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --head "${GITHUB_SHA}" \
+            --exclude-version "${current_version}" \
+            --output "${RUNNER_TEMP}/official-release-baseline" \
+            --expected-fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+
+      - name: Require the tagged baseline on crates.io
+        run: >-
+          cargo xtask release verify-registry
+          --check-version "${{ steps.baseline.outputs.version }}"
+          yaml-sigil-core
+          yaml-sigil-transcription
+          yaml-sigil-signing
+          yaml-sigil-verification
+
+      - name: Recheck release API compatibility
+        run: |
+          current_version="$(cargo xtask release-version show)"
+          intent="$(cargo xtask release-version intent \
+            --published "${{ steps.baseline.outputs.version }}")"
+          cargo xtask release-version check-compatibility \
+            --baseline-manifest "${{ steps.baseline.outputs.manifest }}" \
+            --current-manifest Cargo.toml \
+            --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
+            --expected-current-version "${current_version}" \
+            --intent "${intent}"
+
+      - name: Recheck the exact source-package inventory
+        run: >-
+          cargo xtask release check-packages
+          yaml-sigil-core
+          yaml-sigil-transcription
+          yaml-sigil-signing
+          yaml-sigil-verification
+
+      # Use a new unpatched Cargo home so the OIDC-authorized job exercises the
+      # same registry dependency ordering required by a real crates.io upload.
+      - name: Prepare publication Cargo configuration
+        run: |
+          publication_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-publication-cargo-home"
+          cargo xtask release prepare-publication-cargo-home \
+            --output "${publication_cargo_home}"
+          printf 'CARGO_HOME=%s\n' "${publication_cargo_home}" >>"${GITHUB_ENV}"
+
+      # Change only release-plz's publication switch and impossible branch
+      # prefix so it cannot replace the already authorized current checkout.
+      - name: Prepare checkout-bound release configuration
+        run: |
+          cargo xtask release prepare-publication-config \
+            --output "${RUNNER_TEMP}/release-plz-publication.toml"
+
+      - name: Publish with Trusted Publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cargo xtask release-version show)"
+          set +e
+          cargo xtask release verify-registry \
+            --check-version "${version}" \
             yaml-sigil-core \
             yaml-sigil-transcription \
             yaml-sigil-signing \
             yaml-sigil-verification
+          registry_status="$?"
+          set -e
+          python3 .github/scripts/verify_release_publication_source.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --commit "${GITHUB_SHA}" \
+            --baseline-version "${{ steps.baseline.outputs.version }}" \
+            --baseline-commit "${{ steps.baseline.outputs.commit }}"
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=remote.origin.pushurl \
+            GIT_CONFIG_VALUE_0=disabled://yaml-sigil-release-proposal \
+            python3 .github/scripts/prepare_release_baseline.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --head "${GITHUB_SHA}" \
+            --verify-inventory "${{ steps.baseline.outputs.inventory }}" \
+            --expected-fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+          cargo xtask release require-current-main \
+            --head "${GITHUB_SHA}" \
+            --fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          # Complete publication selects metadata recovery. Any absent package
+          # permits a fresh or fail-closed resumed Trusted Publishing attempt.
+          case "${registry_status}" in
+            0)
+              python3 .github/scripts/reconcile_release_objects.py \
+                --repository "${GITHUB_REPOSITORY}" \
+                --version "${version}" \
+                --commit "${GITHUB_SHA}" \
+                --mode preflight
+              echo "All exact crates are published; skipping registry mutation."
+              ;;
+            3)
+              python3 .github/scripts/reconcile_release_objects.py \
+                --repository "${GITHUB_REPOSITORY}" \
+                --version "${version}" \
+                --commit "${GITHUB_SHA}" \
+                --mode prepublish
+              cargo xtask release require-current-main \
+                --head "${GITHUB_SHA}" \
+                --fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+              test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+              # Exchange only this protected job's OIDC identity, publish the
+              # source packages, and create annotated tags and Releases.
+              release-plz release \
+                --forge github \
+                --config "${RUNNER_TEMP}/release-plz-publication.toml" \
+                --manifest-path Cargo.toml
+              test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+              ;;
+            *)
+              echo "The exact crates.io publication state is invalid." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify crates.io publication
+        run: >-
+          cargo xtask release verify-registry
+          yaml-sigil-core
+          yaml-sigil-transcription
+          yaml-sigil-signing
+          yaml-sigil-verification
+
+      - name: Verify or recover source-only release objects
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cargo xtask release-version show)"
+          cargo xtask release require-current-main \
+            --head "${GITHUB_SHA}" \
+            --fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          # Recovery can create only missing annotated tags and Releases after
+          # it independently rechecks every exact non-yanked registry package.
+          python3 .github/scripts/reconcile_release_objects.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${version}" \
+            --commit "${GITHUB_SHA}" \
+            --mode recover
 
       - name: Request the next release proposal
         env:
@@ -176,236 +389,3 @@ jobs:
           jq --null-input --arg version "${version}" \
             '{event_type: "official-release-published", client_payload: {version: $version}}' \
             | gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" --input -
-
-  resolve_pr:
-    name: Resolve tested PR
-    if: ${{ inputs.operation == 'validate-pr' || inputs.operation == 'publish-pr' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-    outputs:
-      number: ${{ steps.resolve.outputs.number }}
-      sha: ${{ steps.resolve.outputs.sha }}
-    steps:
-      # Load the PR authorization policy from trusted main, not from the PR.
-      - name: Check out trusted PR authorization policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: Resolve writer-authorized PR head and successful CI
-        id: resolve
-        env:
-          EXPECTED_REPOSITORY: NVIDIA/yaml-sigil-rs
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-        run: bash .github/scripts/resolve-tested-pull-request.sh
-
-  validate_pr:
-    name: Validate PR snapshot
-    if: ${{ inputs.operation == 'validate-pr' || inputs.operation == 'publish-pr' }}
-    needs: resolve_pr
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      version: ${{ steps.snapshot.outputs.version }}
-    steps:
-      - name: Check out trusted release tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-        with:
-          cache: false
-
-      - name: Stage trusted release tooling
-        run: |
-          cargo build --locked --manifest-path xtask/Cargo.toml --bin xtask
-          install -m 0755 xtask/target/debug/xtask "${RUNNER_TEMP}/yaml-sigil-xtask"
-          cp .release-plz-snapshot.toml "${RUNNER_TEMP}/release-plz-snapshot.toml"
-          cp .github/scripts/check-release-packages.sh \
-            "${RUNNER_TEMP}/check-release-packages.sh"
-          cp .github/scripts/prepare-unpublished-workspace-dependencies.sh \
-            "${RUNNER_TEMP}/prepare-unpublished-workspace-dependencies.sh"
-
-      - name: Check out exact PR head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve_pr.outputs.sha }}
-
-      # release-plz requires an attached branch with an upstream. Preserve the
-      # resolver's immutable PR head while attaching it to trusted main.
-      - name: Attach exact PR head for release-plz
-        env:
-          PR_NUMBER: ${{ needs.resolve_pr.outputs.number }}
-          PR_SHA: ${{ needs.resolve_pr.outputs.sha }}
-        run: |
-          git switch --create "release-plz-pr-${PR_NUMBER}"
-          git branch --set-upstream-to=origin/main
-          test "$(git rev-parse HEAD)" = "${PR_SHA}"
-
-      - name: Apply synchronized ephemeral snapshot version
-        id: snapshot
-        env:
-          PR_NUMBER: ${{ needs.resolve_pr.outputs.number }}
-          PR_SHA: ${{ needs.resolve_pr.outputs.sha }}
-        run: |
-          version="$(
-            "${RUNNER_TEMP}/yaml-sigil-xtask" release-version snapshot \
-              --pr "${PR_NUMBER}" --sha "${PR_SHA}"
-          )"
-          "${RUNNER_TEMP}/yaml-sigil-xtask" release-version check
-          echo "version=${version}" >>"${GITHUB_OUTPUT}"
-
-      - name: Require library-only snapshot packages in publication order
-        run: |
-          bash "${RUNNER_TEMP}/check-release-packages.sh" \
-            yaml-sigil-core \
-            yaml-sigil-transcription \
-            yaml-sigil-signing \
-            yaml-sigil-verification
-
-      - name: Prepare unpublished snapshot dependencies
-        run: |
-          validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-snapshot-cargo-home"
-          bash "${RUNNER_TEMP}/prepare-unpublished-workspace-dependencies.sh" \
-            "${validation_cargo_home}"
-          printf 'CARGO_HOME=%s\n' "${validation_cargo_home}" >>"${GITHUB_ENV}"
-
-      - name: Package snapshot with Cargo
-        run: |
-          cargo package --allow-dirty --package yaml-sigil-core --all-features
-          cargo package --allow-dirty --package yaml-sigil-transcription
-          cargo package --allow-dirty --package yaml-sigil-signing --all-features
-          cargo package --allow-dirty --package yaml-sigil-verification --all-features
-
-      - name: Validate snapshot publication plan
-        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          command: release
-          config: ${{ runner.temp }}/release-plz-snapshot.toml
-          dry_run: true
-          manifest_path: Cargo.toml
-          version: "0.3.160"
-
-  publish_pr:
-    name: Publish PR snapshot
-    if: ${{ inputs.operation == 'publish-pr' }}
-    needs:
-      - resolve_pr
-      - validate_pr
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    environment: crates-io-pr
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-      id-token: write
-    steps:
-      - name: Check out trusted release tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-        with:
-          cache: false
-
-      - name: Stage trusted release tooling
-        run: |
-          cargo build --locked --manifest-path xtask/Cargo.toml --bin xtask
-          install -m 0755 xtask/target/debug/xtask "${RUNNER_TEMP}/yaml-sigil-xtask"
-          cp .release-plz-snapshot.toml "${RUNNER_TEMP}/release-plz-snapshot.toml"
-          cp .github/scripts/check-release-packages.sh \
-            "${RUNNER_TEMP}/check-release-packages.sh"
-          cp .github/scripts/recheck-tested-pull-request.sh \
-            "${RUNNER_TEMP}/recheck-tested-pull-request.sh"
-          cp .github/scripts/require-tested-copied-head.sh \
-            "${RUNNER_TEMP}/require-tested-copied-head.sh"
-          cp .github/scripts/verify-crates-io-packages.sh \
-            "${RUNNER_TEMP}/verify-crates-io-packages.sh"
-
-      - name: Recheck exact PR head and successful CI
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ needs.resolve_pr.outputs.number }}
-          PR_SHA: ${{ needs.resolve_pr.outputs.sha }}
-        run: bash "${RUNNER_TEMP}/recheck-tested-pull-request.sh"
-
-      - name: Check out exact PR head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ needs.resolve_pr.outputs.sha }}
-
-      # Keep the separately authorized publication on the exact rechecked SHA
-      # while satisfying release-plz's attached-upstream requirement.
-      - name: Attach exact PR head for release-plz
-        env:
-          PR_NUMBER: ${{ needs.resolve_pr.outputs.number }}
-          PR_SHA: ${{ needs.resolve_pr.outputs.sha }}
-        run: |
-          git switch --create "release-plz-pr-${PR_NUMBER}"
-          git branch --set-upstream-to=origin/main
-          test "$(git rev-parse HEAD)" = "${PR_SHA}"
-
-      - name: Reapply exact synchronized snapshot version
-        env:
-          EXPECTED_VERSION: ${{ needs.validate_pr.outputs.version }}
-          PR_NUMBER: ${{ needs.resolve_pr.outputs.number }}
-          PR_SHA: ${{ needs.resolve_pr.outputs.sha }}
-        run: |
-          version="$(
-            "${RUNNER_TEMP}/yaml-sigil-xtask" release-version snapshot \
-              --pr "${PR_NUMBER}" --sha "${PR_SHA}"
-          )"
-          "${RUNNER_TEMP}/yaml-sigil-xtask" release-version check
-          # Bind publication to the version calculated during validation.
-          if [[ "${version}" != "${EXPECTED_VERSION}" ]]; then
-            echo "Snapshot version changed between validation and publication." >&2
-            exit 1
-          fi
-
-      - name: Recheck library-only snapshot packages in publication order
-        run: |
-          bash "${RUNNER_TEMP}/check-release-packages.sh" \
-            yaml-sigil-core \
-            yaml-sigil-transcription \
-            yaml-sigil-signing \
-            yaml-sigil-verification
-
-      - name: Publish snapshots with Trusted Publishing
-        uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          command: release
-          config: ${{ runner.temp }}/release-plz-snapshot.toml
-          manifest_path: Cargo.toml
-          version: "0.3.160"
-
-      - name: Verify crates.io snapshots
-        run: |
-          bash "${RUNNER_TEMP}/verify-crates-io-packages.sh" \
-            yaml-sigil-core \
-            yaml-sigil-transcription \
-            yaml-sigil-signing \
-            yaml-sigil-verification

@@ -5,12 +5,13 @@
 
 mod ci;
 mod package_content;
+mod release;
 mod spec_update;
 mod versions;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
@@ -73,6 +74,8 @@ enum Task {
     },
     /// Manage provider-neutral release version transactions.
     ReleaseVersion(versions::ReleaseVersionArgs),
+    /// Run provider-neutral release preparation and verification.
+    Release(release::ReleaseArgs),
 }
 
 #[derive(Args)]
@@ -82,35 +85,54 @@ struct UpdateSpecArgs {
     spec_ref: Option<String>,
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    match execute() {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("xtask failed: {error:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn execute() -> Result<ExitCode> {
     let root = workspace_root();
     let cli = Cli::parse();
     match cli.command {
         Task::Ci { candidate_root } => {
             let candidate = resolve_candidate_root(candidate_root.as_deref().unwrap_or(&root))?;
-            ci::run(&candidate)
+            ci::run(&candidate)?;
         }
         Task::PackageContent => {
             package_content::run(&root)?;
-            Ok(())
         }
-        Task::Profile { open, iterations } => profile(&root, open, iterations),
-        Task::ProfileOpen => profile_open(&root),
-        Task::Coverage { open } => coverage(&root, open),
-        Task::CoverageOpen => coverage_open(&root),
+        Task::Profile { open, iterations } => profile(&root, open, iterations)?,
+        Task::ProfileOpen => profile_open(&root)?,
+        Task::Coverage { open } => coverage(&root, open)?,
+        Task::CoverageOpen => coverage_open(&root)?,
         Task::UpdateSpec(args) => {
             let spec_ref = args
                 .spec_ref
                 .as_deref()
                 .unwrap_or(spec_update::DEFAULT_SPEC_REF);
             spec_update::update_spec(&root, spec_ref)?;
-            Ok(())
         }
         Task::SyncWorkspaceVersions { check } => {
             versions::sync_workspace_dependency_versions(&root, check)?;
-            Ok(())
         }
-        Task::ReleaseVersion(args) => versions::release_version(&root, args),
+        Task::ReleaseVersion(args) => versions::release_version(&root, args)?,
+        Task::Release(args) => {
+            return release::release(&root, args)
+                .map(|outcome| ExitCode::from(release_exit_code(outcome)));
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn release_exit_code(outcome: release::Outcome) -> u8 {
+    match outcome {
+        release::Outcome::Success => 0,
+        release::Outcome::RegistryUnavailable => 3,
     }
 }
 
@@ -438,6 +460,12 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains(CARGO_LLVM_COV_INSTALL));
+    }
+
+    #[test]
+    fn registry_unavailable_retains_the_ordered_wait_status() {
+        assert_eq!(release_exit_code(release::Outcome::Success), 0);
+        assert_eq!(release_exit_code(release::Outcome::RegistryUnavailable), 3);
     }
 
     #[test]

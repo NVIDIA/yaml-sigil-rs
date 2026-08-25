@@ -35,9 +35,11 @@ calculates and commits versions on its dedicated `release-plz-*` branch.
 When the required `major`, `minor`, or `patch` advance is not discoverable from
 the commits, state the intended impact in the contribution pull request. A
 repository writer can dispatch the `Release proposal` workflow with
-`next-candidate` and the matching bump override. The workflow records an
-explicit override in the release pull request so later updates preserve it.
-Dispatch `auto` to clear that override and return to automatic calculation.
+`next-candidate` and the matching bump selection. The workflow uses that
+dispatch input directly; pull-request text is not release authority. A
+background event may create one default `patch` proposal when none exists, but
+it never revises an existing proposal. Incorporating later changes or choosing
+a different version line requires another explicit writer dispatch.
 
 When the release-proposal GitHub App is unavailable or cannot safely update its
 owned branch, repository writers use the permanent manual release-proposal
@@ -55,9 +57,7 @@ cargo xtask sync-workspace-versions --check
 ```
 
 Official RC and stable publication rejects an unsynchronized or dirty source
-tree. Pull-request snapshots are different. Their `0.pr` versions are applied
-only in an ephemeral checkout and may be published from that intentionally
-dirty tree without mutating the contributor's branch.
+tree. Pull requests do not publish preview versions.
 
 ## Pull-request CI
 
