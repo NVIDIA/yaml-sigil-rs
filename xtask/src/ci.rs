@@ -13,6 +13,8 @@ use super::{bounded_process, package_content, require_success, require_tool, ver
 
 const CARGO_AUDIT_INSTALL_GUIDANCE: &str =
     "cargo +1.98.0 install --locked cargo-audit --version 0.22.2";
+const CARGO_DENY_INSTALL_GUIDANCE: &str =
+    "cargo +1.98.0 install --locked cargo-deny --version 0.20.2";
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str =
     "cargo +1.98.0 install --locked cargo-machete --version 0.9.2";
 #[cfg(test)]
@@ -121,6 +123,33 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         args: &["--with-metadata"],
     },
     Step {
+        label: "Rust dependency policy",
+        program: "cargo",
+        args: &[
+            "deny", "check", "bans", "licenses", "sources", "-D", "warnings",
+        ],
+    },
+    Step {
+        label: "xtask dependency policy",
+        program: "cargo",
+        args: &[
+            "deny",
+            "--manifest-path",
+            "xtask/Cargo.toml",
+            "--locked",
+            "check",
+            "bans",
+            "licenses",
+            "sources",
+            "-D",
+            "warnings",
+            "-A",
+            "unnecessary-skip",
+            "-A",
+            "unmatched-skip",
+        ],
+    },
+    Step {
         label: "Rust dependency audit",
         program: "cargo",
         args: &["audit"],
@@ -134,6 +163,7 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
 
 pub(crate) fn run(root: &Path) -> Result<()> {
     require_tool("cargo-audit", CARGO_AUDIT_INSTALL_GUIDANCE)?;
+    require_tool("cargo-deny", CARGO_DENY_INSTALL_GUIDANCE)?;
     require_tool("cargo-machete", CARGO_MACHETE_INSTALL_GUIDANCE)?;
     for step in BEFORE_PACKAGE_CONTENT {
         run_step(root, *step)?;
@@ -165,8 +195,12 @@ mod tests {
     #[test]
     fn dependency_tool_guidance_is_aligned() {
         assert!(AGENT_GUIDANCE.contains(CARGO_AUDIT_INSTALL_GUIDANCE));
+        assert!(AGENT_GUIDANCE.contains(CARGO_DENY_INSTALL_GUIDANCE));
         assert!(AGENT_GUIDANCE.contains(CARGO_MACHETE_INSTALL_GUIDANCE));
         assert!(AGENT_GUIDANCE.contains("cargo-machete --with-metadata"));
+        assert!(AGENT_GUIDANCE.contains(
+            "cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources"
+        ));
     }
 
     #[test]

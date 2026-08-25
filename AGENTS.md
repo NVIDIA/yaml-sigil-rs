@@ -244,6 +244,8 @@ cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets --all-featu
 cargo test --workspace --all-features
 cargo test --locked --manifest-path xtask/Cargo.toml
 cargo-machete --with-metadata
+cargo deny check bans licenses sources -D warnings
+cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources -D warnings -A unnecessary-skip -A unmatched-skip
 cargo audit
 cargo audit --file xtask/Cargo.lock
 ```
@@ -252,9 +254,11 @@ Copied-ref CI first runs protected commit/release-path policy plus fixed-path
 actionlint, ShellCheck, rumdl, cargo-machete, and `cargo-audit` against the
 committed `xtask/Cargo.lock`. The root lockfile is intentionally absent, so the
 full workspace audit inside the final `cargo xtask ci` phase is candidate
-execution, not trusted pre-execution policy evidence. Candidate tools, Cargo
-state, targets, temporary files, and materialized source stay under fresh
-runner-temporary paths; no policy or privileged step follows candidate Rust.
+execution, not trusted pre-execution policy evidence. The Cargo Deny checks
+also run inside that final phase because they resolve candidate dependency
+graphs. Candidate tools, Cargo state, targets, temporary files, and
+materialized source stay under fresh runner-temporary paths; no policy or
+privileged step follows candidate Rust.
 
 The static package-content stage runs
 `cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
@@ -330,27 +334,37 @@ For each future coordinated upgrade:
 - Confirm that CI used the pinned `buf-tools` executable and retained no
   artifacts.
 
-Install `rumdl`, exact `cargo-audit` `0.22.2`, and exact `cargo-machete`
-`0.9.2` with Cargo before running the wrapper:
+Install `rumdl`, exact `cargo-audit` `0.22.2`, exact `cargo-deny` `0.20.2`,
+and exact `cargo-machete` `0.9.2` with Cargo before running the wrapper:
 
 ```shell
 rustup toolchain install 1.98.0 --component clippy,rustfmt
 cargo +1.98.0 install rumdl
 cargo +1.98.0 install --locked cargo-audit --version 0.22.2
+cargo +1.98.0 install --locked cargo-deny --version 0.20.2
 cargo +1.98.0 install --locked cargo-machete --version 0.9.2
 ```
 
-Keep the cargo-audit and cargo-machete versions aligned with hosted CI, and
-require `cargo-audit --version` to report exactly `cargo-audit 0.22.2`. The
-`--with-metadata` check resolves normal, development, and build dependency
-names across all features, but remains an unused-dependency heuristic; retain
-the all-target, all-feature Clippy and test checks as the compilation proof.
+Cargo Deny reads the repository-wide policy from `deny.toml` and the exact
+license exceptions for each graph from the nearest `deny.exceptions.toml`.
+The root check resolves the uncommitted workspace graph, while the xtask check
+uses its committed lockfile. The xtask command suppresses only warnings for
+root-only duplicate-version skips in the shared policy; unapproved duplicates
+still fail both checks.
 
-Hosted CI declares these checks as independent steps. Keep its command coverage,
-`xtask/src/ci.rs`, and the exact-command documentation above aligned when
-changing the validation sequence. Do not make the xtask read, parse, or test
-provider-specific workflow files. Validate provider configuration with its
-native tooling.
+Keep the cargo-audit, cargo-deny, and cargo-machete versions aligned with
+hosted CI. Require `cargo-audit --version` to report exactly
+`cargo-audit 0.22.2` and `cargo-deny --version` to report exactly
+`cargo-deny 0.20.2`. The `--with-metadata` check resolves normal, development,
+and build dependency names across all features, but remains an
+unused-dependency heuristic; retain the all-target, all-feature Clippy and
+test checks as the compilation proof.
+
+Hosted CI runs this sequence through `cargo xtask ci`. Keep its command
+coverage, `xtask/src/ci.rs`, and the exact-command documentation above aligned
+when changing the validation sequence. Do not make the xtask read, parse, or
+test provider-specific workflow files. Validate provider configuration with
+its native tooling.
 
 The only permitted provider-specific xtask namespace is
 `cargo xtask github`. Keep it limited to typed, repository-owned GitHub

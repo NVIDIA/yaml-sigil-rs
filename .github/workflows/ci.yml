@@ -45,10 +45,12 @@ jobs:
         with:
           checksum: true
           fallback: none
-          tool: cargo-audit@0.22.2,cargo-machete@0.9.2
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2,cargo-machete@0.9.2
 
-      - name: Verify exact dependency-audit tool
-        run: cargo-audit --version | grep -Fx 'cargo-audit 0.22.2'
+      - name: Verify exact dependency-policy tools
+        run: |
+          cargo-audit --version | grep -Fx 'cargo-audit 0.22.2'
+          cargo-deny --version | grep -Fx 'cargo-deny 0.20.2'
         shell: bash
 
       - name: Install Markdown validator
@@ -71,7 +73,7 @@ jobs:
           .github/scripts/test-trusted-tool-pins.sh
 
       # `cargo xtask ci` runs Markdown, Protobuf, formatting, package-content,
-      # Clippy, test, unused-dependency, and dependency-audit checks.
+      # Clippy, test, unused-dependency, dependency-policy, and audit checks.
       - name: Run provider-neutral CI
         run: cargo xtask ci
 
@@ -253,7 +255,7 @@ jobs:
         with:
           checksum: true
           fallback: none
-          tool: cargo-audit@0.22.2,cargo-machete@0.9.2,shellcheck@0.11.0
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2,cargo-machete@0.9.2,shellcheck@0.11.0
 
       - name: Install Markdown validator before candidate materialization
         # Refresh this immutable pin frequently to keep pace with rumdl releases.
@@ -312,6 +314,8 @@ jobs:
           install -m 0500 "${cargo_source}" "${cargo_bin}"
           install -m 0500 "$(command -v cargo-audit)" \
             "${RUNNER_TEMP}/candidate-tools/cargo-audit"
+          install -m 0500 "$(command -v cargo-deny)" \
+            "${RUNNER_TEMP}/candidate-tools/cargo-deny"
           install -m 0500 "$(command -v cargo-machete)" \
             "${RUNNER_TEMP}/candidate-tools/cargo-machete"
           install -m 0500 "$(command -v rumdl)" \
@@ -321,6 +325,8 @@ jobs:
           test -x "${cargo_bin}"
           "${RUNNER_TEMP}/candidate-tools/cargo-audit" --version \
             | grep -Fx 'cargo-audit 0.22.2'
+          "${RUNNER_TEMP}/candidate-tools/cargo-deny" --version \
+            | grep -Fx 'cargo-deny 0.20.2'
           echo "cargo=${cargo_bin}" >> "${GITHUB_OUTPUT}"
           echo "path=${RUNNER_TEMP}/candidate-tools:/usr/local/bin:/usr/bin:/bin" \
             >> "${GITHUB_OUTPUT}"

@@ -1,0 +1,6 @@
+# These licenses are restricted to exact crates in the developer-tool graph.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "option-ext@0.2.0" },
+    { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.24" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots@1.0.9" },
+]

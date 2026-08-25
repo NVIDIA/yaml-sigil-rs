@@ -1,0 +1,26 @@
+# MIT-0 is restricted to the exact JSON Schema dependency in this graph.
+# Unicode-3.0 is restricted to the exact Unicode support crates in this graph.
+exceptions = [
+    { allow = ["MIT-0"], crate = "borrow-or-share@0.2.4" },
+    { allow = ["Unicode-3.0"], crate = "icu_collections@2.3.0" },
+    { allow = ["Unicode-3.0"], crate = "icu_locale_core@2.3.0" },
+    { allow = ["Unicode-3.0"], crate = "icu_normalizer@2.3.0" },
+    { allow = ["Unicode-3.0"], crate = "icu_normalizer_data@2.3.0" },
+    { allow = ["Unicode-3.0"], crate = "icu_properties@2.3.0" },
+    { allow = ["Unicode-3.0"], crate = "icu_properties_data@2.3.0" },
+    { allow = ["Unicode-3.0"], crate = "icu_provider@2.3.1" },
+    { allow = ["Unicode-3.0"], crate = "litemap@0.8.3" },
+    { allow = ["MPL-2.0"], crate = "option-ext@0.2.0" },
+    { allow = ["Unicode-3.0"], crate = "potential_utf@0.1.6" },
+    { allow = ["Unicode-3.0"], crate = "tinystr@0.8.4" },
+    { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.24" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots@1.0.9" },
+    { allow = ["Unicode-3.0"], crate = "writeable@0.6.4" },
+    { allow = ["Unicode-3.0"], crate = "yoke@0.8.3" },
+    { allow = ["Unicode-3.0"], crate = "yoke-derive@0.8.2" },
+    { allow = ["Unicode-3.0"], crate = "zerofrom@0.1.8" },
+    { allow = ["Unicode-3.0"], crate = "zerofrom-derive@0.1.7" },
+    { allow = ["Unicode-3.0"], crate = "zerotrie@0.2.5" },
+    { allow = ["Unicode-3.0"], crate = "zerovec@0.11.8" },
+    { allow = ["Unicode-3.0"], crate = "zerovec-derive@0.11.6" },
+]
