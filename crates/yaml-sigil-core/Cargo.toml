@@ -54,7 +54,7 @@ path = "src/lib.rs"
 json-schema-validate = ["dep:jsonschema", "dep:serde_json"]
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23.1"
 serde = { version = "1", features = ["derive"] }
 noyalib = { workspace = true }
 thiserror = "2"
