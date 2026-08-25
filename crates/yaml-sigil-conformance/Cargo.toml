@@ -10,6 +10,8 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+# This workspace-only crate has no build script.
+build = false
 
 [lints]
 workspace = true

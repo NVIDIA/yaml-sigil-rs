@@ -9,6 +9,8 @@ edition.workspace = true
 # Keep this package library-only. An executable target requires an explicit
 # manifest change and is also rejected by the release workflow.
 autobins = false
+# This crate has no build script; keep automatic discovery disabled.
+build = false
 rust-version.workspace = true
 description = "Create signed YAML and protobuf documents"
 license.workspace = true
