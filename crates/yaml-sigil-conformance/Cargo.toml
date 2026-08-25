@@ -10,6 +10,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+# Keep CI target discovery deterministic. Integration tests remain
+# auto-discovered because this package is the workspace test harness.
+autobenches = false
+autobins = false
+autoexamples = false
 # This workspace-only crate has no build script.
 build = false
 

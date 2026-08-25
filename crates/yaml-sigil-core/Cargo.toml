@@ -9,6 +9,10 @@ edition.workspace = true
 # Keep this package library-only. An executable target requires an explicit
 # manifest change and is also rejected by the release workflow.
 autobins = false
+# Keep CI, package, and release target discovery deterministic. Integration
+# tests remain auto-discovered because they are part of validation.
+autobenches = false
+autoexamples = false
 # Bind the required code generator explicitly instead of auto-discovering it.
 build = "build.rs"
 rust-version.workspace = true
