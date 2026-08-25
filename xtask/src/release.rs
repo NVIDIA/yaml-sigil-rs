@@ -19,31 +19,13 @@ use semver::Version;
 use serde_json::Value;
 use toml_edit::{DocumentMut, Item, Value as TomlValue};
 
+use crate::release_policy::{RUST_POLICY, ReleaseToolchain, TRAITS_POLICY};
+
 const REGISTRY_USER_AGENT: &str = "yaml-sigil-release-workflow/1.0";
 const REGISTRY_ATTEMPTS: usize = 30;
 const REGISTRY_RETRY_SECONDS: u64 = 10;
-const CARGO_BINSTALL_VERSION: &str = "1.20.1";
-const RELEASE_PLZ_VERSION: &str = "0.3.160";
-pub(crate) const SEMVER_CHECKS_VERSION: &str = "0.50.0";
-const TRAITS_PACKAGE: &str = "yaml-sigil-traits";
 const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
-
-pub(crate) const RELEASE_PACKAGES: &[&str] = &[
-    "yaml-sigil-core",
-    "yaml-sigil-transcription",
-    "yaml-sigil-signing",
-    "yaml-sigil-verification",
-];
-
-pub(crate) const RELEASE_PACKAGE_PATHS: &[(&str, &str)] = &[
-    ("yaml-sigil-core", "crates/yaml-sigil-core"),
-    (
-        "yaml-sigil-transcription",
-        "crates/yaml-sigil-transcription",
-    ),
-    ("yaml-sigil-signing", "crates/yaml-sigil-signing"),
-    ("yaml-sigil-verification", "crates/yaml-sigil-verification"),
-];
+const TRAITS_PACKAGE: &str = TRAITS_POLICY.packages[0].package;
 
 #[derive(Args)]
 pub struct ReleaseArgs {
@@ -102,6 +84,10 @@ enum ReleaseCommand {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Prepare or verify an archive-bound official release baseline.
+    Baseline(crate::release_baseline::BaselineArgs),
+    /// Generate a provider-neutral release proposal transaction.
+    Proposal(crate::release_proposal::ProposalArgs),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,6 +130,14 @@ pub fn release(root: &Path, args: ReleaseArgs) -> Result<Outcome> {
         }
         ReleaseCommand::PreparePublicationCargoHome { output } => {
             prepare_publication_cargo_home(root, &output)?;
+            Ok(Outcome::Success)
+        }
+        ReleaseCommand::Baseline(args) => {
+            crate::release_baseline::run(root, args).map_err(anyhow::Error::msg)?;
+            Ok(Outcome::Success)
+        }
+        ReleaseCommand::Proposal(args) => {
+            crate::release_proposal::run(root, args).map_err(anyhow::Error::msg)?;
             Ok(Outcome::Success)
         }
     }
@@ -266,25 +260,35 @@ pub(crate) fn exact_output_line(output: &[u8], label: &str) -> Result<String> {
 }
 
 fn install_tools(root: &Path) -> Result<()> {
+    let toolchain = crate::release_policy::detect(root)
+        .map_err(anyhow::Error::msg)?
+        .toolchain;
     let mut runner = SystemRunner;
-    install_tools_with(root, &mut runner)
+    install_tools_with(root, toolchain, &mut runner)
 }
 
-fn install_tools_with(root: &Path, runner: &mut impl Runner) -> Result<()> {
+fn install_tools_with(
+    root: &Path,
+    toolchain: ReleaseToolchain,
+    runner: &mut impl Runner,
+) -> Result<()> {
     require_command_version(
         root,
         runner,
         OsStr::new("cargo-binstall"),
         &[OsString::from("--version")],
-        &format!("cargo-binstall {CARGO_BINSTALL_VERSION}"),
+        &format!("cargo-binstall {}", toolchain.cargo_binstall_version),
     )?;
     let install_args = [
         OsString::from("--force"),
         OsString::from("--locked"),
         OsString::from("--no-confirm"),
         OsString::from("--strategies=crate-meta-data,compile"),
-        OsString::from(format!("release-plz@{RELEASE_PLZ_VERSION}")),
-        OsString::from(format!("cargo-semver-checks@{SEMVER_CHECKS_VERSION}")),
+        OsString::from(format!("release-plz@{}", toolchain.release_plz_version)),
+        OsString::from(format!(
+            "cargo-semver-checks@{}",
+            toolchain.cargo_semver_checks_version
+        )),
     ];
     let status = runner.status(OsStr::new("cargo-binstall"), &install_args, root)?;
     if !status.success {
@@ -300,14 +304,17 @@ fn install_tools_with(root: &Path, runner: &mut impl Runner) -> Result<()> {
         runner,
         OsStr::new("release-plz"),
         &[OsString::from("--version")],
-        &format!("release-plz {RELEASE_PLZ_VERSION}"),
+        &format!("release-plz {}", toolchain.release_plz_version),
     )?;
     require_command_version(
         root,
         runner,
         OsStr::new("cargo-semver-checks"),
         &[OsString::from("semver-checks"), OsString::from("--version")],
-        &format!("cargo-semver-checks {SEMVER_CHECKS_VERSION}"),
+        &format!(
+            "cargo-semver-checks {}",
+            toolchain.cargo_semver_checks_version
+        ),
     )?;
     eprintln!("release: installed and verified the exact release analyzers");
     Ok(())
@@ -421,9 +428,10 @@ fn validate_publishable_package_identity(
     package: &Value,
     targets: &[Value],
 ) -> Result<()> {
-    let relative = RELEASE_PACKAGE_PATHS
+    let relative = RUST_POLICY
+        .packages
         .iter()
-        .find_map(|(name, path)| (*name == package_name).then_some(*path))
+        .find_map(|policy| (policy.package == package_name).then_some(policy.path_in_vcs))
         .ok_or_else(|| {
             anyhow!("crates.io package {package_name} has no approved workspace identity")
         })?;
@@ -476,8 +484,8 @@ fn validate_publishable_build_script(
     target: &Value,
     kinds: &[Value],
 ) -> Result<()> {
-    if package != "yaml-sigil-core" || kinds.len() != 1 || kinds[0].as_str() != Some("custom-build")
-    {
+    let core = &RUST_POLICY.packages[0];
+    if package != core.package || kinds.len() != 1 || kinds[0].as_str() != Some("custom-build") {
         bail!("crates.io package {package} contains an unexpected build script");
     }
     let workspace_root = metadata
@@ -488,7 +496,9 @@ fn validate_publishable_build_script(
         .get("src_path")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("Cargo returned no source path for {package}'s build script"))?;
-    let expected = Path::new(workspace_root).join("crates/yaml-sigil-core/build.rs");
+    let expected = Path::new(workspace_root)
+        .join(core.path_in_vcs)
+        .join("build.rs");
     if Path::new(source) != expected {
         bail!(
             "crates.io package {package} build script differs from {}",
@@ -499,20 +509,23 @@ fn validate_publishable_build_script(
 }
 
 fn package_publishes_to_crates_io(package: &Value) -> Result<bool> {
-    let publish = package
-        .get("publish")
-        .ok_or_else(|| anyhow!("Cargo returned package metadata without publish policy"))?;
-    match publish {
+    match package.get("publish") {
         // Cargo permits publication to the default registry when `package.publish`
         // is absent from the manifest, which metadata represents as JSON null.
-        Value::Null => Ok(true),
-        Value::Array(registries) => {
+        None | Some(Value::Null) => Ok(true),
+        Some(Value::Array(registries)) if registries.is_empty() => Ok(false),
+        Some(Value::Array(registries)) => {
             if !registries.iter().all(Value::is_string) {
                 bail!("Cargo returned invalid package publish policy");
             }
-            Ok(registries
+            if registries
                 .iter()
-                .any(|registry| registry.as_str() == Some("crates-io")))
+                .any(|registry| registry.as_str() == Some("crates-io"))
+            {
+                Ok(true)
+            } else {
+                bail!("a publishable release package excludes crates-io")
+            }
         }
         _ => bail!("Cargo returned invalid package publish policy"),
     }
@@ -697,19 +710,20 @@ fn verify_traits(root: &Path) -> Result<Outcome> {
 }
 
 fn verify_traits_with(root: &Path, runner: &mut impl Runner) -> Result<Outcome> {
+    let traits_package = TRAITS_PACKAGE;
     let direct = cargo_metadata(root, false, runner)?;
     let version = exact_traits_dependency(&direct)?;
-    let packages = [TRAITS_PACKAGE.to_string()];
+    let packages = [traits_package.to_string()];
     let readiness = verify_registry_with(root, Some(&version), &packages, runner)?;
     if readiness == Outcome::RegistryUnavailable {
         return Ok(readiness);
     }
-    verify_cargo_resolution(root, TRAITS_PACKAGE, &version, runner)?;
+    verify_cargo_resolution(root, traits_package, &version, runner)?;
 
     let resolved = cargo_metadata(root, true, runner)?;
     let identities: BTreeSet<_> = metadata_packages(&resolved)?
         .iter()
-        .filter(|package| package.get("name").and_then(Value::as_str) == Some(TRAITS_PACKAGE))
+        .filter(|package| package.get("name").and_then(Value::as_str) == Some(traits_package))
         .map(|package| {
             let version = package
                 .get("version")
@@ -726,11 +740,12 @@ fn verify_traits_with(root: &Path, runner: &mut impl Runner) -> Result<Outcome> 
     if identities.len() != 1 || !identities.contains(&expected) {
         bail!("Cargo did not resolve the exact yaml-sigil-traits crates.io source");
     }
-    eprintln!("release: verified {TRAITS_PACKAGE} {version} from the named crates.io index");
+    eprintln!("release: verified {traits_package} {version} from the named crates.io index");
     Ok(Outcome::Success)
 }
 
 fn exact_traits_dependency(metadata: &Value) -> Result<Version> {
+    let traits_package = TRAITS_PACKAGE;
     let mut records = BTreeSet::new();
     for package in metadata_packages(metadata)? {
         let dependencies = package
@@ -738,7 +753,7 @@ fn exact_traits_dependency(metadata: &Value) -> Result<Version> {
             .and_then(Value::as_array)
             .ok_or_else(|| anyhow!("Cargo returned invalid dependency metadata"))?;
         for dependency in dependencies {
-            if dependency.get("name").and_then(Value::as_str) != Some(TRAITS_PACKAGE) {
+            if dependency.get("name").and_then(Value::as_str) != Some(traits_package) {
                 continue;
             }
             let requirement = dependency
@@ -1041,8 +1056,9 @@ fn prepare_validation_cargo_home(root: &Path, output: &Path) -> Result<()> {
         .with_context(|| format!("resolve workspace root {}", root.display()))?;
 
     let mut expected = Vec::new();
-    for (package, relative) in RELEASE_PACKAGE_PATHS {
-        let requested_path = root.join(relative);
+    for policy in RUST_POLICY.packages {
+        let package = policy.package;
+        let requested_path = root.join(policy.path_in_vcs);
         let path = requested_path.canonicalize().with_context(|| {
             format!(
                 "resolve workspace package path {}",
@@ -1123,6 +1139,7 @@ fn prepare_publication_cargo_home(root: &Path, output: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::release_policy::RUST_TOOLCHAIN;
 
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1208,27 +1225,33 @@ mod tests {
         })
     }
 
+    fn expected_release_packages() -> Vec<String> {
+        RUST_POLICY
+            .packages
+            .iter()
+            .map(|policy| policy.package.to_string())
+            .collect()
+    }
+
     #[test]
     fn exact_lines_accept_only_one_unpadded_record() {
-        for value in [
-            b"release-plz 0.3.160".as_slice(),
-            b"release-plz 0.3.160\n",
-            b"release-plz 0.3.160\r\n",
-        ] {
+        let expected = format!("release-plz {}", RUST_TOOLCHAIN.release_plz_version);
+        for suffix in ["", "\n", "\r\n"] {
+            let value = format!("{expected}{suffix}");
             assert_eq!(
-                exact_output_line(value, "version").unwrap(),
-                "release-plz 0.3.160"
+                exact_output_line(value.as_bytes(), "version").unwrap(),
+                expected
             );
         }
         for value in [
-            b"".as_slice(),
-            b"release-plz 0.3.160\r",
-            b"release-plz 0.3.160\nextra\n",
-            b" release-plz 0.3.160\n",
+            String::new(),
+            format!("{expected}\r"),
+            format!("{expected}\nextra\n"),
+            format!(" {expected}\n"),
         ] {
-            let parsed = exact_output_line(value, "version");
-            if value.starts_with(b" ") {
-                assert_ne!(parsed.unwrap(), "release-plz 0.3.160");
+            let parsed = exact_output_line(value.as_bytes(), "version");
+            if value.starts_with(' ') {
+                assert_ne!(parsed.unwrap(), expected);
             } else {
                 assert!(parsed.is_err());
             }
@@ -1240,9 +1263,20 @@ mod tests {
     fn tool_installation_binds_exact_alias_resistant_versions() {
         let mut runner = FakeRunner {
             outputs: VecDeque::from([
-                success(b"cargo-binstall 1.20.1\n"),
-                success(b"release-plz 0.3.160\n"),
-                success(b"cargo-semver-checks 0.50.0\r\n"),
+                success(
+                    format!("cargo-binstall {}\n", RUST_TOOLCHAIN.cargo_binstall_version)
+                        .into_bytes(),
+                ),
+                success(
+                    format!("release-plz {}\n", RUST_TOOLCHAIN.release_plz_version).into_bytes(),
+                ),
+                success(
+                    format!(
+                        "cargo-semver-checks {}\r\n",
+                        RUST_TOOLCHAIN.cargo_semver_checks_version
+                    )
+                    .into_bytes(),
+                ),
             ]),
             statuses: VecDeque::from([Ok(CommandStatus {
                 success: true,
@@ -1251,22 +1285,20 @@ mod tests {
             ..FakeRunner::default()
         };
 
-        install_tools_with(Path::new("."), &mut runner).unwrap();
+        install_tools_with(Path::new("."), RUST_TOOLCHAIN, &mut runner).unwrap();
 
         assert_eq!(runner.calls[0].program, "cargo-binstall");
         assert_eq!(runner.calls[0].args, ["--version"]);
         assert_eq!(runner.calls[1].mode, CallMode::Status);
         assert_eq!(runner.calls[1].program, "cargo-binstall");
-        assert!(
-            runner.calls[1]
-                .args
-                .contains(&"release-plz@0.3.160".to_string())
-        );
-        assert!(
-            runner.calls[1]
-                .args
-                .contains(&"cargo-semver-checks@0.50.0".to_string())
-        );
+        assert!(runner.calls[1].args.contains(&format!(
+            "release-plz@{}",
+            RUST_TOOLCHAIN.release_plz_version
+        )));
+        assert!(runner.calls[1].args.contains(&format!(
+            "cargo-semver-checks@{}",
+            RUST_TOOLCHAIN.cargo_semver_checks_version
+        )));
         assert_eq!(runner.calls[3].program, "cargo-semver-checks");
         assert_eq!(runner.calls[3].args, ["semver-checks", "--version"]);
     }
@@ -1277,42 +1309,40 @@ mod tests {
             outputs: VecDeque::from([success(b"cargo-binstall 9.9.9\n")]),
             ..FakeRunner::default()
         };
-        assert!(install_tools_with(Path::new("."), &mut runner).is_err());
+        assert!(install_tools_with(Path::new("."), RUST_TOOLCHAIN, &mut runner).is_err());
         assert!(runner.statuses.is_empty());
         assert_eq!(runner.calls.len(), 1);
     }
 
     #[test]
     fn package_policy_requires_exact_order_and_library_targets() {
+        let core = &RUST_POLICY.packages[0];
         let metadata = serde_json::json!({
             "workspace_root": "/workspace",
-            "packages": RELEASE_PACKAGE_PATHS.iter().map(|(name, relative)| serde_json::json!({
-                "name": name,
+            "packages": RUST_POLICY.packages.iter().map(|policy| serde_json::json!({
+                "name": policy.package,
                 "publish": ["crates-io"],
-                "manifest_path": format!("/workspace/{relative}/Cargo.toml"),
-                "targets": if *name == "yaml-sigil-core" {
+                "manifest_path": format!("/workspace/{}/Cargo.toml", policy.path_in_vcs),
+                "targets": if policy.package == core.package {
                     serde_json::json!([
                         {
                             "kind": ["lib"],
-                            "src_path": format!("/workspace/{relative}/src/lib.rs")
+                            "src_path": format!("/workspace/{}/src/lib.rs", policy.path_in_vcs)
                         },
                         {
                             "kind": ["custom-build"],
-                            "src_path": "/workspace/crates/yaml-sigil-core/build.rs"
+                            "src_path": format!("/workspace/{}/build.rs", core.path_in_vcs)
                         }
                     ])
                 } else {
                     serde_json::json!([{
                         "kind": ["lib"],
-                        "src_path": format!("/workspace/{relative}/src/lib.rs")
+                        "src_path": format!("/workspace/{}/src/lib.rs", policy.path_in_vcs)
                     }])
                 }
             })).collect::<Vec<_>>()
         });
-        let expected = RELEASE_PACKAGES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect::<Vec<_>>();
+        let expected = expected_release_packages();
         check_packages_in_metadata(&metadata, &expected).unwrap();
 
         let mut reordered = expected.clone();
@@ -1337,25 +1367,22 @@ mod tests {
 
         let mut wrong_source = metadata;
         wrong_source["packages"][0]["targets"][1]["src_path"] =
-            serde_json::json!("/workspace/crates/yaml-sigil-core/other.rs");
+            serde_json::json!(format!("/workspace/{}/other.rs", core.path_in_vcs));
         assert!(check_packages_in_metadata(&wrong_source, &expected).is_err());
     }
 
     #[test]
     fn package_policy_includes_cargo_default_publish_packages() {
-        let expected = RELEASE_PACKAGES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect::<Vec<_>>();
+        let expected = expected_release_packages();
         let metadata = serde_json::json!({
             "workspace_root": "/workspace",
-            "packages": RELEASE_PACKAGE_PATHS.iter().map(|(name, relative)| serde_json::json!({
-                "name": name,
+            "packages": RUST_POLICY.packages.iter().map(|policy| serde_json::json!({
+                "name": policy.package,
                 "publish": null,
-                "manifest_path": format!("/workspace/{relative}/Cargo.toml"),
+                "manifest_path": format!("/workspace/{}/Cargo.toml", policy.path_in_vcs),
                 "targets": [{
                     "kind": ["lib"],
-                    "src_path": format!("/workspace/{relative}/src/lib.rs")
+                    "src_path": format!("/workspace/{}/src/lib.rs", policy.path_in_vcs)
                 }]
             })).collect::<Vec<_>>()
         });
@@ -1383,19 +1410,16 @@ mod tests {
 
     #[test]
     fn package_policy_binds_each_manifest_and_primary_library() {
-        let expected = RELEASE_PACKAGES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect::<Vec<_>>();
+        let expected = expected_release_packages();
         let valid = serde_json::json!({
             "workspace_root": "/workspace",
-            "packages": RELEASE_PACKAGE_PATHS.iter().map(|(name, relative)| serde_json::json!({
-                "name": name,
+            "packages": RUST_POLICY.packages.iter().map(|policy| serde_json::json!({
+                "name": policy.package,
                 "publish": ["crates-io"],
-                "manifest_path": format!("/workspace/{relative}/Cargo.toml"),
+                "manifest_path": format!("/workspace/{}/Cargo.toml", policy.path_in_vcs),
                 "targets": [{
                     "kind": ["lib"],
-                    "src_path": format!("/workspace/{relative}/src/lib.rs")
+                    "src_path": format!("/workspace/{}/src/lib.rs", policy.path_in_vcs)
                 }]
             })).collect::<Vec<_>>()
         });
@@ -1433,50 +1457,49 @@ mod tests {
     }
 
     #[test]
-    fn package_policy_excludes_disabled_and_other_registry_packages() {
-        let metadata = serde_json::json!({
+    fn package_policy_excludes_disabled_and_rejects_other_registries() {
+        let core = &RUST_POLICY.packages[0];
+        let mut metadata = serde_json::json!({
             "workspace_root": "/workspace",
             "packages": [
                 {"name": "private", "publish": [], "targets": "not inspected"},
                 {
-                    "name": "alternate-registry",
-                    "publish": ["internal"],
-                    "targets": "not inspected"
-                },
-                {
-                    "name": "yaml-sigil-core",
+                    "name": core.package,
                     "publish": ["crates-io"],
-                    "manifest_path": "/workspace/crates/yaml-sigil-core/Cargo.toml",
+                    "manifest_path": format!("/workspace/{}/Cargo.toml", core.path_in_vcs),
                     "targets": [{
                         "kind": ["lib"],
-                        "src_path": "/workspace/crates/yaml-sigil-core/src/lib.rs"
+                        "src_path": format!("/workspace/{}/src/lib.rs", core.path_in_vcs)
                     }]
                 }
             ]
         });
-        check_packages_in_metadata(&metadata, &["yaml-sigil-core".to_string()]).unwrap();
+        check_packages_in_metadata(&metadata, &[core.package.to_string()]).unwrap();
+
+        metadata["packages"].as_array_mut().unwrap().insert(
+            1,
+            serde_json::json!({
+                "name": "alternate-registry",
+                "publish": ["internal"],
+                "targets": "not inspected"
+            }),
+        );
+        assert!(check_packages_in_metadata(&metadata, &[core.package.to_string()]).is_err());
     }
 
     #[test]
-    fn package_policy_rejects_missing_or_malformed_publish_metadata() {
-        let missing = serde_json::json!({
-            "packages": [{"name": "missing", "targets": [{"kind": ["lib"]}]}]
-        });
-        assert!(check_packages_in_metadata(&missing, &[]).is_err());
+    fn package_policy_accepts_absent_publish_and_rejects_malformed_metadata() {
+        assert!(package_publishes_to_crates_io(&serde_json::json!({})).unwrap());
+        assert!(package_publishes_to_crates_io(&serde_json::json!({"publish": null})).unwrap());
+        assert!(!package_publishes_to_crates_io(&serde_json::json!({"publish": []})).unwrap());
 
         for publish in [
             serde_json::json!(true),
             serde_json::json!("crates-io"),
             serde_json::json!(["crates-io", 7]),
         ] {
-            let malformed = serde_json::json!({
-                "packages": [{
-                    "name": "malformed",
-                    "publish": publish,
-                    "targets": [{"kind": ["lib"]}]
-                }]
-            });
-            assert!(check_packages_in_metadata(&malformed, &[]).is_err());
+            let malformed = serde_json::json!({"publish": publish});
+            assert!(package_publishes_to_crates_io(&malformed).is_err());
         }
     }
 
@@ -1537,10 +1560,7 @@ mod tests {
             ]),
             ..FakeRunner::default()
         };
-        let packages = RELEASE_PACKAGES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect::<Vec<_>>();
+        let packages = expected_release_packages();
         assert_eq!(
             verify_registry_with(
                 Path::new("."),
@@ -1722,8 +1742,8 @@ mod tests {
         };
         let root = temporary.join(workspace_name);
         fs::create_dir(&root).unwrap();
-        for (_, relative) in RELEASE_PACKAGE_PATHS {
-            let package = root.join(relative);
+        for policy in RUST_POLICY.packages {
+            let package = root.join(policy.path_in_vcs);
             fs::create_dir_all(&package).unwrap();
             fs::write(
                 package.join("Cargo.toml"),
@@ -1739,16 +1759,16 @@ mod tests {
         let document: DocumentMut = body.parse().unwrap();
         let patches = document["patch"]["crates-io"].as_table().unwrap();
         assert_eq!(patches.len(), 4);
-        for (package, relative) in RELEASE_PACKAGE_PATHS {
+        for policy in RUST_POLICY.packages {
             assert_eq!(
-                patches[package]
+                patches[policy.package]
                     .as_inline_table()
                     .unwrap()
                     .get("path")
                     .unwrap()
                     .as_str()
                     .unwrap(),
-                root.join(relative)
+                root.join(policy.path_in_vcs)
                     .canonicalize()
                     .unwrap()
                     .to_str()
@@ -1780,8 +1800,8 @@ mod tests {
         let temporary = temp_root("validation-home-missing");
         let root = temporary.join("workspace");
         fs::create_dir(&root).unwrap();
-        for (_, relative) in &RELEASE_PACKAGE_PATHS[..3] {
-            let package = root.join(relative);
+        for policy in &RUST_POLICY.packages[..3] {
+            let package = root.join(policy.path_in_vcs);
             fs::create_dir_all(&package).unwrap();
             fs::write(
                 package.join("Cargo.toml"),

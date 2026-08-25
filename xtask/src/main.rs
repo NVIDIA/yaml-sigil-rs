@@ -4,8 +4,13 @@
 //! Workspace maintenance tasks. Invoke via `cargo xtask <COMMAND>` from the repo root.
 
 mod ci;
+mod crate_archive;
+mod github;
 mod package_content;
 mod release;
+mod release_baseline;
+mod release_policy;
+mod release_proposal;
 mod spec_update;
 mod versions;
 
@@ -76,6 +81,8 @@ enum Task {
     ReleaseVersion(versions::ReleaseVersionArgs),
     /// Run provider-neutral release preparation and verification.
     Release(release::ReleaseArgs),
+    /// Run bounded GitHub release-automation operations.
+    Github(github::GithubArgs),
 }
 
 #[derive(Args)]
@@ -125,6 +132,7 @@ fn execute() -> Result<ExitCode> {
             return release::release(&root, args)
                 .map(|outcome| ExitCode::from(release_exit_code(outcome)));
         }
+        Task::Github(args) => github::run(&root, args).map_err(anyhow::Error::msg)?,
     }
     Ok(ExitCode::SUCCESS)
 }

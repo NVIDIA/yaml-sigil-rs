@@ -7,6 +7,7 @@
 name = "xtask"
 version = "0.0.0"
 edition = "2024"
+rust-version = "1.95"
 publish = false
 # Keep the developer tool's target inventory explicit; only the declared
 # binary below participates in validation.
@@ -17,6 +18,7 @@ autotests = false
 # This developer tool has no build script.
 build = false
 license = "Apache-2.0"
+description = "Developer-only tasks for yaml-sigil-rs."
 
 [[bin]]
 name = "xtask"
@@ -25,8 +27,13 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0"
 buf-tools = "=1.72.0-hotfix.1"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
+tar = "0.4"
+tempfile = "3.23"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 toml_edit = { version = "0.25.13", default-features = false, features = ["parse"] }

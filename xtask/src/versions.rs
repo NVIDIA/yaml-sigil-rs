@@ -14,34 +14,10 @@ use clap::{Args, Subcommand, ValueEnum};
 use semver::{Prerelease, Version};
 use serde_json::Value;
 
-use crate::release::{
-    RELEASE_PACKAGE_PATHS, RELEASE_PACKAGES, SEMVER_CHECKS_VERSION, exact_output_line,
-};
+use crate::release::exact_output_line;
+use crate::release_policy::{RUST_POLICY, RUST_TOOLCHAIN, TRAITS_POLICY};
 
-const WORKSPACE_INTERNAL_DEPS: &[&str] = &[
-    "yaml-sigil-core",
-    "yaml-sigil-transcription",
-    "yaml-sigil-verification",
-    "yaml-sigil-signing",
-];
-
-const EXTERNAL_TRAITS_DEP: &str = "yaml-sigil-traits";
-
-const CHANGELOGS: &[(&str, &str)] = &[
-    ("yaml-sigil-core", "crates/yaml-sigil-core/CHANGELOG.md"),
-    (
-        "yaml-sigil-transcription",
-        "crates/yaml-sigil-transcription/CHANGELOG.md",
-    ),
-    (
-        "yaml-sigil-signing",
-        "crates/yaml-sigil-signing/CHANGELOG.md",
-    ),
-    (
-        "yaml-sigil-verification",
-        "crates/yaml-sigil-verification/CHANGELOG.md",
-    ),
-];
+const TRAITS_PACKAGE: &str = TRAITS_POLICY.packages[0].package;
 
 #[derive(Args)]
 pub struct ReleaseVersionArgs {
@@ -208,7 +184,8 @@ pub fn sync_workspace_dependency_versions(root: &Path, check: bool) -> Result<bo
     for line in cargo_toml.lines() {
         let trimmed = line.trim();
         let mut out = line.to_string();
-        for dep in WORKSPACE_INTERNAL_DEPS {
+        for policy in RUST_POLICY.packages {
+            let dep = policy.package;
             if trimmed.starts_with(&format!("{dep} = ")) {
                 if let Some(current) = workspace_dependency_version(&cargo_toml, dep) {
                     if current != package_version {
@@ -437,7 +414,10 @@ fn check_api_compatibility_with_runner(
             cargo_output_detail(&tool)
         );
     }
-    let expected_tool = format!("cargo-semver-checks {SEMVER_CHECKS_VERSION}");
+    let expected_tool = format!(
+        "cargo-semver-checks {}",
+        RUST_TOOLCHAIN.cargo_semver_checks_version
+    );
     let actual_tool = exact_output_line(&tool.stdout, "cargo-semver-checks version")?;
     if actual_tool != expected_tool {
         bail!("expected {expected_tool}; found {actual_tool}");
@@ -468,7 +448,8 @@ fn check_api_compatibility_with_runner(
         .parent()
         .ok_or_else(|| anyhow!("the baseline manifest has no parent directory"))?;
 
-    for package in RELEASE_PACKAGES {
+    for policy in RUST_POLICY.packages {
+        let package = policy.package;
         let args = [
             OsString::from("semver-checks"),
             OsString::from("check-release"),
@@ -558,7 +539,9 @@ fn metadata_versions_from_json(
     }
 
     let mut versions = Vec::new();
-    for (name, relative) in RELEASE_PACKAGE_PATHS {
+    for policy in RUST_POLICY.packages {
+        let name = policy.package;
+        let relative = policy.path_in_vcs;
         let expected_manifest = expected_root
             .join(relative)
             .join("Cargo.toml")
@@ -601,7 +584,7 @@ fn require_common_versions(
     expected: &Version,
     label: &str,
 ) -> Result<()> {
-    if versions.len() != RELEASE_PACKAGES.len() {
+    if versions.len() != RUST_POLICY.packages.len() {
         bail!("{label} metadata did not contain all four release packages");
     }
     for (package, version) in versions {
@@ -786,28 +769,26 @@ fn validate_crates_io_traits_dependency(root: &Path) -> Result<()> {
     let dependency = document
         .get("workspace")
         .and_then(|workspace| workspace.get("dependencies"))
-        .and_then(|dependencies| dependencies.get(EXTERNAL_TRAITS_DEP))
-        .ok_or_else(|| {
-            anyhow!("missing [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}")
-        })?;
+        .and_then(|dependencies| dependencies.get(TRAITS_PACKAGE))
+        .ok_or_else(|| anyhow!("missing [workspace.dependencies] entry for {TRAITS_PACKAGE}"))?;
     let details = dependency.as_table().ok_or_else(|| {
-        anyhow!("[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must use an inline table")
+        anyhow!("[workspace.dependencies] {TRAITS_PACKAGE} must use an inline table")
     })?;
 
     for source_key in ["git", "path", "branch", "tag", "rev", "package"] {
         if details.contains_key(source_key) {
             bail!(
-                "[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must resolve only from crates.io; remove {source_key}"
+                "[workspace.dependencies] {TRAITS_PACKAGE} must resolve only from crates.io; remove {source_key}"
             );
         }
     }
     if let Some(registry) = details.get("registry") {
         let registry = registry.as_str().ok_or_else(|| {
-            anyhow!("[workspace.dependencies] {EXTERNAL_TRAITS_DEP} registry must be a string")
+            anyhow!("[workspace.dependencies] {TRAITS_PACKAGE} registry must be a string")
         })?;
         if registry != "crates-io" {
             bail!(
-                "[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must resolve from crates.io, not registry {registry}"
+                "[workspace.dependencies] {TRAITS_PACKAGE} must resolve from crates.io, not registry {registry}"
             );
         }
     }
@@ -816,7 +797,7 @@ fn validate_crates_io_traits_dependency(root: &Path) -> Result<()> {
         .get("version")
         .and_then(toml::Value::as_str)
         .ok_or_else(|| {
-            anyhow!("missing version in [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}")
+            anyhow!("missing version in [workspace.dependencies] entry for {TRAITS_PACKAGE}")
         })?;
     exact_traits_version(requirement)?;
     Ok(())
@@ -834,7 +815,7 @@ fn validate_stable_traits_dependency(root: &Path, workspace_version: &Version) -
     let traits_version = exact_traits_version(&requirement)?;
     if !traits_version.pre.is_empty() {
         bail!(
-            "stable workspace {workspace_version} cannot retain prerelease {EXTERNAL_TRAITS_DEP} requirement {requirement}"
+            "stable workspace {workspace_version} cannot retain prerelease {TRAITS_PACKAGE} requirement {requirement}"
         );
     }
     Ok(())
@@ -848,7 +829,7 @@ fn validate_promotable_traits_dependency(root: &Path) -> Result<()> {
     let traits_version = exact_traits_version(&requirement)?;
     if !traits_version.pre.is_empty() {
         require_rc(&traits_version).with_context(|| {
-            format!("{EXTERNAL_TRAITS_DEP} requirement {requirement} is not an rc.N release")
+            format!("{TRAITS_PACKAGE} requirement {requirement} is not an rc.N release")
         })?;
     }
     Ok(())
@@ -865,7 +846,7 @@ fn promote_traits_dependency_to_stable(root: &Path) -> Result<bool> {
         return Ok(false);
     }
     require_rc(&traits_version).with_context(|| {
-        format!("{EXTERNAL_TRAITS_DEP} requirement {requirement} is not an rc.N release")
+        format!("{TRAITS_PACKAGE} requirement {requirement} is not an rc.N release")
     })?;
 
     let stable = Version::new(
@@ -878,13 +859,13 @@ fn promote_traits_dependency_to_stable(root: &Path) -> Result<bool> {
     let mut updated = lines.join("\n");
     updated.push('\n');
     fs::write(path, updated).context("write stable traits requirement to workspace Cargo.toml")?;
-    eprintln!("release-version: promoted {EXTERNAL_TRAITS_DEP} requirement to ={stable}");
+    eprintln!("release-version: promoted {TRAITS_PACKAGE} requirement to ={stable}");
     Ok(true)
 }
 
 /// Locate the one canonical inline-table traits entry in workspace dependencies.
 fn workspace_traits_dependency(cargo_toml: &str) -> Result<(usize, String)> {
-    let prefix = format!("{EXTERNAL_TRAITS_DEP} = ");
+    let prefix = format!("{TRAITS_PACKAGE} = ");
     let mut in_section = false;
     let mut found = None;
     for (line_index, line) in cargo_toml.lines().enumerate() {
@@ -900,38 +881,36 @@ fn workspace_traits_dependency(cargo_toml: &str) -> Result<(usize, String)> {
             continue;
         }
         if found.is_some() {
-            bail!("multiple [workspace.dependencies] entries for {EXTERNAL_TRAITS_DEP}");
+            bail!("multiple [workspace.dependencies] entries for {TRAITS_PACKAGE}");
         }
 
         let inline = trimmed
             .strip_prefix(&prefix)
             .and_then(|value| value.strip_prefix('{'))
             .ok_or_else(|| {
-                anyhow!("[workspace.dependencies] {EXTERNAL_TRAITS_DEP} must use an inline table")
+                anyhow!("[workspace.dependencies] {TRAITS_PACKAGE} must use an inline table")
             })?;
         let marker = "version = ";
         let version_start = inline.find(marker).ok_or_else(|| {
-            anyhow!("missing version in [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}")
+            anyhow!("missing version in [workspace.dependencies] entry for {TRAITS_PACKAGE}")
         })?;
         let requirement = parse_toml_string_value(&inline[version_start + marker.len()..])
             .ok_or_else(|| {
-                anyhow!(
-                    "invalid version in [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}"
-                )
+                anyhow!("invalid version in [workspace.dependencies] entry for {TRAITS_PACKAGE}")
             })?;
         found = Some((line_index, requirement));
     }
 
-    found.ok_or_else(|| anyhow!("missing [workspace.dependencies] entry for {EXTERNAL_TRAITS_DEP}"))
+    found.ok_or_else(|| anyhow!("missing [workspace.dependencies] entry for {TRAITS_PACKAGE}"))
 }
 
 /// Parse only a single exact Cargo requirement such as `=0.4.0-rc.1`.
 fn exact_traits_version(requirement: &str) -> Result<Version> {
     let version = requirement
         .strip_prefix('=')
-        .ok_or_else(|| anyhow!("{EXTERNAL_TRAITS_DEP} requirement {requirement} must be exact"))?;
+        .ok_or_else(|| anyhow!("{TRAITS_PACKAGE} requirement {requirement} must be exact"))?;
     Version::parse(version)
-        .with_context(|| format!("invalid exact {EXTERNAL_TRAITS_DEP} requirement {requirement}"))
+        .with_context(|| format!("invalid exact {TRAITS_PACKAGE} requirement {requirement}"))
 }
 
 fn validate_date(date: &str) -> Result<()> {
@@ -956,8 +935,9 @@ fn ensure_candidate_changelogs(
     target: &Version,
     date: &str,
 ) -> Result<()> {
-    for (crate_name, relative_path) in CHANGELOGS {
-        let path = root.join(relative_path);
+    for policy in RUST_POLICY.packages {
+        let crate_name = policy.package;
+        let path = root.join(policy.changelog);
         let body = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let generated_prefix = format!("## [{generated}](");
         let target_prefix = format!("## [{target}](");
@@ -990,8 +970,9 @@ fn ensure_candidate_changelogs(
 }
 
 fn promote_changelogs(root: &Path, rc: &Version, stable: &Version, date: &str) -> Result<()> {
-    for (crate_name, relative_path) in CHANGELOGS {
-        let path = root.join(relative_path);
+    for policy in RUST_POLICY.packages {
+        let crate_name = policy.package;
+        let path = root.join(policy.changelog);
         let body = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let section = changelog_section(&body, rc)?;
         let promoted = format!(
@@ -1184,7 +1165,7 @@ mod tests {
 
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).unwrap();
         assert_eq!(
-            workspace_dependency_version(&cargo_toml, EXTERNAL_TRAITS_DEP).as_deref(),
+            workspace_dependency_version(&cargo_toml, TRAITS_PACKAGE).as_deref(),
             Some("=0.4.0")
         );
         cleanup_temp_test_root(root);
@@ -1348,12 +1329,19 @@ mod tests {
         write_release_workspace(&current, "0.5.0-rc.2");
         let mut runner = FakeCargoRunner {
             outputs: VecDeque::from([
-                cargo_success(b"cargo-semver-checks 0.50.0\n"),
+                cargo_success(
+                    format!(
+                        "cargo-semver-checks {}\n",
+                        RUST_TOOLCHAIN.cargo_semver_checks_version
+                    )
+                    .into_bytes(),
+                ),
                 cargo_success(release_metadata(&baseline, "0.5.0-rc.1")),
                 cargo_success(release_metadata(&current, "0.5.0-rc.2")),
             ]),
             statuses: VecDeque::from(
-                RELEASE_PACKAGES
+                RUST_POLICY
+                    .packages
                     .iter()
                     .map(|_| {
                         Ok(CargoStatus {
@@ -1377,15 +1365,15 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(runner.calls.len(), 7);
+        assert_eq!(runner.calls.len(), 3 + RUST_POLICY.packages.len());
         assert_eq!(runner.calls[0].program, "cargo-semver-checks");
         assert_eq!(runner.calls[0].args, ["semver-checks", "--version"]);
-        for (index, package) in RELEASE_PACKAGES.iter().enumerate() {
+        for (index, policy) in RUST_POLICY.packages.iter().enumerate() {
             let call = &runner.calls[index + 3];
             assert_eq!(call.program, "cargo-semver-checks");
             assert_eq!(call.mode, CargoCallMode::Status);
             let package_index = call.args.iter().position(|arg| arg == "--package").unwrap();
-            assert_eq!(call.args[package_index + 1], *package);
+            assert_eq!(call.args[package_index + 1], policy.package);
             let release_type_index = call
                 .args
                 .iter()
@@ -1410,7 +1398,7 @@ mod tests {
         write_release_workspace(&current, "0.5.0-rc.2");
 
         let mut wrong_tool = FakeCargoRunner {
-            outputs: VecDeque::from([cargo_success(b"cargo-semver-checks 0.49.0\n")]),
+            outputs: VecDeque::from([cargo_success(b"cargo-semver-checks 0.48.0\n")]),
             ..FakeCargoRunner::default()
         };
         assert!(
@@ -1429,7 +1417,13 @@ mod tests {
 
         let mut wrong_version = FakeCargoRunner {
             outputs: VecDeque::from([
-                cargo_success(b"cargo-semver-checks 0.50.0\n"),
+                cargo_success(
+                    format!(
+                        "cargo-semver-checks {}\n",
+                        RUST_TOOLCHAIN.cargo_semver_checks_version
+                    )
+                    .into_bytes(),
+                ),
                 cargo_success(release_metadata(&baseline, "0.5.0-rc.1")),
                 cargo_success(release_metadata(&current, "0.5.0-rc.9")),
             ]),
@@ -1461,7 +1455,13 @@ mod tests {
         write_release_workspace(&baseline, "0.5.0-rc.1");
         write_release_workspace(&foreign, "0.5.0-rc.2");
         let mut runner = FakeCargoRunner {
-            outputs: VecDeque::from([cargo_success(b"cargo-semver-checks 0.50.0\n")]),
+            outputs: VecDeque::from([cargo_success(
+                format!(
+                    "cargo-semver-checks {}\n",
+                    RUST_TOOLCHAIN.cargo_semver_checks_version
+                )
+                .into_bytes(),
+            )]),
             ..FakeCargoRunner::default()
         };
         assert!(
@@ -1563,12 +1563,15 @@ mod tests {
 
     fn write_release_workspace(root: &Path, version: &str) {
         fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
-        for (package, relative) in RELEASE_PACKAGE_PATHS {
-            let directory = root.join(relative);
+        for policy in RUST_POLICY.packages {
+            let directory = root.join(policy.path_in_vcs);
             fs::create_dir_all(&directory).unwrap();
             fs::write(
                 directory.join("Cargo.toml"),
-                format!("[package]\nname = \"{package}\"\nversion = \"{version}\"\n"),
+                format!(
+                    "[package]\nname = \"{}\"\nversion = \"{version}\"\n",
+                    policy.package
+                ),
             )
             .unwrap();
         }
@@ -1577,11 +1580,11 @@ mod tests {
     fn release_metadata(root: &Path, version: &str) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
             "workspace_root": root.canonicalize().unwrap(),
-            "packages": RELEASE_PACKAGE_PATHS.iter().map(|(package, relative)| {
+            "packages": RUST_POLICY.packages.iter().map(|policy| {
                 serde_json::json!({
-                    "name": package,
+                    "name": policy.package,
                     "version": version,
-                    "manifest_path": root.join(relative).join("Cargo.toml").canonicalize().unwrap()
+                    "manifest_path": root.join(policy.path_in_vcs).join("Cargo.toml").canonicalize().unwrap()
                 })
             }).collect::<Vec<_>>()
         }))
