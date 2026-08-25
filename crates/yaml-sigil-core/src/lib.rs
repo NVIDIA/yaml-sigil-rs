@@ -15,6 +15,15 @@ pub mod signature_doc;
 pub mod tier_a_schema;
 pub mod wire;
 
+/// Generated protobuf message types.
+///
+/// # Resource usage
+///
+/// These types implement [`buffa::Message`] and expose its direct decode and merge APIs. Those
+/// APIs impose no deployment-specific size limits on artifact, payload, or signature-carrier
+/// data. Decoding copies length-delimited fields into owned message buffers, so allocation and
+/// copying are linear in field size. Callers handling untrusted data must enforce
+/// deployment-appropriate size limits before decoding.
 pub mod pb {
     #![allow(clippy::all)]
     #![allow(dead_code)]
