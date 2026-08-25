@@ -299,6 +299,44 @@ changing the validation sequence. Do not make the xtask read, parse, or test
 provider-specific workflow files. Validate provider configuration with its
 native tooling.
 
+The only permitted provider-specific xtask namespace is
+`cargo xtask github`. Keep it limited to typed, repository-owned GitHub
+operations that consolidate release automation. It must not become an
+arbitrary `gh api` passthrough or a replacement for actionlint. It must never
+parse, embed, snapshot, or validate workflow YAML, triggers, job names,
+permissions, secrets, expressions, Action pins, or historical workflow files.
+Accept tokens only through environment variables; never log them, serialize
+them into fixtures, or pass them as command-line arguments.
+
+Within GitHub Actions, bind repository selection to GitHub's default
+`GITHUB_ACTIONS` and `GITHUB_REPOSITORY` variables and require an exact match
+with a compiled repository-policy table and the local package family. Do not
+use the mutable `CI` variable or configurable environment values as a trust
+switch. Local mutation commands must take an explicit repository and bind it
+to that same table and checkout.
+
+`cargo xtask ci` and every non-`github` command must remain provider-neutral
+and credential-free. The checkout-free protected-PR reporter and controller
+remain Python so that immutable protected-main policy can run without
+compiling candidate Rust. Keep
+`.github/scripts/check-pull-request-commits.sh` identical across the YamlSigil
+repositories. Small host-setup helpers may remain shell when moving them would
+add complexity without consolidating policy.
+
+The surviving provider helpers have deliberately narrow roles:
+
+- `protected_pr_ci.py` and `test_protected_pr_ci.py` keep protected-main
+  authorization checkout-free and test that immutable policy without compiling
+  candidate Rust.
+- `check-pull-request-commits.sh` enforces the shared exact-range, linear
+  history, and DCO policy across all three YamlSigil repositories.
+- `remove-preinstalled-aws-tap.sh` performs one bounded macOS host cleanup
+  before Rust setup.
+
+Release intent, proposal mutation, publication authorization, baseline
+selection, proposal generation, and release-object reconciliation belong in
+the Rust commands described above, not in additional Python or shell helpers.
+
 Validate shell scripts under `.github/scripts` with Shuck before landing
 changes. Install it from the `shuck-cli` crate and run it from the repository
 root:
