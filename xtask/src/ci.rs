@@ -11,6 +11,7 @@ use anyhow::Result;
 use super::{package_content, require_success, require_tool, run as run_command, versions};
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
+const CARGO_DENY_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-deny --version 0.20.2";
 
 #[derive(Clone, Copy, Debug)]
 struct Step {
@@ -118,6 +119,33 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         args: &["--with-metadata"],
     },
     Step {
+        label: "Rust dependency policy",
+        program: "cargo",
+        args: &[
+            "deny", "check", "bans", "licenses", "sources", "-D", "warnings",
+        ],
+    },
+    Step {
+        label: "xtask dependency policy",
+        program: "cargo",
+        args: &[
+            "deny",
+            "--manifest-path",
+            "xtask/Cargo.toml",
+            "--locked",
+            "check",
+            "bans",
+            "licenses",
+            "sources",
+            "-D",
+            "warnings",
+            "-A",
+            "unnecessary-skip",
+            "-A",
+            "unmatched-skip",
+        ],
+    },
+    Step {
         label: "Rust dependency audit",
         program: "cargo",
         args: &["audit"],
@@ -131,6 +159,7 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
 
 pub(crate) fn run(root: &Path) -> Result<()> {
     require_tool("cargo-machete", CARGO_MACHETE_INSTALL_GUIDANCE)?;
+    require_tool("cargo-deny", CARGO_DENY_INSTALL_GUIDANCE)?;
     for step in BEFORE_PACKAGE_CONTENT {
         run_step(root, *step)?;
     }
@@ -238,5 +267,17 @@ mod tests {
                 .any(|entry| entry == root)
         );
         (candidate, marker)
+    }
+
+    #[test]
+    fn cargo_deny_guidance_is_aligned_and_actionable() {
+        assert_eq!(
+            CARGO_DENY_INSTALL_GUIDANCE,
+            "cargo install --locked cargo-deny --version 0.20.2"
+        );
+        assert!(AGENT_GUIDANCE.contains(CARGO_DENY_INSTALL_GUIDANCE));
+        assert!(AGENT_GUIDANCE.contains(
+            "cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources"
+        ));
     }
 }
