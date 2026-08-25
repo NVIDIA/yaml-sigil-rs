@@ -2,9 +2,8 @@
 # SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 # SPDX-License-Identifier: Apache-2.0
 
-# Resolve the release mode and version bump. Manual choices replace the prior
-# override, while push and post-publication events preserve the hidden marker
-# already reviewed in an open release PR. A manual `auto` clears the marker.
+# Resolve whether this event may create or update the App-owned release
+# proposal and select its explicit release mode and version-line intent.
 
 set -euo pipefail
 
@@ -15,6 +14,14 @@ set -euo pipefail
 : "${REQUESTED_BUMP:?REQUESTED_BUMP is required}"
 : "${REQUESTED_MODE:?REQUESTED_MODE is required}"
 
+# Accept only the event-authority states supplied by the workflow.
+case "${MANUAL_DISPATCH}" in
+  true | false) ;;
+  *)
+    echo "Unsupported manual-dispatch state: ${MANUAL_DISPATCH}." >&2
+    exit 2
+    ;;
+esac
 # Accept only the two documented release paths.
 case "${REQUESTED_MODE}" in
   next-candidate | promote-stable) ;;
@@ -25,49 +32,61 @@ case "${REQUESTED_MODE}" in
 esac
 # Accept only bump values exposed by the manual workflow form.
 case "${REQUESTED_BUMP}" in
-  auto | patch | minor | major) ;;
+  patch | minor | major) ;;
   *)
     echo "Unsupported release bump: ${REQUESTED_BUMP}." >&2
     exit 2
     ;;
 esac
 
-existing_body="$(
+release_app_login="nvidia-yamlsigil-release-pr[bot]"
+release_app_id=318780254
+existing_prs="$(
   gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" \
-    -f state=open -f "head=${GITHUB_REPOSITORY%%/*}:release-plz-next" \
-    --jq '.[0].body // ""'
+    -f state=open -f "head=${GITHUB_REPOSITORY%%/*}:release-plz-next"
 )"
-retained_bump="$(
-  sed -n \
-    's/.*<!-- yaml-sigil-release-bump: \(patch\|minor\|major\) -->.*/\1/p' \
-    <<<"${existing_body}" | head -1
-)"
+# Accept only an absent proposal or one exact App-owned same-repository PR.
+if ! jq -e \
+  --arg repository "${GITHUB_REPOSITORY}" \
+  --arg login "${release_app_login}" \
+  --argjson user_id "${release_app_id}" \
+  'type == "array" and length <= 1 and
+   (length == 0 or (.[0] |
+     .state == "open" and
+     .user.login == $login and .user.id == $user_id and
+     .head.ref == "release-plz-next" and
+     .head.repo.full_name == $repository and
+     .base.ref == "main" and .base.repo.full_name == $repository))' \
+  >/dev/null <<<"${existing_prs}"; then
+  echo "The existing release proposal lookup is ambiguous or unauthorized." >&2
+  exit 1
+fi
+existing_count="$(jq -r 'length' <<<"${existing_prs}")"
 
 mode="${REQUESTED_MODE}"
-# Stable promotion ignores bump calculation and clears any earlier override.
-if [[ "${mode}" == "promote-stable" ]]; then
-  bump=auto
-  marker=""
-# A manual dispatch deliberately replaces the retained release intent.
-elif [[ "${MANUAL_DISPATCH}" == "true" ]]; then
-  bump="${REQUESTED_BUMP}"
-  # Selecting auto is the explicit operation that removes a prior override.
-  if [[ "${bump}" == "auto" ]]; then
-    marker=""
-  else
-    marker="<!-- yaml-sigil-release-bump: ${bump} -->"
+proceed=true
+bump="${REQUESTED_BUMP}"
+# Background events may seed one patch proposal but cannot revise one.
+if [[ "${MANUAL_DISPATCH}" == "false" ]]; then
+  # Background inputs must remain the deterministic next-patch defaults.
+  if [[ "${mode}" != "next-candidate" || "${bump}" != "patch" ]]; then
+    echo "Background release proposals must use next-candidate patch mode." >&2
+    exit 2
   fi
-# Background updates retain the last reviewed explicit bump selection.
-elif [[ -n "${retained_bump}" ]]; then
-  bump="${retained_bump}"
-  marker="<!-- yaml-sigil-release-bump: ${bump} -->"
+  # Leave an existing exact proposal untouched until a manual dispatch.
+  if [[ "${existing_count}" == "1" ]]; then
+    proceed=false
+    echo "An App-owned release proposal already exists; no background update is needed."
+  fi
 else
-  bump=auto
-  marker=""
+  # Stable promotion always uses patch compatibility intent for the same core.
+  if [[ "${mode}" == "promote-stable" ]]; then
+    bump="patch"
+  fi
 fi
 
 {
+  echo "proceed=${proceed}"
   echo "mode=${mode}"
   echo "bump=${bump}"
-  echo "marker=${marker}"
 } >>"${GITHUB_OUTPUT}"

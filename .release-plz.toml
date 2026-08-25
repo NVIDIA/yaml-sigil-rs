@@ -10,6 +10,8 @@ git_release_type = "auto"
 publish_allow_dirty = false
 publish_no_verify = false
 publish_timeout = "5m"
+# The workflow runs the exact analyzer directly and fails on every error.
+semver_check = false
 
 [[package]]
 name = "yaml-sigil-core"
@@ -20,7 +22,10 @@ publish_all_features = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-core/CHANGELOG.md"
 git_tag_enable = true
+git_tag_name = "yaml-sigil-core-v{{ version }}"
 git_release_enable = true
+git_release_name = "yaml-sigil-core-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"
 
 [[package]]
@@ -31,7 +36,10 @@ publish = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-transcription/CHANGELOG.md"
 git_tag_enable = true
+git_tag_name = "yaml-sigil-transcription-v{{ version }}"
 git_release_enable = true
+git_release_name = "yaml-sigil-transcription-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"
 
 [[package]]
@@ -43,7 +51,10 @@ publish_all_features = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-signing/CHANGELOG.md"
 git_tag_enable = true
+git_tag_name = "yaml-sigil-signing-v{{ version }}"
 git_release_enable = true
+git_release_name = "yaml-sigil-signing-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"
 
 [[package]]
@@ -55,5 +66,8 @@ publish_all_features = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-verification/CHANGELOG.md"
 git_tag_enable = true
+git_tag_name = "yaml-sigil-verification-v{{ version }}"
 git_release_enable = true
+git_release_name = "yaml-sigil-verification-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"

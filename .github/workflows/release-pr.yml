@@ -18,18 +18,21 @@ on:
           - next-candidate
           - promote-stable
       bump:
-        description: Override an otherwise non-discoverable version-line change.
+        description: Select the next-candidate line; stable promotion uses patch.
         required: true
-        default: auto
+        default: patch
         type: choice
         options:
-          - auto
           - patch
           - minor
           - major
 
 permissions:
   contents: read
+
+env:
+  # Resolve the exact external traits package from the named crates.io index.
+  CARGO_REGISTRIES_CRATES_IO_INDEX: https://github.com/rust-lang/crates.io-index
 
 concurrency:
   group: release-proposal-${{ github.repository }}
@@ -52,6 +55,7 @@ jobs:
     if: ${{ vars.YAML_SIGIL_RELEASE_PR_APP_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment: protected-automation
     permissions:
       contents: read
       pull-requests: read
@@ -78,14 +82,15 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache: false
+          toolchain: 1.95.0
 
-      # This section would benefit by a change to the action allowlist
-      - name: Install release-plz
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+      - name: Install exact cargo-binstall
+        uses: cargo-bins/cargo-binstall@732870f031d2fb36309d0deaf36abcc704a7be65 # v1.20.1
         with:
-          checksum: true
-          fallback: cargo-binstall
-          tool: release-plz@0.3.160
+          version: 1.20.1
+
+      - name: Install and verify release analyzers
+        run: cargo xtask release install-tools
 
       - name: Require the expected repository and current main
         run: |
@@ -114,8 +119,11 @@ jobs:
             exit 1
           fi
 
-      # All four crates form one version transaction. Do not advance while any
-      # manifest version integrated on main is still awaiting publication.
+      - name: Require exact traits availability and source
+        run: cargo xtask release verify-traits
+
+      # Do not advance a release proposal while any crate version integrated on
+      # main is awaiting publication. This orders merge before publication.
       - name: Require the current source version on crates.io
         id: published
         run: |
@@ -123,7 +131,7 @@ jobs:
           echo "version=${version}" >>"${GITHUB_OUTPUT}"
           # Exit 3 means at least one crate is awaiting publication. That is an
           # ordered wait state, while any other error must fail the run.
-          if bash .github/scripts/verify-crates-io-packages.sh \
+          if cargo xtask release verify-registry \
             --check-version "${version}" \
             yaml-sigil-core \
             yaml-sigil-transcription \
@@ -132,49 +140,133 @@ jobs:
             echo "available=true" >>"${GITHUB_OUTPUT}"
           else
             status="$?"
-            # Registry failures are errors; only an exact 404 is a wait state.
+            # Registry failures are errors; only exact absence is a wait state.
             if [[ "${status}" -ne 3 ]]; then
               exit "${status}"
             fi
             echo "available=false" >>"${GITHUB_OUTPUT}"
-            echo "${version} is not yet published for every crate; no later proposal is created."
+            echo "${version} is not published for every crate; no later proposal is created."
           fi
 
+      # Manual dispatches may revise the App proposal with explicit intent.
+      # Background events seed one patch proposal but never revise it.
       - name: Resolve release mode and bump intent
         id: intent
         if: ${{ steps.published.outputs.available == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           MANUAL_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
-          REQUESTED_BUMP: ${{ inputs.bump || 'auto' }}
+          REQUESTED_BUMP: ${{ inputs.bump || 'patch' }}
           REQUESTED_MODE: ${{ inputs.mode || 'next-candidate' }}
         run: bash .github/scripts/resolve-release-intent.sh
 
+      - name: Prepare the official tagged baseline
+        id: baseline
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: remote.origin.pushurl
+          GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-proposal
+        run: |
+          python3 .github/scripts/prepare_release_baseline.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${{ steps.published.outputs.version }}" \
+            --head "${GITHUB_SHA}" \
+            --output "${RUNNER_TEMP}/official-release-baseline" \
+            --expected-fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+
       - name: Generate and validate release transaction
         id: generate
-        if: ${{ steps.published.outputs.available == 'true' }}
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
         env:
           EFFECTIVE_BUMP: ${{ steps.intent.outputs.bump }}
-          GITHUB_TOKEN: ${{ github.token }}
+          GIT_TOKEN: ${{ github.token }}
           MODE: ${{ steps.intent.outputs.mode }}
           PUBLISHED_VERSION: ${{ steps.published.outputs.version }}
-          RELEASE_MARKER: ${{ steps.intent.outputs.marker }}
+          REGISTRY_MANIFEST_PATH: ${{ steps.baseline.outputs.manifest }}
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: remote.origin.pushurl
+          GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-proposal
         run: bash .github/scripts/generate-release-proposal.sh
 
+      # Exercise every provider-neutral generated-source gate before the App
+      # may change a Git object, branch, or pull request.
+      - name: Validate generated release source before mutation
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
+        run: |
+          cargo xtask sync-workspace-versions --check
+          cargo xtask release-version check
+          cargo xtask release verify-traits
+          cargo xtask release check-packages \
+            yaml-sigil-core \
+            yaml-sigil-transcription \
+            yaml-sigil-signing \
+            yaml-sigil-verification
+          current_version="$(cargo xtask release-version show)"
+          cargo xtask release-version check-compatibility \
+            --baseline-manifest "${{ steps.baseline.outputs.manifest }}" \
+            --current-manifest Cargo.toml \
+            --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
+            --expected-current-version "${current_version}" \
+            --intent "${{ steps.intent.outputs.bump }}"
+          cargo metadata --no-deps --format-version 1 >/dev/null
+          validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-precommit-cargo-home"
+          cargo xtask release prepare-validation-cargo-home \
+            --output "${validation_cargo_home}"
+          export CARGO_HOME="${validation_cargo_home}"
+          # Keep signing ahead of verification while validating the transaction.
+          cargo package --package yaml-sigil-core --all-features
+          cargo package --package yaml-sigil-transcription
+          cargo package --package yaml-sigil-signing --all-features
+          cargo package --package yaml-sigil-verification --all-features
+          git diff --check
+
+      # Proposal analysis cannot authorize a later tag or main state. Recheck
+      # the complete persisted authority immediately before the App writes.
+      - name: Recheck official tags and current main before mutation
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
+        env:
+          GIT_CONFIG_COUNT: 1
+          GIT_CONFIG_KEY_0: remote.origin.pushurl
+          GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-proposal
+        run: |
+          python3 .github/scripts/prepare_release_baseline.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --head "${GITHUB_SHA}" \
+            --verify-inventory "${{ steps.baseline.outputs.inventory }}" \
+            --expected-fetch-url "https://github.com/${GITHUB_REPOSITORY}"
+
+      # GitHub signs Git Database commits created with the App installation
+      # token. The helper derives the bot's DCO identity, rejects foreign
+      # branch commits, and keeps the generated file set narrow.
       - name: Create or update release pull request
         id: release-pr
-        if: ${{ steps.published.outputs.available == 'true' }}
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
         env:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASE_BODY_FILE: ${{ runner.temp }}/release-pr-body.md
           RELEASE_BRANCH: release-plz-next
           RELEASE_DRAFT: ${{ steps.generate.outputs.draft }}
+          RELEASE_HOLD_DRAFT: "true"
+          RELEASE_OPERATION: update
           RELEASE_TITLE: ${{ steps.generate.outputs.title }}
         run: bash .github/scripts/update-release-pull-request.sh
 
       - name: Check out generated Verified commit
-        if: ${{ steps.published.outputs.available == 'true' }}
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -182,7 +274,9 @@ jobs:
           ref: ${{ steps.release-pr.outputs.commit_sha }}
 
       - name: Attach generated release branch
-        if: ${{ steps.published.outputs.available == 'true' }}
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
         env:
           RELEASE_BRANCH: release-plz-next
           RELEASE_COMMIT: ${{ steps.release-pr.outputs.commit_sha }}
@@ -199,23 +293,62 @@ jobs:
             exit 1
           fi
 
-      - name: Recheck clean synchronized release source
-        if: ${{ steps.published.outputs.available == 'true' }}
+      - name: Recheck clean generated release source
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
         env:
-          # Resolve manifests whose publish allowlist names crates-io.
-          CARGO_REGISTRIES_CRATES_IO_INDEX: https://github.com/rust-lang/crates.io-index
           GIT_TOKEN: ${{ github.token }}
         run: |
           cargo xtask sync-workspace-versions --check
           cargo xtask release-version check
           test -z "$(git status --porcelain --untracked-files=no)"
+          cargo xtask release verify-traits
+          cargo xtask release check-packages \
+            yaml-sigil-core \
+            yaml-sigil-transcription \
+            yaml-sigil-signing \
+            yaml-sigil-verification
+          current_version="$(cargo xtask release-version show)"
+          cargo xtask release-version check-compatibility \
+            --baseline-manifest "${{ steps.baseline.outputs.manifest }}" \
+            --current-manifest Cargo.toml \
+            --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
+            --expected-current-version "${current_version}" \
+            --intent "${{ steps.intent.outputs.bump }}"
           cargo metadata --no-deps --format-version 1 >/dev/null
-          # Resolve unpublished workspace crates only inside the dry-run
-          # Cargo home.
           validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-proposal-cargo-home"
-          bash .github/scripts/prepare-unpublished-workspace-dependencies.sh \
-            "${validation_cargo_home}"
+          cargo xtask release prepare-validation-cargo-home \
+            --output "${validation_cargo_home}"
+          export CARGO_HOME="${validation_cargo_home}"
+          # Keep signing ahead of verification while validating the transaction.
+          cargo package --package yaml-sigil-core --all-features
+          cargo package --package yaml-sigil-transcription
+          cargo package --package yaml-sigil-signing --all-features
+          cargo package --package yaml-sigil-verification --all-features
           # The read-only job token permits forge checks; dry-run cannot publish.
-          CARGO_HOME="${validation_cargo_home}" \
-            release-plz release --dry-run --forge github --config .release-plz.toml
+          release-plz release \
+            --dry-run \
+            --forge github \
+            --config .release-plz.toml \
+            --manifest-path Cargo.toml
           test -z "$(git status --porcelain --untracked-files=no)"
+
+      # Change review state only after the exact App commit passes the
+      # association-dependent release-plz dry run and every repeated source gate.
+      - name: Finalize validated release pull request
+        if: >-
+          ${{ steps.published.outputs.available == 'true' &&
+              steps.intent.outputs.proceed == 'true' }}
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_BODY_FILE: ${{ runner.temp }}/release-pr-body.md
+          RELEASE_BRANCH: release-plz-next
+          RELEASE_COMMIT: ${{ steps.release-pr.outputs.commit_sha }}
+          RELEASE_DRAFT: ${{ steps.generate.outputs.draft }}
+          RELEASE_HOLD_DRAFT: "true"
+          RELEASE_OPERATION: finalize
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.pr_number }}
+          RELEASE_TITLE: ${{ steps.generate.outputs.title }}
+        run: bash .github/scripts/update-release-pull-request.sh
