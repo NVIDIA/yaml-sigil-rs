@@ -23,7 +23,9 @@ pub mod wire;
 /// APIs impose no deployment-specific size limits on artifact, payload, or signature-carrier
 /// data. Decoding copies length-delimited fields into owned message buffers, so allocation and
 /// copying are linear in field size. Callers handling untrusted data must enforce
-/// deployment-appropriate size limits before decoding.
+/// deployment-appropriate size limits before decoding. Direct consumers can set a top-level input
+/// bound with [`buffa::DecodeOptions::with_max_message_size`] and then decode through
+/// [`buffa::DecodeOptions::decode_from_slice`].
 pub mod pb {
     #![allow(clippy::all)]
     #![allow(dead_code)]
