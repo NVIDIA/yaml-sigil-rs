@@ -10,6 +10,8 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+# Bind the required test-key generator explicitly.
+build = "build.rs"
 
 # The dependency is invoked directly by build.rs.
 [package.metadata.cargo-machete]
