@@ -8,37 +8,23 @@ use std::io::{self, Write};
 use std::path::{Component, Path};
 use std::process::Command;
 
+use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
+use crate::package_content_policy::PACKAGE_SPECS;
+
 #[derive(Clone, Copy, Debug)]
-struct PackageSpec {
-    name: &'static str,
-    inventory_path: &'static str,
-    inventory: &'static str,
+pub(crate) struct PackageSpec {
+    pub(crate) name: &'static str,
+    pub(crate) inventory_path: &'static str,
+    pub(crate) inventory: &'static str,
 }
 
-const PACKAGE_SPECS: &[PackageSpec] = &[
-    PackageSpec {
-        name: "yaml-sigil-core",
-        inventory_path: "xtask/package-contents/yaml-sigil-core.txt",
-        inventory: include_str!("../package-contents/yaml-sigil-core.txt"),
-    },
-    PackageSpec {
-        name: "yaml-sigil-transcription",
-        inventory_path: "xtask/package-contents/yaml-sigil-transcription.txt",
-        inventory: include_str!("../package-contents/yaml-sigil-transcription.txt"),
-    },
-    PackageSpec {
-        name: "yaml-sigil-signing",
-        inventory_path: "xtask/package-contents/yaml-sigil-signing.txt",
-        inventory: include_str!("../package-contents/yaml-sigil-signing.txt"),
-    },
-    PackageSpec {
-        name: "yaml-sigil-verification",
-        inventory_path: "xtask/package-contents/yaml-sigil-verification.txt",
-        inventory: include_str!("../package-contents/yaml-sigil-verification.txt"),
-    },
-];
-
 const SYNTHETIC_LOCKFILE: &str = "Cargo.lock";
+
+#[derive(Debug, Eq, PartialEq)]
+struct InventoryDifference {
+    missing: Vec<String>,
+    unexpected: Vec<String>,
+}
 
 /// Compare Cargo's modeled package paths with the committed exact inventories.
 ///
@@ -52,7 +38,7 @@ pub(crate) fn run(root: &Path) -> io::Result<()> {
     for package in PACKAGE_SPECS {
         match check_package(root, *package) {
             Ok(count) => eprintln!("{}: package contents match ({count} paths)", package.name),
-            Err(error) => failures.push(error),
+            Err(error) => failures.push(format!("{}: {error}", package.name)),
         }
     }
 
@@ -66,52 +52,59 @@ pub(crate) fn run(root: &Path) -> io::Result<()> {
     }
 }
 
-fn check_package(root: &Path, package: PackageSpec) -> Result<usize, String> {
+fn check_package(root: &Path, package: PackageSpec) -> io::Result<usize> {
     let expected = parse_inventory(package.inventory, package.inventory_path)
-        .map_err(|error| format!("{}: {error}", package.name))?;
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let args = package_list_args(package.name);
     eprintln!("+ cargo {} (cwd {})", args.join(" "), root.display());
 
-    let output = Command::new("cargo")
-        .current_dir(root)
-        .args(args)
-        .output()
-        .map_err(|error| {
-            format!(
-                "{}: failed to run cargo package --list: {error}",
-                package.name
+    let mut command = Command::new("cargo");
+    command.current_dir(root).args(args);
+    let output =
+        bounded_process::output(&mut command, VALIDATION_OUTPUT_LIMITS).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("failed to run cargo package --list: {error}"),
             )
         })?;
 
     if !output.stderr.is_empty() {
-        io::stderr()
-            .lock()
-            .write_all(&output.stderr)
-            .map_err(|error| format!("{}: failed to relay Cargo stderr: {error}", package.name))?;
+        io::stderr().lock().write_all(&output.stderr)?;
     }
     if !output.status.success() {
-        return Err(format!(
-            "{}: cargo package --list failed (exit {})",
-            package.name,
-            output.status.code().unwrap_or(-1)
-        ));
+        return Err(io::Error::other(format!(
+            "cargo package --list failed with {}",
+            output.status
+        )));
     }
 
-    let actual_text = String::from_utf8(output.stdout).map_err(|error| {
-        format!(
-            "{}: cargo package --list produced non-UTF-8 output: {error}",
-            package.name
+    let stdout = std::str::from_utf8(&output.stdout).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("cargo package --list returned non-UTF-8 output: {error}"),
         )
     })?;
-    let mut actual = parse_cargo_list(&actual_text, "cargo package --list output")
-        .map_err(|error| format!("{}: {error}", package.name))?;
+    let mut actual = parse_cargo_list(stdout)?;
     actual.insert(SYNTHETIC_LOCKFILE.to_owned());
 
-    if let Some(difference) = inventory_difference(package.name, &expected, &actual) {
-        Err(difference)
+    let difference = compare_inventories(&expected, &actual);
+    if difference.missing.is_empty() && difference.unexpected.is_empty() {
+        Ok(actual.len())
     } else {
-        Ok(expected.len())
+        Err(io::Error::other(format_difference(&difference)))
     }
+}
+
+#[cfg(all(test, windows))]
+pub(crate) fn check_test_package(root: &Path) -> io::Result<usize> {
+    check_package(
+        root,
+        PackageSpec {
+            name: "candidate-package",
+            inventory_path: "test package inventory",
+            inventory: "Cargo.lock\nCargo.toml\nCargo.toml.orig\nsrc/lib.rs\n",
+        },
+    )
 }
 
 fn package_list_args(package: &str) -> [&str; 6] {
@@ -125,98 +118,102 @@ fn package_list_args(package: &str) -> [&str; 6] {
     ]
 }
 
-fn parse_inventory(text: &str, label: &str) -> io::Result<BTreeSet<String>> {
+fn parse_inventory(text: &str, label: &str) -> Result<BTreeSet<String>, String> {
     if text.is_empty() {
-        return Err(invalid_data(format!("{label} is empty")));
+        return Err(format!("{label} is empty"));
     }
     if !text.ends_with('\n') {
-        return Err(invalid_data(format!("{label} must end with a line feed")));
+        return Err(format!("{label} must end with a line feed"));
     }
     if text.contains('\r') {
-        return Err(invalid_data(format!(
-            "{label} must use line-feed terminators"
-        )));
+        return Err(format!("{label} must use line-feed terminators"));
     }
 
     let mut paths = BTreeSet::new();
     let mut previous: Option<&str> = None;
     for (index, path) in text.lines().enumerate() {
         let line = index + 1;
-        if path.is_empty() {
-            return Err(invalid_data(format!("{label}:{line}: blank path")));
-        }
-        if path.starts_with('#') {
-            return Err(invalid_data(format!(
-                "{label}:{line}: comments are not allowed"
-            )));
-        }
-        if path.contains('\\')
-            || path
-                .split('/')
-                .any(|component| component.is_empty() || matches!(component, "." | ".."))
-            || !Path::new(path)
-                .components()
-                .all(|component| matches!(component, Component::Normal(_)))
-        {
-            return Err(invalid_data(format!(
-                "{label}:{line}: path must be crate-relative: {path}"
-            )));
-        }
+        validate_inventory_path(path, label, line)?;
+
         if let Some(prior) = previous {
             match prior.as_bytes().cmp(path.as_bytes()) {
                 std::cmp::Ordering::Greater => {
-                    return Err(invalid_data(format!(
+                    return Err(format!(
                         "{label}:{line}: paths are not bytewise sorted: {path} follows {prior}"
-                    )));
+                    ));
                 }
                 std::cmp::Ordering::Equal => {
-                    return Err(invalid_data(format!(
-                        "{label}:{line}: duplicate path: {path}"
-                    )));
+                    return Err(format!("{label}:{line}: duplicate path: {path}"));
                 }
                 std::cmp::Ordering::Less => {}
             }
         }
+
         paths.insert(path.to_owned());
         previous = Some(path);
     }
     Ok(paths)
 }
 
-fn parse_cargo_list(text: &str, label: &str) -> io::Result<BTreeSet<String>> {
+fn parse_cargo_list(text: &str) -> io::Result<BTreeSet<String>> {
     let normalized = normalize_platform_separators(text, std::path::MAIN_SEPARATOR);
-    parse_inventory(&normalized, label)
+    parse_inventory(&normalized, "cargo package --list output")
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn normalize_platform_separators(text: &str, separator: char) -> String {
     text.replace(separator, "/")
 }
 
-fn inventory_difference(
-    package: &str,
-    expected: &BTreeSet<String>,
-    actual: &BTreeSet<String>,
-) -> Option<String> {
-    let missing: Vec<_> = expected.difference(actual).collect();
-    let unexpected: Vec<_> = actual.difference(expected).collect();
-    if missing.is_empty() && unexpected.is_empty() {
-        return None;
+fn validate_inventory_path(path: &str, label: &str, line: usize) -> Result<(), String> {
+    if path.is_empty() {
+        return Err(format!("{label}:{line}: blank path"));
     }
-
-    let mut lines = vec![format!("{package}: package contents differ")];
-    if !missing.is_empty() {
-        lines.push("missing from package:".to_owned());
-        lines.extend(missing.into_iter().map(|path| format!("  {path}")));
+    if path.starts_with('#') {
+        return Err(format!("{label}:{line}: comments are not allowed"));
     }
-    if !unexpected.is_empty() {
-        lines.push("unexpected in package:".to_owned());
-        lines.extend(unexpected.into_iter().map(|path| format!("  {path}")));
+    if path.contains('\\')
+        || path
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        || !Path::new(path)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(format!(
+            "{label}:{line}: path must be a normalized crate-relative path: {path}"
+        ));
     }
-    Some(lines.join("\n"))
+    Ok(())
 }
 
-fn invalid_data(message: String) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+fn compare_inventories(
+    expected: &BTreeSet<String>,
+    actual: &BTreeSet<String>,
+) -> InventoryDifference {
+    InventoryDifference {
+        missing: expected.difference(actual).cloned().collect(),
+        unexpected: actual.difference(expected).cloned().collect(),
+    }
+}
+
+fn format_difference(difference: &InventoryDifference) -> String {
+    let mut message = String::from("package contents differ");
+    if !difference.missing.is_empty() {
+        message.push_str("\n  missing from package:");
+        for path in &difference.missing {
+            message.push_str("\n    ");
+            message.push_str(path);
+        }
+    }
+    if !difference.unexpected.is_empty() {
+        message.push_str("\n  unexpected in package:");
+        for path in &difference.unexpected {
+            message.push_str("\n    ");
+            message.push_str(path);
+        }
+    }
+    message
 }
 
 #[cfg(test)]
@@ -224,19 +221,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn package_scope_and_order_are_explicit() {
-        assert_eq!(
-            PACKAGE_SPECS
-                .iter()
-                .map(|package| package.name)
-                .collect::<Vec<_>>(),
-            [
-                "yaml-sigil-core",
-                "yaml-sigil-transcription",
-                "yaml-sigil-signing",
-                "yaml-sigil-verification",
-            ]
-        );
+    fn package_policy_is_nonempty_and_unique() {
+        assert!(!PACKAGE_SPECS.is_empty());
+
+        let names = PACKAGE_SPECS
+            .iter()
+            .map(|package| package.name)
+            .collect::<BTreeSet<_>>();
+        let inventories = PACKAGE_SPECS
+            .iter()
+            .map(|package| package.inventory_path)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(names.len(), PACKAGE_SPECS.len());
+        assert_eq!(inventories.len(), PACKAGE_SPECS.len());
     }
 
     #[test]
@@ -270,16 +267,17 @@ mod tests {
             ("src/lib.rs\r\n", "must use line-feed terminators"),
             ("src/lib.rs\n\n", "blank path"),
             ("# note\n", "comments are not allowed"),
-            ("/src/lib.rs\n", "path must be crate-relative"),
-            ("src//lib.rs\n", "path must be crate-relative"),
-            ("src/./lib.rs\n", "path must be crate-relative"),
-            ("src/\n", "path must be crate-relative"),
+            ("/src/lib.rs\n", "normalized crate-relative path"),
+            ("../src/lib.rs\n", "normalized crate-relative path"),
+            ("src//lib.rs\n", "normalized crate-relative path"),
+            ("src/./lib.rs\n", "normalized crate-relative path"),
+            ("src/\n", "normalized crate-relative path"),
+            ("src\\lib.rs\n", "normalized crate-relative path"),
             ("src/z.rs\nsrc/a.rs\n", "not bytewise sorted"),
             ("src/lib.rs\nsrc/lib.rs\n", "duplicate path"),
         ] {
             let error = parse_inventory(text, "test inventory")
-                .expect_err("noncanonical inventory must fail")
-                .to_string();
+                .expect_err("noncanonical inventory must fail");
             assert!(error.contains(message), "unexpected error: {error}");
         }
     }
@@ -300,17 +298,24 @@ mod tests {
     fn differences_name_missing_and_unexpected_paths_deterministically() {
         let expected = paths(&["README.md", "src/lib.rs"]);
         let actual = paths(&["README.md", "src/new.rs"]);
+        let difference = compare_inventories(&expected, &actual);
         assert_eq!(
-            inventory_difference("example", &expected, &actual).as_deref(),
-            Some(concat!(
-                "example: package contents differ\n",
-                "missing from package:\n",
-                "  src/lib.rs\n",
-                "unexpected in package:\n",
-                "  src/new.rs"
-            ))
+            format_difference(&difference),
+            concat!(
+                "package contents differ\n",
+                "  missing from package:\n",
+                "    src/lib.rs\n",
+                "  unexpected in package:\n",
+                "    src/new.rs"
+            )
         );
-        assert!(inventory_difference("example", &expected, &expected).is_none());
+        assert_eq!(
+            compare_inventories(&expected, &expected),
+            InventoryDifference {
+                missing: Vec::new(),
+                unexpected: Vec::new(),
+            }
+        );
     }
 
     fn paths(paths: &[&str]) -> BTreeSet<String> {

@@ -11,9 +11,11 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand, ValueEnum};
-use semver::{Prerelease, Version};
+use semver::{Prerelease, Version, VersionReq};
 use serde_json::Value;
+use toml_edit::{DocumentMut, Item, Value as TomlValue};
 
+use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
 use crate::release::exact_output_line;
 use crate::release_policy::{RUST_POLICY, RUST_TOOLCHAIN, TRAITS_POLICY};
 
@@ -173,49 +175,237 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
 /// `[workspace.package].version` because Cargo cannot inherit `version` into
 /// that table.
 pub fn sync_workspace_dependency_versions(root: &Path, check: bool) -> Result<bool> {
+    let mut runner = SystemCargoRunner;
+    sync_workspace_dependency_versions_with_runner(root, check, &mut runner)
+}
+
+fn sync_workspace_dependency_versions_with_runner(
+    root: &Path,
+    check: bool,
+    runner: &mut impl CargoRunner,
+) -> Result<bool> {
     let path = root.join("Cargo.toml");
     let cargo_toml =
         fs::read_to_string(&path).context("read workspace Cargo.toml for version sync")?;
-    let package_version = workspace_package_version(&cargo_toml)
-        .ok_or_else(|| anyhow!("missing [workspace.package] version in root Cargo.toml"))?;
-
-    let mut changed = false;
-    let mut lines: Vec<String> = Vec::new();
-    for line in cargo_toml.lines() {
-        let trimmed = line.trim();
-        let mut out = line.to_string();
-        for policy in RUST_POLICY.packages {
-            let dep = policy.package;
-            if trimmed.starts_with(&format!("{dep} = ")) {
-                if let Some(current) = workspace_dependency_version(&cargo_toml, dep) {
-                    if current != package_version {
-                        out = set_dependency_version_on_line(line, &package_version);
-                        changed = true;
-                    }
-                } else {
-                    bail!("missing version in [workspace.dependencies] entry for {dep}");
-                }
-                break;
-            }
-        }
-        lines.push(out);
-    }
+    let mut document = cargo_toml
+        .parse::<DocumentMut>()
+        .context("parse workspace Cargo.toml for version sync")?;
+    let package_version = document
+        .get("workspace")
+        .and_then(|workspace| workspace.get("package"))
+        .and_then(|package| package.get("version"))
+        .and_then(Item::as_str)
+        .ok_or_else(|| anyhow!("missing string [workspace.package] version in root Cargo.toml"))?
+        .to_string();
+    let changed = synchronize_internal_dependency_entries(&mut document, &package_version)?;
 
     if changed && check {
         bail!(
             "[workspace.dependencies] versions are not synchronized with {package_version}; run `cargo xtask sync-workspace-versions`"
         );
     } else if changed {
-        let mut body = lines.join("\n");
-        body.push('\n');
-        fs::write(&path, body).context("write workspace Cargo.toml after version sync")?;
+        fs::write(&path, document.to_string())
+            .context("write workspace Cargo.toml after version sync")?;
         eprintln!(
             "sync-workspace-versions: set [workspace.dependencies] versions to {package_version}"
         );
     } else {
         eprintln!("sync-workspace-versions: [workspace.dependencies] already at {package_version}");
     }
+    validate_internal_dependency_metadata(root, &package_version, runner)?;
     Ok(changed)
+}
+
+fn synchronize_internal_dependency_entries(
+    document: &mut DocumentMut,
+    package_version: &str,
+) -> Result<bool> {
+    let dependencies = document
+        .get_mut("workspace")
+        .and_then(Item::as_table_mut)
+        .and_then(|workspace| workspace.get_mut("dependencies"))
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| anyhow!("missing [workspace.dependencies] table"))?;
+    let mut changed = false;
+    for policy in RUST_POLICY.packages {
+        let package = policy.package;
+        let entry = dependencies
+            .get_mut(package)
+            .ok_or_else(|| anyhow!("missing [workspace.dependencies] entry for {package}"))?;
+        let inline = entry.as_inline_table_mut().ok_or_else(|| {
+            anyhow!("[workspace.dependencies] {package} must use an inline table")
+        })?;
+        let current = inline
+            .get("version")
+            .and_then(TomlValue::as_str)
+            .ok_or_else(|| {
+                anyhow!("[workspace.dependencies] {package} must contain one string version field")
+            })?;
+        if current == package_version {
+            continue;
+        }
+        let version = inline
+            .get_mut("version")
+            .expect("the validated inline-table version exists");
+        let decor = version.decor().clone();
+        *version = TomlValue::from(package_version);
+        *version.decor_mut() = decor;
+        changed = true;
+    }
+    Ok(changed)
+}
+
+fn validate_internal_dependency_metadata(
+    root: &Path,
+    package_version: &str,
+    runner: &mut impl CargoRunner,
+) -> Result<()> {
+    let args: Vec<OsString> = ["metadata", "--no-deps", "--format-version", "1"]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    let output = runner
+        .output(root, &cargo_program(), &args)
+        .context("run Cargo metadata for workspace dependency synchronization")?;
+    if !output.success {
+        bail!(
+            "Cargo metadata failed for workspace dependency synchronization: {}",
+            cargo_output_detail(&output)
+        );
+    }
+    validate_internal_dependency_metadata_json(root, package_version, &output.stdout)
+}
+
+fn validate_internal_dependency_metadata_json(
+    root: &Path,
+    package_version: &str,
+    output: &[u8],
+) -> Result<()> {
+    require_cargo_json_bound(output)?;
+    let metadata: Value =
+        serde_json::from_slice(output).context("Cargo returned invalid dependency metadata")?;
+    let packages = metadata
+        .get("packages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("Cargo returned invalid package metadata"))?;
+    let workspace_root = metadata
+        .get("workspace_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("Cargo dependency metadata omitted workspace_root"))?;
+    let workspace_identity = Path::new(workspace_root)
+        .canonicalize()
+        .with_context(|| format!("resolve Cargo workspace root {workspace_root}"))?;
+    let expected_root = root
+        .canonicalize()
+        .with_context(|| format!("resolve workspace root {}", root.display()))?;
+    if workspace_identity != expected_root {
+        bail!("Cargo dependency metadata selected an unexpected workspace root");
+    }
+
+    let expected_requirement = VersionReq::parse(package_version)
+        .with_context(|| format!("invalid workspace dependency version {package_version}"))?;
+    for policy in RUST_POLICY.packages {
+        let package_name = policy.package;
+        let matches: Vec<_> = packages
+            .iter()
+            .filter(|package| package.get("name").and_then(Value::as_str) == Some(package_name))
+            .collect();
+        if matches.len() != 1 {
+            bail!(
+                "Cargo dependency metadata did not contain exactly one {package_name} package; found {}",
+                matches.len()
+            );
+        }
+        let package = matches[0];
+        if package.get("source") != Some(&Value::Null) {
+            bail!("Cargo dependency metadata gave {package_name} a non-workspace source");
+        }
+        if package.get("version").and_then(Value::as_str) != Some(package_version) {
+            bail!("Cargo dependency metadata gave {package_name} an unexpected release version");
+        }
+        let expected_manifest = expected_root
+            .join(policy.path_in_vcs)
+            .join("Cargo.toml")
+            .canonicalize()
+            .with_context(|| format!("resolve expected manifest for {package_name}"))?;
+        let actual_manifest = package
+            .get("manifest_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("Cargo dependency metadata omitted {package_name} manifest"))?;
+        let actual_manifest = Path::new(actual_manifest)
+            .canonicalize()
+            .with_context(|| format!("resolve Cargo manifest for {package_name}"))?;
+        if actual_manifest != expected_manifest {
+            bail!("Cargo dependency metadata returned an unexpected manifest for {package_name}");
+        }
+        let dependencies = package
+            .get("dependencies")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                anyhow!("Cargo dependency metadata omitted dependencies for {package_name}")
+            })?;
+        for dependency in dependencies {
+            let dependency_name = dependency
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("Cargo returned a dependency without a valid name"))?;
+            let Some(dependency_policy) = RUST_POLICY
+                .packages
+                .iter()
+                .find(|policy| policy.package == dependency_name)
+            else {
+                continue;
+            };
+            if dependency.get("source") != Some(&Value::Null)
+                || dependency.get("rename") != Some(&Value::Null)
+            {
+                bail!(
+                    "Cargo dependency metadata gave {package_name}'s {dependency_name} dependency an unexpected identity"
+                );
+            }
+            let requirement = dependency
+                .get("req")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Cargo dependency metadata omitted {package_name}'s {dependency_name} requirement"
+                    )
+                })?;
+            let requirement = VersionReq::parse(requirement).with_context(|| {
+                format!(
+                    "Cargo dependency metadata returned an invalid {package_name} requirement for {dependency_name}"
+                )
+            })?;
+            if requirement != expected_requirement {
+                bail!(
+                    "Cargo dependency metadata gave {package_name}'s {dependency_name} dependency an unexpected release requirement"
+                );
+            }
+            let expected_path = expected_root
+                .join(dependency_policy.path_in_vcs)
+                .canonicalize()
+                .with_context(|| {
+                    format!("resolve expected dependency path for {dependency_name}")
+                })?;
+            let actual_path = dependency
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Cargo dependency metadata omitted {package_name}'s {dependency_name} path"
+                    )
+                })?;
+            let actual_path = Path::new(actual_path)
+                .canonicalize()
+                .with_context(|| format!("resolve Cargo dependency path for {dependency_name}"))?;
+            if actual_path != expected_path {
+                bail!(
+                    "Cargo dependency metadata returned an unexpected {dependency_name} path for {package_name}"
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn read_workspace_version(root: &Path) -> Result<Version> {
@@ -334,11 +524,10 @@ struct SystemCargoRunner;
 
 impl CargoRunner for SystemCargoRunner {
     fn output(&mut self, root: &Path, program: &OsStr, args: &[OsString]) -> Result<CargoOutput> {
-        let output = Command::new(program)
-            .current_dir(root)
-            .args(args)
-            .output()
-            .with_context(|| format!("run {}", program.to_string_lossy()))?;
+        let mut command = Command::new(program);
+        command.current_dir(root).args(args);
+        let output = bounded_process::output(&mut command, VALIDATION_OUTPUT_LIMITS)
+            .map_err(|error| anyhow!("run {}: {error}", program.to_string_lossy()))?;
         Ok(CargoOutput {
             success: output.status.success(),
             stdout: output.stdout,
@@ -365,6 +554,11 @@ fn cargo_output_detail(output: &CargoOutput) -> String {
         return stderr;
     }
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn require_cargo_json_bound(output: &[u8]) -> Result<()> {
+    bounded_process::require_within_limit(output, VALIDATION_OUTPUT_LIMITS.stdout, "Cargo metadata")
+        .map_err(anyhow::Error::from)
 }
 
 fn check_api_compatibility(
@@ -517,6 +711,7 @@ fn metadata_versions_from_json(
     output: &[u8],
     manifest: &ManifestPath,
 ) -> Result<Vec<(String, Version)>> {
+    require_cargo_json_bound(output)?;
     let metadata: Value =
         serde_json::from_slice(output).context("Cargo returned invalid metadata")?;
     let packages = metadata
@@ -1051,23 +1246,17 @@ fn workspace_package_version(cargo_toml: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn workspace_dependency_version(cargo_toml: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name} = ");
-    for line in cargo_toml.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with(&prefix) {
-            continue;
-        }
-        let rest = trimmed.strip_prefix(&prefix)?;
-        if let Some(inner) = rest.strip_prefix('{') {
-            let version_key = "version = ";
-            if let Some(start) = inner.find(version_key) {
-                let after = &inner[start + version_key.len()..];
-                return parse_toml_string_value(after.trim());
-            }
-        }
-    }
-    None
+    let document = cargo_toml.parse::<DocumentMut>().ok()?;
+    document
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(|dependencies| dependencies.get(name))
+        .and_then(Item::as_inline_table)
+        .and_then(|dependency| dependency.get("version"))
+        .and_then(TomlValue::as_str)
+        .map(str::to_string)
 }
 
 fn parse_toml_string_value(s: &str) -> Option<String> {
@@ -1088,16 +1277,61 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn metadata_json_rejects_candidate_input_above_byte_ceiling() {
+        let error = require_cargo_json_bound(&vec![b' '; VALIDATION_OUTPUT_LIMITS.stdout + 1])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            format!(
+                "Cargo metadata exceeded its {}-byte limit",
+                VALIDATION_OUTPUT_LIMITS.stdout
+            )
+        );
+    }
+
+    #[test]
+    fn system_cargo_runner_bounds_candidate_metadata_while_reading() {
+        let root = temp_test_root("bounded-cargo-metadata");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"metadata-bound-test\"\nversion = \"0.1.0\"\n\
+                 edition = \"2024\"\npublish = false\n\n[package.metadata]\npadding = \"{}\"\n",
+                "x".repeat(VALIDATION_OUTPUT_LIMITS.stdout)
+            ),
+        )
+        .unwrap();
+        let args = ["metadata", "--no-deps", "--format-version", "1"]
+            .into_iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>();
+
+        let error = SystemCargoRunner
+            .output(&root, &cargo_program(), &args)
+            .unwrap_err()
+            .to_string();
+
+        cleanup_temp_test_root(root);
+        assert!(
+            error.contains(&format!(
+                "stdout exceeded its {}-byte limit",
+                VALIDATION_OUTPUT_LIMITS.stdout
+            )),
+            "unexpected bounded-output error: {error}"
+        );
+    }
+
+    #[test]
     fn sync_keeps_split_traits_dependency_explicit() {
         let root = temp_test_root("sync-keeps-traits");
-        write_test_workspace_manifest(
-            &root,
-            "0.2.0-0.dev.branch.20260615.t123456",
-            "0.2.0-rc.1",
-            "0.2.0-rc.1",
-        );
+        let workspace_version = "0.2.0-0.dev.branch.20260615.t123456";
+        write_test_workspace_manifest(&root, workspace_version, "0.2.0-rc.1", "0.2.0-rc.1");
+        let mut runner = workspace_sync_runner(&root, workspace_version);
 
-        sync_workspace_dependency_versions(&root, false).unwrap();
+        sync_workspace_dependency_versions_with_runner(&root, false, &mut runner).unwrap();
 
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).unwrap();
         assert_eq!(
@@ -1108,15 +1342,18 @@ mod tests {
             workspace_dependency_version(&cargo_toml, "yaml-sigil-traits").as_deref(),
             Some("0.2.0-rc.1")
         );
+        assert_workspace_sync_call(&runner);
         cleanup_temp_test_root(root);
     }
 
     #[test]
     fn sync_removes_exact_publish_pins() {
         let root = temp_test_root("sync-removes-exact");
-        write_test_workspace_manifest(&root, "0.3.0-rc.1", "=0.3.0-rc.1", "0.2.0");
+        let workspace_version = "0.3.0-rc.1";
+        write_test_workspace_manifest(&root, workspace_version, "=0.3.0-rc.1", "0.2.0");
+        let mut runner = workspace_sync_runner(&root, workspace_version);
 
-        sync_workspace_dependency_versions(&root, false).unwrap();
+        sync_workspace_dependency_versions_with_runner(&root, false, &mut runner).unwrap();
 
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).unwrap();
         assert_eq!(
@@ -1127,6 +1364,7 @@ mod tests {
             workspace_dependency_version(&cargo_toml, "yaml-sigil-signing").as_deref(),
             Some("0.3.0-rc.1")
         );
+        assert_workspace_sync_call(&runner);
         cleanup_temp_test_root(root);
     }
 
@@ -1138,6 +1376,127 @@ mod tests {
 
         assert!(sync_workspace_dependency_versions(&root, true).is_err());
         assert_eq!(fs::read_to_string(root.join("Cargo.toml")).unwrap(), before);
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn sync_ignores_masking_keys_outside_workspace_dependencies() {
+        let root = temp_test_root("sync-masking-table");
+        write_test_workspace_manifest(&root, "0.4.0-rc.2", "0.4.0-rc.1", "0.3.0-rc.1");
+        let path = root.join("Cargo.toml");
+        let body = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            format!(
+                "[package.metadata.mask]\n\
+                 yaml-sigil-core = {{ version = \"0.4.0-rc.2\" }}\n\n\
+                 {body}"
+            ),
+        )
+        .unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        let error = sync_workspace_dependency_versions(&root, true).unwrap_err();
+        assert!(error.to_string().contains("not synchronized"));
+        assert_eq!(fs::read_to_string(path).unwrap(), before);
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn sync_rejects_malformed_or_duplicate_canonical_entries() {
+        for (case, replacement) in [
+            ("missing", ""),
+            ("non-inline", "yaml-sigil-core = \"0.4.0-rc.1\"\n"),
+            (
+                "non-string-version",
+                "yaml-sigil-core = { version = 4, path = \"crates/yaml-sigil-core\" }\n",
+            ),
+            (
+                "duplicate",
+                "yaml-sigil-core = { version = \"0.4.0-rc.1\", path = \"crates/yaml-sigil-core\" }\n\
+                 yaml-sigil-core = { version = \"0.4.0-rc.1\", path = \"crates/yaml-sigil-core\" }\n",
+            ),
+        ] {
+            let root = temp_test_root(case);
+            write_test_workspace_manifest(&root, "0.4.0-rc.1", "0.4.0-rc.1", "0.3.0-rc.1");
+            let path = root.join("Cargo.toml");
+            let body = fs::read_to_string(&path).unwrap();
+            let malformed = body.replace(
+                "yaml-sigil-core = { version = \"0.4.0-rc.1\", path = \"crates/yaml-sigil-core\", default-features = false }\n",
+                replacement,
+            );
+            fs::write(&path, &malformed).unwrap();
+
+            assert!(sync_workspace_dependency_versions(&root, true).is_err());
+            assert_eq!(fs::read_to_string(path).unwrap(), malformed);
+            cleanup_temp_test_root(root);
+        }
+    }
+
+    #[test]
+    fn sync_rewrites_only_canonical_internal_versions() {
+        let root = temp_test_root("sync-targeted-rewrite");
+        let workspace_version = "0.3.0-rc.1";
+        write_test_workspace_manifest(&root, workspace_version, "=0.3.0-rc.1", "0.2.0");
+        let path = root.join("Cargo.toml");
+        let body = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            format!(
+                "[package.metadata.mask]\n\
+                 yaml-sigil-core = {{ version = \"9.9.9\" }} # preserved\n\n\
+                 {body}"
+            ),
+        )
+        .unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+        let expected = before.replace("version = \"=0.3.0-rc.1\"", "version = \"0.3.0-rc.1\"");
+        let mut runner = workspace_sync_runner(&root, workspace_version);
+
+        assert!(sync_workspace_dependency_versions_with_runner(&root, false, &mut runner).unwrap());
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+        cleanup_temp_test_root(root);
+    }
+
+    #[test]
+    fn sync_metadata_rejects_release_identity_and_requirement_mismatches() {
+        let root = temp_test_root("sync-metadata-mismatch");
+        let version = "0.4.0-rc.1";
+        write_test_workspace_manifest(&root, version, version, "0.3.0-rc.1");
+
+        let mut wrong_version = workspace_sync_metadata_value(&root, version);
+        wrong_version["packages"][0]["version"] = serde_json::json!("0.4.0-rc.2");
+        assert!(
+            validate_internal_dependency_metadata_json(
+                &root,
+                version,
+                &serde_json::to_vec(&wrong_version).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut wrong_requirement = workspace_sync_metadata_value(&root, version);
+        wrong_requirement["packages"][1]["dependencies"][0]["req"] = serde_json::json!("*");
+        assert!(
+            validate_internal_dependency_metadata_json(
+                &root,
+                version,
+                &serde_json::to_vec(&wrong_requirement).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut renamed_dependency = workspace_sync_metadata_value(&root, version);
+        renamed_dependency["packages"][1]["dependencies"][0]["rename"] =
+            serde_json::json!("renamed-core");
+        assert!(
+            validate_internal_dependency_metadata_json(
+                &root,
+                version,
+                &serde_json::to_vec(&renamed_dependency).unwrap(),
+            )
+            .is_err()
+        );
         cleanup_temp_test_root(root);
     }
 
@@ -1591,6 +1950,72 @@ mod tests {
         .unwrap()
     }
 
+    fn workspace_sync_metadata_value(root: &Path, version: &str) -> Value {
+        serde_json::json!({
+            "workspace_root": root.canonicalize().unwrap(),
+            "packages": RUST_POLICY.packages.iter().map(|policy| {
+                let dependencies: Vec<_> = match policy.package {
+                    "yaml-sigil-core" => Vec::new(),
+                    "yaml-sigil-transcription" => vec!["yaml-sigil-core"],
+                    "yaml-sigil-signing" => {
+                        vec!["yaml-sigil-core", "yaml-sigil-transcription"]
+                    }
+                    "yaml-sigil-verification" => vec![
+                        "yaml-sigil-core",
+                        "yaml-sigil-transcription",
+                        "yaml-sigil-signing",
+                    ],
+                    package => panic!("unexpected release package {package}"),
+                }
+                .into_iter()
+                .map(|name| {
+                    let dependency = RUST_POLICY
+                        .packages
+                        .iter()
+                        .find(|policy| policy.package == name)
+                        .unwrap();
+                    serde_json::json!({
+                        "name": name,
+                        "source": null,
+                        "req": format!("^{version}"),
+                        "path": root.join(dependency.path_in_vcs).canonicalize().unwrap(),
+                        "rename": null,
+                    })
+                })
+                .collect();
+                serde_json::json!({
+                    "name": policy.package,
+                    "version": version,
+                    "source": null,
+                    "manifest_path": root
+                        .join(policy.path_in_vcs)
+                        .join("Cargo.toml")
+                        .canonicalize()
+                        .unwrap(),
+                    "dependencies": dependencies,
+                })
+            }).collect::<Vec<_>>()
+        })
+    }
+
+    fn workspace_sync_runner(root: &Path, version: &str) -> FakeCargoRunner {
+        FakeCargoRunner {
+            outputs: VecDeque::from([cargo_success(
+                serde_json::to_vec(&workspace_sync_metadata_value(root, version)).unwrap(),
+            )]),
+            ..FakeCargoRunner::default()
+        }
+    }
+
+    fn assert_workspace_sync_call(runner: &FakeCargoRunner) {
+        assert_eq!(runner.calls.len(), 1);
+        assert_eq!(runner.calls[0].mode, CargoCallMode::Output);
+        assert_eq!(
+            runner.calls[0].args,
+            ["metadata", "--no-deps", "--format-version", "1"]
+        );
+    }
+
     fn temp_test_root(name: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1648,5 +2073,17 @@ yaml-sigil-signing = {{ version = "{internal_version}", path = "crates/yaml-sigi
 "#
         );
         fs::write(root.join("Cargo.toml"), cargo_toml).unwrap();
+        for policy in RUST_POLICY.packages {
+            let directory = root.join(policy.path_in_vcs);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{}\"\nversion = \"{workspace_version}\"\n",
+                    policy.package
+                ),
+            )
+            .unwrap();
+        }
     }
 }

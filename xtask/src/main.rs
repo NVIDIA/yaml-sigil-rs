@@ -3,10 +3,12 @@
 
 //! Workspace maintenance tasks. Invoke via `cargo xtask <COMMAND>` from the repo root.
 
+mod bounded_process;
 mod ci;
 mod crate_archive;
 mod github;
 mod package_content;
+mod package_content_policy;
 mod release;
 mod release_baseline;
 mod release_policy;
