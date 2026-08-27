@@ -93,9 +93,7 @@ release intent in pull-request text.
 Release proposals enter `protected-automation`, which is restricted to exact
 `main` and supplies only the App credential. Official publication enters
 `crates-io`, whose configured approval gates the OIDC-enabled publication job.
-Validation enters neither environment and receives no OIDC permission. The
-separately configured `crates-io-pr` environment is not referenced by a
-workflow.
+Validation enters neither environment and receives no OIDC permission.
 
 Every proposal resolves its comparison baseline from the last complete set of
 official annotated tags:
