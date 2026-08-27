@@ -42,8 +42,9 @@
   contract in
   [yaml-sigil-traits](https://github.com/NVIDIA/yaml-sigil-traits); any required
   traits changes are already available or tracked as coordinated work.
-- [ ] I have the right to submit this contribution and every commit includes a
-  `Signed-off-by` trailer.
+- [ ] I have the right to submit this contribution, every commit is GitHub
+  Verified, and every commit includes a `Signed-off-by` trailer that exactly
+  matches its Git author.
 - [ ] I understand and can explain this change.
 - [ ] I updated documentation or tests where needed.
 - [ ] I reviewed `CONTRIBUTING.md` and `SECURITY.md`.
