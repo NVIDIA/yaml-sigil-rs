@@ -272,12 +272,14 @@ fn install_tools_with(
     toolchain: ReleaseToolchain,
     runner: &mut impl Runner,
 ) -> Result<()> {
+    // cargo-binstall reserves --version for package selection; -V reports
+    // the installed cargo-binstall version.
     require_command_version(
         root,
         runner,
         OsStr::new("cargo-binstall"),
-        &[OsString::from("--version")],
-        &format!("cargo-binstall {}", toolchain.cargo_binstall_version),
+        &[OsString::from("-V")],
+        toolchain.cargo_binstall_version,
     )?;
     let install_args = [
         OsString::from("--force"),
@@ -1263,10 +1265,7 @@ mod tests {
     fn tool_installation_binds_exact_alias_resistant_versions() {
         let mut runner = FakeRunner {
             outputs: VecDeque::from([
-                success(
-                    format!("cargo-binstall {}\n", RUST_TOOLCHAIN.cargo_binstall_version)
-                        .into_bytes(),
-                ),
+                success(format!("{}\n", RUST_TOOLCHAIN.cargo_binstall_version).into_bytes()),
                 success(
                     format!("release-plz {}\n", RUST_TOOLCHAIN.release_plz_version).into_bytes(),
                 ),
@@ -1288,7 +1287,7 @@ mod tests {
         install_tools_with(Path::new("."), RUST_TOOLCHAIN, &mut runner).unwrap();
 
         assert_eq!(runner.calls[0].program, "cargo-binstall");
-        assert_eq!(runner.calls[0].args, ["--version"]);
+        assert_eq!(runner.calls[0].args, ["-V"]);
         assert_eq!(runner.calls[1].mode, CallMode::Status);
         assert_eq!(runner.calls[1].program, "cargo-binstall");
         assert!(runner.calls[1].args.contains(&format!(
@@ -1306,7 +1305,7 @@ mod tests {
     #[test]
     fn tool_installation_fails_before_mutation_on_wrong_bootstrap() {
         let mut runner = FakeRunner {
-            outputs: VecDeque::from([success(b"cargo-binstall 9.9.9\n")]),
+            outputs: VecDeque::from([success(b"9.9.9\n")]),
             ..FakeRunner::default()
         };
         assert!(install_tools_with(Path::new("."), RUST_TOOLCHAIN, &mut runner).is_err());
