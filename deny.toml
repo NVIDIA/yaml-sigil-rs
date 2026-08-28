@@ -29,7 +29,7 @@ highlight = "all"
 skip = [
     { crate = "block-buffer@0.12.1", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
     { crate = "const-oid@0.10.2", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
-    { crate = "cpufeatures@0.3.0", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
+    { crate = "cpufeatures@0.3.1", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
     { crate = "crypto-common@0.2.2", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
     { crate = "digest@0.11.3", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
     { crate = "foldhash@0.1.5", reason = "Buffa 0.9 and the parser stack use different hashbrown dependency lines." },
