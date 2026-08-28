@@ -992,6 +992,7 @@ dependencies = [
  "buf-tools",
  "clap",
  "flate2",
+ "rustix",
  "semver",
  "serde",
  "serde_json",
@@ -1000,6 +1001,7 @@ dependencies = [
  "tempfile",
  "toml",
  "toml_edit",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
