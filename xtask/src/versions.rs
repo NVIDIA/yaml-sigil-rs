@@ -12,10 +12,12 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use semver::{Prerelease, Version, VersionReq};
+#[cfg(test)]
 use serde_json::Value;
 use toml_edit::{DocumentMut, Item, Value as TomlValue};
 
 use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
+use crate::cargo_metadata_output::parse_bounded;
 use crate::release::exact_output_line;
 use crate::release_policy::{RUST_POLICY, RUST_TOOLCHAIN, TRAITS_POLICY};
 use crate::safe_file;
@@ -282,20 +284,13 @@ fn validate_internal_dependency_metadata_json(
     package_version: &str,
     output: &[u8],
 ) -> Result<()> {
-    require_cargo_json_bound(output)?;
-    let metadata: Value =
-        serde_json::from_slice(output).context("Cargo returned invalid dependency metadata")?;
-    let packages = metadata
-        .get("packages")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("Cargo returned invalid package metadata"))?;
-    let workspace_root = metadata
-        .get("workspace_root")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("Cargo dependency metadata omitted workspace_root"))?;
-    let workspace_identity = Path::new(workspace_root)
+    let metadata = parse_bounded(output, "Cargo returned invalid dependency metadata")
+        .map_err(anyhow::Error::msg)?;
+    let workspace_identity = metadata
+        .workspace_root
+        .as_std_path()
         .canonicalize()
-        .with_context(|| format!("resolve Cargo workspace root {workspace_root}"))?;
+        .with_context(|| format!("resolve Cargo workspace root {}", metadata.workspace_root))?;
     let expected_root = root
         .canonicalize()
         .with_context(|| format!("resolve workspace root {}", root.display()))?;
@@ -303,13 +298,16 @@ fn validate_internal_dependency_metadata_json(
         bail!("Cargo dependency metadata selected an unexpected workspace root");
     }
 
+    let expected_version = Version::parse(package_version)
+        .with_context(|| format!("invalid workspace package version {package_version}"))?;
     let expected_requirement = VersionReq::parse(package_version)
         .with_context(|| format!("invalid workspace dependency version {package_version}"))?;
     for policy in RUST_POLICY.packages {
         let package_name = policy.package;
-        let matches: Vec<_> = packages
+        let matches: Vec<_> = metadata
+            .packages
             .iter()
-            .filter(|package| package.get("name").and_then(Value::as_str) == Some(package_name))
+            .filter(|package| package.name == package_name)
             .collect();
         if matches.len() != 1 {
             bail!(
@@ -318,10 +316,10 @@ fn validate_internal_dependency_metadata_json(
             );
         }
         let package = matches[0];
-        if package.get("source") != Some(&Value::Null) {
+        if package.source.is_some() {
             bail!("Cargo dependency metadata gave {package_name} a non-workspace source");
         }
-        if package.get("version").and_then(Value::as_str) != Some(package_version) {
+        if package.version != expected_version {
             bail!("Cargo dependency metadata gave {package_name} an unexpected release version");
         }
         let expected_manifest = expected_root
@@ -330,26 +328,15 @@ fn validate_internal_dependency_metadata_json(
             .canonicalize()
             .with_context(|| format!("resolve expected manifest for {package_name}"))?;
         let actual_manifest = package
-            .get("manifest_path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("Cargo dependency metadata omitted {package_name} manifest"))?;
-        let actual_manifest = Path::new(actual_manifest)
+            .manifest_path
+            .as_std_path()
             .canonicalize()
             .with_context(|| format!("resolve Cargo manifest for {package_name}"))?;
         if actual_manifest != expected_manifest {
             bail!("Cargo dependency metadata returned an unexpected manifest for {package_name}");
         }
-        let dependencies = package
-            .get("dependencies")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                anyhow!("Cargo dependency metadata omitted dependencies for {package_name}")
-            })?;
-        for dependency in dependencies {
-            let dependency_name = dependency
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| anyhow!("Cargo returned a dependency without a valid name"))?;
+        for dependency in &package.dependencies {
+            let dependency_name = dependency.name.as_str();
             let Some(dependency_policy) = RUST_POLICY
                 .packages
                 .iter()
@@ -357,27 +344,12 @@ fn validate_internal_dependency_metadata_json(
             else {
                 continue;
             };
-            if dependency.get("source") != Some(&Value::Null)
-                || dependency.get("rename") != Some(&Value::Null)
-            {
+            if dependency.source.is_some() || dependency.rename.is_some() {
                 bail!(
                     "Cargo dependency metadata gave {package_name}'s {dependency_name} dependency an unexpected identity"
                 );
             }
-            let requirement = dependency
-                .get("req")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Cargo dependency metadata omitted {package_name}'s {dependency_name} requirement"
-                    )
-                })?;
-            let requirement = VersionReq::parse(requirement).with_context(|| {
-                format!(
-                    "Cargo dependency metadata returned an invalid {package_name} requirement for {dependency_name}"
-                )
-            })?;
-            if requirement != expected_requirement {
+            if dependency.req != expected_requirement {
                 bail!(
                     "Cargo dependency metadata gave {package_name}'s {dependency_name} dependency an unexpected release requirement"
                 );
@@ -388,15 +360,11 @@ fn validate_internal_dependency_metadata_json(
                 .with_context(|| {
                     format!("resolve expected dependency path for {dependency_name}")
                 })?;
-            let actual_path = dependency
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Cargo dependency metadata omitted {package_name}'s {dependency_name} path"
-                    )
-                })?;
-            let actual_path = Path::new(actual_path)
+            let actual_path = dependency.path.as_ref().ok_or_else(|| {
+                anyhow!("Cargo dependency metadata omitted {package_name}'s {dependency_name} path")
+            })?;
+            let actual_path = actual_path
+                .as_std_path()
                 .canonicalize()
                 .with_context(|| format!("resolve Cargo dependency path for {dependency_name}"))?;
             if actual_path != expected_path {
@@ -558,11 +526,6 @@ fn cargo_output_detail(output: &CargoOutput) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn require_cargo_json_bound(output: &[u8]) -> Result<()> {
-    bounded_process::require_within_limit(output, VALIDATION_OUTPUT_LIMITS.stdout, "Cargo metadata")
-        .map_err(anyhow::Error::from)
-}
-
 fn check_api_compatibility(
     root: &Path,
     baseline_manifest: &Path,
@@ -713,20 +676,13 @@ fn metadata_versions_from_json(
     output: &[u8],
     manifest: &ManifestPath,
 ) -> Result<Vec<(String, Version)>> {
-    require_cargo_json_bound(output)?;
-    let metadata: Value =
-        serde_json::from_slice(output).context("Cargo returned invalid metadata")?;
-    let packages = metadata
-        .get("packages")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("Cargo returned invalid package metadata"))?;
-    let workspace_root = metadata
-        .get("workspace_root")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("Cargo metadata omitted workspace_root"))?;
-    let workspace_identity = Path::new(workspace_root)
+    let metadata =
+        parse_bounded(output, "Cargo returned invalid metadata").map_err(anyhow::Error::msg)?;
+    let workspace_identity = metadata
+        .workspace_root
+        .as_std_path()
         .canonicalize()
-        .with_context(|| format!("resolve Cargo workspace root {workspace_root}"))?;
+        .with_context(|| format!("resolve Cargo workspace root {}", metadata.workspace_root))?;
     let expected_root = manifest
         .identity
         .parent()
@@ -744,9 +700,10 @@ fn metadata_versions_from_json(
             .join("Cargo.toml")
             .canonicalize()
             .with_context(|| format!("resolve expected manifest for {name}"))?;
-        let matches: Vec<_> = packages
+        let matches: Vec<_> = metadata
+            .packages
             .iter()
-            .filter(|package| package.get("name").and_then(Value::as_str) == Some(name))
+            .filter(|package| package.name == name)
             .collect();
         if matches.len() != 1 {
             bail!(
@@ -754,22 +711,15 @@ fn metadata_versions_from_json(
                 matches.len()
             );
         }
-        let actual_manifest = matches[0]
-            .get("manifest_path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("metadata omitted manifest_path for {name}"))?;
-        let actual_identity = Path::new(actual_manifest)
+        let actual_manifest = &matches[0].manifest_path;
+        let actual_identity = actual_manifest
+            .as_std_path()
             .canonicalize()
             .with_context(|| format!("resolve Cargo metadata manifest {actual_manifest}"))?;
         if actual_identity != expected_manifest {
             bail!("metadata returned an unexpected manifest identity for {name}");
         }
-        let value = matches[0]
-            .get("version")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("metadata omitted version for {name}"))?;
-        let version = Version::parse(value)
-            .with_context(|| format!("metadata returned invalid version for {name}"))?;
+        let version = matches[0].version.clone();
         release_rc(&version)?;
         versions.push((name.to_string(), version));
     }
@@ -1273,24 +1223,13 @@ fn parse_toml_string_value(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cargo_metadata_output::test_support::{
+        dependency, encoded, metadata as metadata_value, package, target,
+    };
 
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn metadata_json_rejects_candidate_input_above_byte_ceiling() {
-        let error = require_cargo_json_bound(&vec![b' '; VALIDATION_OUTPUT_LIMITS.stdout + 1])
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
-            error,
-            format!(
-                "Cargo metadata exceeded its {}-byte limit",
-                VALIDATION_OUTPUT_LIMITS.stdout
-            )
-        );
-    }
 
     #[test]
     fn system_cargo_runner_bounds_candidate_metadata_while_reading() {
@@ -1939,23 +1878,36 @@ mod tests {
     }
 
     fn release_metadata(root: &Path, version: &str) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({
-            "workspace_root": root.canonicalize().unwrap(),
-            "packages": RUST_POLICY.packages.iter().map(|policy| {
-                serde_json::json!({
-                    "name": policy.package,
-                    "version": version,
-                    "manifest_path": root.join(policy.path_in_vcs).join("Cargo.toml").canonicalize().unwrap()
-                })
-            }).collect::<Vec<_>>()
-        }))
-        .unwrap()
+        let root = root.canonicalize().unwrap();
+        let packages = RUST_POLICY
+            .packages
+            .iter()
+            .map(|policy| {
+                let package_root = root.join(policy.path_in_vcs);
+                package(
+                    policy.package,
+                    version,
+                    None,
+                    &package_root.join("Cargo.toml").canonicalize().unwrap(),
+                    Some(&["crates-io"]),
+                    Vec::new(),
+                    vec![target(
+                        &policy.package.replace('-', "_"),
+                        "lib",
+                        &package_root.join("src/lib.rs"),
+                    )],
+                )
+            })
+            .collect();
+        encoded(&metadata_value(&root, packages))
     }
 
     fn workspace_sync_metadata_value(root: &Path, version: &str) -> Value {
-        serde_json::json!({
-            "workspace_root": root.canonicalize().unwrap(),
-            "packages": RUST_POLICY.packages.iter().map(|policy| {
+        let root = root.canonicalize().unwrap();
+        let packages = RUST_POLICY
+            .packages
+            .iter()
+            .map(|policy| {
                 let dependencies: Vec<_> = match policy.package {
                     "yaml-sigil-core" => Vec::new(),
                     "yaml-sigil-transcription" => vec!["yaml-sigil-core"],
@@ -1971,40 +1923,50 @@ mod tests {
                 }
                 .into_iter()
                 .map(|name| {
-                    let dependency = RUST_POLICY
+                    let dependency_policy = RUST_POLICY
                         .packages
                         .iter()
                         .find(|policy| policy.package == name)
                         .unwrap();
-                    serde_json::json!({
-                        "name": name,
-                        "source": null,
-                        "req": format!("^{version}"),
-                        "path": root.join(dependency.path_in_vcs).canonicalize().unwrap(),
-                        "rename": null,
-                    })
+                    dependency(
+                        name,
+                        &format!("^{version}"),
+                        None,
+                        None,
+                        None,
+                        Some(
+                            &root
+                                .join(dependency_policy.path_in_vcs)
+                                .canonicalize()
+                                .unwrap(),
+                        ),
+                    )
                 })
                 .collect();
-                serde_json::json!({
-                    "name": policy.package,
-                    "version": version,
-                    "source": null,
-                    "manifest_path": root
-                        .join(policy.path_in_vcs)
-                        .join("Cargo.toml")
-                        .canonicalize()
-                        .unwrap(),
-                    "dependencies": dependencies,
-                })
-            }).collect::<Vec<_>>()
-        })
+                let package_root = root.join(policy.path_in_vcs);
+                package(
+                    policy.package,
+                    version,
+                    None,
+                    &package_root.join("Cargo.toml").canonicalize().unwrap(),
+                    Some(&["crates-io"]),
+                    dependencies,
+                    vec![target(
+                        &policy.package.replace('-', "_"),
+                        "lib",
+                        &package_root.join("src/lib.rs"),
+                    )],
+                )
+            })
+            .collect();
+        metadata_value(&root, packages)
     }
 
     fn workspace_sync_runner(root: &Path, version: &str) -> FakeCargoRunner {
         FakeCargoRunner {
-            outputs: VecDeque::from([cargo_success(
-                serde_json::to_vec(&workspace_sync_metadata_value(root, version)).unwrap(),
-            )]),
+            outputs: VecDeque::from([cargo_success(encoded(&workspace_sync_metadata_value(
+                root, version,
+            )))]),
             ..FakeCargoRunner::default()
         }
     }
