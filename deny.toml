@@ -1,0 +1,50 @@
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "MIT",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "Apache-2.0",
+    "ISC",
+    "Zlib",
+]
+confidence-threshold = 0.8
+unused-allowed-license = "allow"
+unused-license-exception = "deny"
+include-dev = true
+include-build = true
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+multiple-versions = "deny"
+multiple-versions-include-dev = true
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+skip = [
+    { crate = "block-buffer@0.12.1", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
+    { crate = "const-oid@0.10.2", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
+    { crate = "cpufeatures@0.3.1", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
+    { crate = "crypto-common@0.2.2", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
+    { crate = "digest@0.11.3", reason = "buf-tools requires the SHA-2 0.11 dependency line at build time." },
+    { crate = "foldhash@0.1.5", reason = "Buffa 0.9 and the parser stack use different hashbrown dependency lines." },
+    { crate = "getrandom@0.2.17", reason = "Rand 0.8 and its cryptographic dependencies retain rand_core 0.6." },
+    { crate = "getrandom@0.3.4", reason = "The JSON Schema stack currently uses ahash with getrandom 0.3." },
+    { crate = "hashbrown@0.15.5", reason = "Buffa 0.9 and the parser stack use different hashbrown dependency lines." },
+    { crate = "r-efi@5.3.0", reason = "getrandom 0.3 retains the earlier WASI ABI support line." },
+    { crate = "sha2@0.11.0", reason = "buf-tools uses SHA-2 0.11 while runtime crypto remains on SHA-2 0.10." },
+    { crate = "syn@2.0.119", reason = "Buffa and cryptographic macros retain syn 2 while newer derives use syn 3." },
+    { crate = "windows-sys@0.52.0", reason = "ring retains windows-sys 0.52 while current tooling uses 0.61." },
+]
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
