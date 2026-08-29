@@ -4,6 +4,7 @@
 //! Workspace maintenance tasks. Invoke via `cargo xtask <COMMAND>` from the repo root.
 
 mod bounded_process;
+mod cargo_metadata_output;
 mod ci;
 mod crate_archive;
 mod github;
