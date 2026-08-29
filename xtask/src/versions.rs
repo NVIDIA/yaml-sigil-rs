@@ -18,6 +18,7 @@ use toml_edit::{DocumentMut, Item, Value as TomlValue};
 use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
 use crate::release::exact_output_line;
 use crate::release_policy::{RUST_POLICY, RUST_TOOLCHAIN, TRAITS_POLICY};
+use crate::safe_file;
 
 const TRAITS_PACKAGE: &str = TRAITS_POLICY.packages[0].package;
 
@@ -185,8 +186,8 @@ fn sync_workspace_dependency_versions_with_runner(
     runner: &mut impl CargoRunner,
 ) -> Result<bool> {
     let path = root.join("Cargo.toml");
-    let cargo_toml =
-        fs::read_to_string(&path).context("read workspace Cargo.toml for version sync")?;
+    let cargo_toml = safe_file::read_manifest(root, Path::new("Cargo.toml"))
+        .context("read workspace Cargo.toml for version sync")?;
     let mut document = cargo_toml
         .parse::<DocumentMut>()
         .context("parse workspace Cargo.toml for version sync")?;
@@ -409,7 +410,7 @@ fn validate_internal_dependency_metadata_json(
 }
 
 fn read_workspace_version(root: &Path) -> Result<Version> {
-    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
         .context("read workspace Cargo.toml for release version")?;
     let value = workspace_package_version(&manifest)
         .ok_or_else(|| anyhow!("missing [workspace.package] version in root Cargo.toml"))?;
@@ -421,7 +422,8 @@ fn read_workspace_version(root: &Path) -> Result<Version> {
 
 fn write_workspace_version(root: &Path, version: &Version) -> Result<()> {
     let path = root.join("Cargo.toml");
-    let manifest = fs::read_to_string(&path).context("read workspace Cargo.toml")?;
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
+        .context("read workspace Cargo.toml")?;
     let mut in_section = false;
     let mut replaced = false;
     let mut lines = Vec::new();
@@ -957,7 +959,7 @@ fn stable_version(version: &Version) -> Result<Version> {
 /// workspace crates exchange incompatible Rust types even when both copies
 /// display the same semantic version.
 fn validate_crates_io_traits_dependency(root: &Path) -> Result<()> {
-    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
         .context("read workspace Cargo.toml for traits source validation")?;
     let document: toml::Value = toml::from_str(&manifest)
         .context("parse workspace Cargo.toml for traits source validation")?;
@@ -1004,7 +1006,7 @@ fn validate_stable_traits_dependency(root: &Path, workspace_version: &Version) -
         return Ok(());
     }
 
-    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
         .context("read workspace Cargo.toml for traits version validation")?;
     let (_, requirement) = workspace_traits_dependency(&manifest)?;
     let traits_version = exact_traits_version(&requirement)?;
@@ -1018,7 +1020,7 @@ fn validate_stable_traits_dependency(root: &Path, workspace_version: &Version) -
 
 /// Validate the exact split-crate pin before stable promotion mutates files.
 fn validate_promotable_traits_dependency(root: &Path) -> Result<()> {
-    let manifest = fs::read_to_string(root.join("Cargo.toml"))
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
         .context("read workspace Cargo.toml for traits stable promotion")?;
     let (_, requirement) = workspace_traits_dependency(&manifest)?;
     let traits_version = exact_traits_version(&requirement)?;
@@ -1033,7 +1035,7 @@ fn validate_promotable_traits_dependency(root: &Path) -> Result<()> {
 /// Strip an `rc.N` suffix from the exact split-crate requirement.
 fn promote_traits_dependency_to_stable(root: &Path) -> Result<bool> {
     let path = root.join("Cargo.toml");
-    let manifest = fs::read_to_string(&path)
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
         .context("read workspace Cargo.toml for traits stable promotion")?;
     let (line_index, requirement) = workspace_traits_dependency(&manifest)?;
     let traits_version = exact_traits_version(&requirement)?;

@@ -361,8 +361,10 @@ NVIDIA's `linux-amd64-cpu8` runner and GitHub's moving `macos-latest` and
 release versions, package contents, Clippy, tests, unused dependencies, and
 both dependency audits against that platform's resolved dependency graph.
 Linux commit-policy, Markdown, Protobuf, provider-workflow, and aggregation
-jobs run on `linux-amd64-cpu4`. The local command does not launch other
-operating systems.
+jobs run on `linux-amd64-cpu4`. A separate GitHub-hosted Linux, macOS, and
+Windows matrix runs the protected checkout verifier regressions; its Windows
+leg creates an actual directory junction and a short-name-shaped path. The
+local command does not launch other operating systems.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

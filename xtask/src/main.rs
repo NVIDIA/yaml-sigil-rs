@@ -13,6 +13,7 @@ mod release;
 mod release_baseline;
 mod release_policy;
 mod release_proposal;
+mod safe_file;
 mod spec_update;
 mod versions;
 

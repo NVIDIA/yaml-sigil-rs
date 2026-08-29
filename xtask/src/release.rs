@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -19,7 +19,9 @@ use semver::Version;
 use serde_json::Value;
 use toml_edit::{DocumentMut, Item, Value as TomlValue};
 
+use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
 use crate::release_policy::{RUST_POLICY, ReleaseToolchain, TRAITS_POLICY};
+use crate::safe_file;
 
 const REGISTRY_USER_AGENT: &str = "yaml-sigil-release-workflow/1.0";
 const REGISTRY_ATTEMPTS: usize = 30;
@@ -201,10 +203,9 @@ struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn output(&mut self, program: &OsStr, args: &[OsString], root: &Path) -> Result<CommandResult> {
-        let output = Command::new(program)
-            .current_dir(root)
-            .args(args)
-            .output()
+        let mut command = Command::new(program);
+        command.current_dir(root).args(args);
+        let output = bounded_process::output(&mut command, VALIDATION_OUTPUT_LIMITS)
             .with_context(|| format!("run {}", program.to_string_lossy()))?;
         Ok(CommandResult {
             success: output.status.success(),
@@ -888,12 +889,45 @@ fn require_publication_fields(
     if workspace.get("release_always").and_then(Item::as_bool) != Some(release_always) {
         bail!("reviewed config must set release_always = {release_always}");
     }
+    for field in ["git_tag_enable", "git_release_enable"] {
+        if workspace.get(field).and_then(Item::as_bool) != Some(false) {
+            bail!("reviewed workspace config must set {field} = false");
+        }
+    }
+    let packages = document
+        .get("package")
+        .and_then(Item::as_array_of_tables)
+        .ok_or_else(|| anyhow!("release config has no package overrides"))?;
+    if packages.len() != RUST_POLICY.packages.len() {
+        bail!("release config has an unexpected package override set");
+    }
+    for (package, policy) in packages.iter().zip(RUST_POLICY.packages) {
+        if package.get("name").and_then(Item::as_str) != Some(policy.package) {
+            bail!("release config package overrides are not exact or ordered");
+        }
+        for field in ["git_tag_enable", "git_release_enable"] {
+            if package.get(field).and_then(Item::as_bool) != Some(false) {
+                bail!(
+                    "reviewed {} config must set {field} = false",
+                    policy.package
+                );
+            }
+        }
+    }
     match (workspace.get("pr_branch_prefix"), branch_prefix) {
         (None, None) => Ok(()),
         (Some(value), Some(expected)) if value.as_str() == Some(expected) => Ok(()),
         (Some(_), None) => bail!("reviewed config already selects a PR branch prefix"),
         _ => bail!("publication config has an invalid PR branch prefix"),
     }
+}
+
+fn release_config_relative(root: &Path, source: &Path) -> Result<PathBuf> {
+    let relative = source.strip_prefix(root).unwrap_or(source);
+    if relative.is_absolute() {
+        bail!("release config must be inside the trusted checkout");
+    }
+    Ok(relative.to_path_buf())
 }
 
 fn source_newline(body: &str) -> Result<&'static str> {
@@ -911,24 +945,26 @@ fn source_newline(body: &str) -> Result<&'static str> {
 }
 
 fn prepare_publication_config(root: &Path, source: &Path, output: &Path) -> Result<()> {
-    let source = resolve_path(root, source)
-        .canonicalize()
-        .with_context(|| format!("resolve release config {}", source.display()))?;
+    let source_relative = release_config_relative(root, source)?;
     let output = resolve_path(root, output);
     if output.exists() {
         bail!("publication config already exists: {}", output.display());
     }
-    let body = fs::read_to_string(&source)
+    let body = safe_file::TrustedRoot::open(root)
+        .and_then(|trusted| trusted.read_manifest(&source_relative))
         .with_context(|| format!("read release config {}", source.display()))?;
     let original: DocumentMut = body
         .parse()
         .with_context(|| format!("parse release config {}", source.display()))?;
     require_publication_fields(&original, false, None)?;
 
-    let valid_ref = Command::new("git")
-        .current_dir(root)
-        .args(["check-ref-format", "--branch", "release-plz-publication"])
-        .output()
+    let mut valid_ref_command = Command::new("git");
+    valid_ref_command.current_dir(root).args([
+        "check-ref-format",
+        "--branch",
+        "release-plz-publication",
+    ]);
+    let valid_ref = bounded_process::output(&mut valid_ref_command, VALIDATION_OUTPUT_LIMITS)
         .context("run git check-ref-format")?;
     if !valid_ref.status.success() {
         bail!(
@@ -936,10 +972,13 @@ fn prepare_publication_config(root: &Path, source: &Path, output: &Path) -> Resu
             process_output_detail(&valid_ref)
         );
     }
-    let invalid_ref = Command::new("git")
-        .current_dir(root)
-        .args(["check-ref-format", "--branch", ":release-plz-publication"])
-        .output()
+    let mut invalid_ref_command = Command::new("git");
+    invalid_ref_command.current_dir(root).args([
+        "check-ref-format",
+        "--branch",
+        ":release-plz-publication",
+    ]);
+    let invalid_ref = bounded_process::output(&mut invalid_ref_command, VALIDATION_OUTPUT_LIMITS)
         .context("run git check-ref-format")?;
     if invalid_ref.status.success() {
         bail!("the publication branch prefix is a valid Git ref");
@@ -984,22 +1023,30 @@ fn write_new_verified_file(
             .with_context(|| format!("create output directory {}", parent.display()))?;
     }
     let mut file = OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .open(path)
         .with_context(|| format!("create {}", path.display()))?;
     if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        drop(file);
         let _ = fs::remove_file(path);
         return Err(error).with_context(|| format!("write {}", path.display()));
     }
-    drop(file);
     let result = (|| {
-        let actual = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        file.seek(SeekFrom::Start(0))
+            .with_context(|| format!("rewind {}", path.display()))?;
+        let mut actual = Vec::with_capacity(bytes.len() + 1);
+        Read::by_ref(&mut file)
+            .take((bytes.len() + 1) as u64)
+            .read_to_end(&mut actual)
+            .with_context(|| format!("reread {}", path.display()))?;
         if actual != bytes {
             bail!("generated file bytes changed while writing");
         }
         verify(&actual)
     })();
+    drop(file);
     if result.is_err() {
         let _ = fs::remove_file(path);
     }
@@ -1668,16 +1715,37 @@ mod tests {
         assert!(require_current_main(Path::new("."), &head, "--upload-pack=bad").is_err());
     }
 
+    fn reviewed_publication_config(newline: &str) -> String {
+        let mut lines = vec![
+            "[workspace]".to_string(),
+            "release = false".to_string(),
+            "release_always = false".to_string(),
+            "git_tag_enable = false".to_string(),
+            "git_release_enable = false".to_string(),
+            String::new(),
+        ];
+        for policy in RUST_POLICY.packages {
+            lines.extend([
+                "[[package]]".to_string(),
+                format!("name = {:?}", policy.package),
+                "release = true".to_string(),
+                "git_tag_enable = false".to_string(),
+                "git_release_enable = false".to_string(),
+                String::new(),
+            ]);
+        }
+        lines.join(newline)
+    }
+
     #[test]
     fn publication_config_changes_only_reviewed_switches() {
         let temporary = temp_root("publication-config");
         let source = temporary.join("release-plz.toml");
         let output = temporary.join("generated.toml");
-        let body = "[workspace]\nrelease = false\nrelease_always = false\n\n[[package]]\nname = \"yaml-sigil-core\"\nrelease = true\n";
-        fs::write(&source, body).unwrap();
+        let body = reviewed_publication_config("\n");
+        fs::write(&source, &body).unwrap();
 
-        prepare_publication_config(Path::new(env!("CARGO_MANIFEST_DIR")), &source, &output)
-            .unwrap();
+        prepare_publication_config(&temporary, &source, &output).unwrap();
 
         let actual = fs::read_to_string(&output).unwrap();
         assert_eq!(
@@ -1689,7 +1757,7 @@ mod tests {
             )
             .replacen("release_always = false", "release_always = true", 1)
         );
-        assert!(prepare_publication_config(Path::new("."), &source, &output).is_err());
+        assert!(prepare_publication_config(&temporary, &source, &output).is_err());
         cleanup(temporary);
     }
 
@@ -1698,13 +1766,8 @@ mod tests {
         let temporary = temp_root("publication-crlf");
         let source = temporary.join("release-plz.toml");
         let output = temporary.join("generated.toml");
-        fs::write(
-            &source,
-            b"[workspace]\r\nrelease = false\r\nrelease_always = false\r\n",
-        )
-        .unwrap();
-        prepare_publication_config(Path::new(env!("CARGO_MANIFEST_DIR")), &source, &output)
-            .unwrap();
+        fs::write(&source, reviewed_publication_config("\r\n")).unwrap();
+        prepare_publication_config(&temporary, &source, &output).unwrap();
         let actual = fs::read(&output).unwrap();
         assert!(actual.windows(2).any(|window| window == b"\r\n"));
         assert!(
@@ -1721,12 +1784,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            prepare_publication_config(
-                Path::new(env!("CARGO_MANIFEST_DIR")),
-                &ambiguous,
-                &temporary.join("rejected.toml")
-            )
-            .is_err()
+            prepare_publication_config(&temporary, &ambiguous, &temporary.join("rejected.toml"))
+                .is_err()
         );
         cleanup(temporary);
     }
