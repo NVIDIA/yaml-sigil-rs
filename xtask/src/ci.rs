@@ -3,6 +3,7 @@
 
 //! Local entry point for the repository's provider-neutral validation sequence.
 
+use std::ffi::OsStr;
 use std::io::{self, Write as _};
 use std::path::Path;
 use std::process::Command;
@@ -12,6 +13,7 @@ use anyhow::Result;
 use super::{bounded_process, package_content, require_success, require_tool, versions};
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
+const CARGO_LOCKFILE_PATH_ENV: &str = "CARGO_RESOLVER_LOCKFILE_PATH";
 
 #[derive(Clone, Copy, Debug)]
 struct Step {
@@ -22,13 +24,35 @@ struct Step {
 
 impl Step {
     fn command(self, root: &Path) -> Command {
+        let root_lockfile = std::env::var_os(CARGO_LOCKFILE_PATH_ENV);
+        self.command_with_root_lockfile(root, root_lockfile.as_deref())
+    }
+
+    fn command_with_root_lockfile(self, root: &Path, root_lockfile: Option<&OsStr>) -> Command {
         let mut command = if self.program == "buf" {
             Command::new(buf_tools::buf_bin_path())
         } else {
             Command::new(self.program)
         };
         command.current_dir(root).args(self.args);
+        if self.uses_xtask_workspace() {
+            command.env_remove(CARGO_LOCKFILE_PATH_ENV);
+        } else if self.is_root_dependency_audit()
+            && let Some(lockfile) = root_lockfile
+        {
+            command.args(["--file"]).arg(lockfile);
+        }
         command
+    }
+
+    fn uses_xtask_workspace(self) -> bool {
+        self.args
+            .iter()
+            .any(|argument| matches!(*argument, "xtask/Cargo.toml" | "xtask/Cargo.lock"))
+    }
+
+    fn is_root_dependency_audit(self) -> bool {
+        self.program == "cargo" && self.args == ["audit"]
     }
 }
 
@@ -167,6 +191,46 @@ mod tests {
         );
         assert!(AGENT_GUIDANCE.contains(CARGO_MACHETE_INSTALL_GUIDANCE));
         assert!(AGENT_GUIDANCE.contains("cargo-machete --with-metadata"));
+    }
+
+    #[test]
+    fn xtask_commands_retain_the_committed_xtask_lock() {
+        let steps = BEFORE_PACKAGE_CONTENT.iter().chain(AFTER_PACKAGE_CONTENT);
+        let mut xtask_steps = 0;
+
+        for step in steps {
+            let command = step.command(Path::new("."));
+            let removes_external_lock = command
+                .get_envs()
+                .any(|(name, value)| name == CARGO_LOCKFILE_PATH_ENV && value.is_none());
+            assert_eq!(
+                removes_external_lock,
+                step.uses_xtask_workspace(),
+                "unexpected lockfile environment for {}",
+                step.label
+            );
+            xtask_steps += usize::from(step.uses_xtask_workspace());
+        }
+
+        assert!(
+            xtask_steps > 0,
+            "CI must retain explicit xtask-workspace steps"
+        );
+    }
+
+    #[test]
+    fn root_audit_reads_the_cargo_generated_external_lock() {
+        let root_audit = AFTER_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .find(|step| step.is_root_dependency_audit())
+            .expect("CI must audit the root dependency lock");
+        let lockfile = Path::new("/candidate-home/Cargo.lock");
+        let command =
+            root_audit.command_with_root_lockfile(Path::new("."), Some(lockfile.as_os_str()));
+        let arguments = command.get_args().collect::<Vec<_>>();
+
+        assert_eq!(arguments, ["audit", "--file", "/candidate-home/Cargo.lock"]);
     }
 
     #[cfg(windows)]
