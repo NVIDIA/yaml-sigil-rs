@@ -3,12 +3,13 @@
 
 //! Local entry point for the repository's provider-neutral validation sequence.
 
+use std::io::{self, Write as _};
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
 
-use super::{package_content, require_success, require_tool, run as run_command, versions};
+use super::{bounded_process, package_content, require_success, require_tool, versions};
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
 
@@ -143,7 +144,13 @@ pub(crate) fn run(root: &Path) -> Result<()> {
 }
 
 fn run_step(root: &Path, step: Step) -> Result<()> {
-    require_success(run_command(step.command(root))?, step.label)
+    let output = bounded_process::output(
+        &mut step.command(root),
+        bounded_process::VALIDATION_OUTPUT_LIMITS,
+    )?;
+    io::stdout().write_all(&output.stdout)?;
+    io::stderr().write_all(&output.stderr)?;
+    require_success(output.status, step.label)
 }
 
 #[cfg(test)]

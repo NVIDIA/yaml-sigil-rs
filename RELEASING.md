@@ -172,7 +172,7 @@ unexpected registry identity, and a requirement other than one exact version.
 
 Use this procedure when the App is unavailable or cannot safely update its
 owned proposal. A repository writer may prepare the same release transaction
-on a human-authored branch. Use Rust `1.95.0`, cargo-binstall `1.20.1`,
+on a human-authored branch. Use current stable Rust, cargo-binstall `1.20.1`,
 release-plz `0.3.160`, and cargo-semver-checks `0.49.0`. Create a
 same-repository branch named `release-plz-manual-<target>` from exact current
 `main`; do not reuse the workflow-owned `release-plz-next` branch.
@@ -187,13 +187,14 @@ Fetch current main and tags, verify the analyzers, verify the current official
 version and traits dependency, and prepare the detached official baseline:
 
 ```shell
-export RUSTUP_TOOLCHAIN=1.95.0
+rustup toolchain install stable --profile minimal \
+  --component clippy --component rustfmt --no-self-update
+export RUSTUP_TOOLCHAIN=stable
 fetch_url="https://github.com/NVIDIA/yaml-sigil-rs"
 test "$(git remote get-url origin)" = "${fetch_url}"
 git fetch origin main --tags
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-rustc_version="$(rustc --version)"
-test "${rustc_version%% (*}" = "rustc 1.95.0"
+test "$(rustc --version)" = "$(rustup run stable rustc --version)"
 test "$(cargo-binstall -V)" = "1.20.1"
 cargo xtask release install-tools
 published_version="$(cargo xtask release-version show)"
@@ -535,6 +536,15 @@ and emit the authenticated internal notification. These jobs receive no OIDC
 credential; the finalizer's App token has repository `contents: write` and the
 notifier's separately minted token is isolated to notification.
 
+The finalizer receives the exact numeric intent Check ID. It requires exactly
+one successful same-name Check from the expected App, re-reads that Check by
+ID, and compares its repository, captured SHA, external ID, canonical body,
+and digest immediately before each tag-object, tag-ref, or Release mutation.
+The receiver separately verifies the originating workflow run and attempt,
+recomputes the canonical repository-setting evidence, and derives each
+complete physical archive inventory from the bounded downloaded crate before
+any proposal mutation.
+
 If publication succeeds, wait for the resulting authenticated receiver run to
 complete before disabling `publish.yml`. If the publication run fails before
 notification, disable it after the failure is understood. Then confirm both
@@ -589,7 +599,10 @@ states:
 For every published crate considered during recovery, exact Cargo `1.95.0`
 reproduces the source archive in an ephemeral directory. The complete archive
 entry map must match, including the opaque Cargo-generated `Cargo.lock` bytes
-and Cargo archive metadata; no archive entry is excluded from comparison.
+and Cargo archive metadata; no archive entry is excluded from comparison. The
+complete compressed archive bytes must also be identical. Extra gzip members,
+trailing bytes, tar records after the terminator, pseudo-entries, and raw path
+aliases are rejected.
 
 Recovery never moves or replaces an existing ref, edits an existing Release,
 deletes an object, or uploads an asset. A non-prefix partial publication, a
