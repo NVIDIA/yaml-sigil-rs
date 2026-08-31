@@ -2514,6 +2514,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
         run_git(root, &["init", "--quiet"]);
+        run_git(root, &["config", "core.autocrlf", "false"]);
         run_git(root, &["config", "user.name", "Fixture"]);
         run_git(root, &["config", "user.email", "fixture@example.invalid"]);
         fs::write(root.join(".release-plz.toml"), "historical = true\n").unwrap();
