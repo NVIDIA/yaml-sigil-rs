@@ -163,8 +163,10 @@ jobs:
 
       - name: Require a committed release version
         run: |
-          cargo xtask sync-workspace-versions --check
-          cargo xtask release-version check
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" sync-workspace-versions --check
+          "${YAML_SIGIL_RELEASE_XTASK}" release-version check
           git diff --exit-code
 
       - name: Require exact traits availability and source
@@ -181,10 +183,10 @@ jobs:
           GIT_CONFIG_KEY_0: remote.origin.pushurl
           GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-readiness
         run: |
-          current_version="$(cargo xtask release-version show)"
-          result="${RUNNER_TEMP}/baseline-result.json"
           test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
             = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          current_version="$("${YAML_SIGIL_RELEASE_XTASK}" release-version show)"
+          result="${RUNNER_TEMP}/baseline-result.json"
           "${YAML_SIGIL_RELEASE_XTASK}" release baseline prepare \
             --source-root "${GITHUB_WORKSPACE}" \
             --head "${CAPTURED_SHA}" \
@@ -213,10 +215,12 @@ jobs:
 
       - name: Check release API compatibility
         run: |
-          current_version="$(cargo xtask release-version show)"
-          intent="$(cargo xtask release-version intent \
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          current_version="$("${YAML_SIGIL_RELEASE_XTASK}" release-version show)"
+          intent="$("${YAML_SIGIL_RELEASE_XTASK}" release-version intent \
             --published "${{ steps.baseline.outputs.version }}")"
-          cargo xtask release-version check-compatibility \
+          "${YAML_SIGIL_RELEASE_XTASK}" release-version check-compatibility \
             --baseline-manifest "${{ steps.baseline.outputs.manifest }}" \
             --current-manifest Cargo.toml \
             --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
@@ -432,8 +436,10 @@ jobs:
           CAPTURED_SHA: ${{ steps.discover.outputs.captured_release_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "${CAPTURED_SHA}"
-          cargo xtask sync-workspace-versions --check
-          cargo xtask release-version check
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" sync-workspace-versions --check
+          "${YAML_SIGIL_RELEASE_XTASK}" release-version check
           git diff --exit-code
 
       - name: Recheck exact traits availability and source
@@ -450,10 +456,10 @@ jobs:
           GIT_CONFIG_KEY_0: remote.origin.pushurl
           GIT_CONFIG_VALUE_0: disabled://yaml-sigil-release-publication
         run: |
-          current_version="$(cargo xtask release-version show)"
-          result="${RUNNER_TEMP}/baseline-result.json"
           test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
             = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          current_version="$("${YAML_SIGIL_RELEASE_XTASK}" release-version show)"
+          result="${RUNNER_TEMP}/baseline-result.json"
           "${YAML_SIGIL_RELEASE_XTASK}" release baseline prepare \
             --source-root "${GITHUB_WORKSPACE}" \
             --head "${CAPTURED_SHA}" \
@@ -482,10 +488,10 @@ jobs:
             yaml-sigil-transcription \
             yaml-sigil-signing \
             yaml-sigil-verification
-          current_version="$(cargo xtask release-version show)"
-          intent="$(cargo xtask release-version intent \
+          current_version="$("${YAML_SIGIL_RELEASE_XTASK}" release-version show)"
+          intent="$("${YAML_SIGIL_RELEASE_XTASK}" release-version intent \
             --published "${{ steps.baseline.outputs.version }}")"
-          cargo xtask release-version check-compatibility \
+          "${YAML_SIGIL_RELEASE_XTASK}" release-version check-compatibility \
             --baseline-manifest "${{ steps.baseline.outputs.manifest }}" \
             --current-manifest Cargo.toml \
             --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
