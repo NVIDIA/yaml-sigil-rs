@@ -2,3 +2,5 @@
 /xtask/target/
 /.rumdl_cache/
 /Cargo.lock
+__pycache__/
+*.py[cod]
