@@ -170,8 +170,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 recovered = block.split("- name: Check out captured release source", 1)[1]
                 self.assertNotRegex(
                     recovered,
-                    r"\bcargo(?:\s+\+\S+)?\s+xtask\s+release(?:\s|$)",
+                    r"\bcargo(?:\s+\+\S+)?\s+xtask(?:\s|$)",
                 )
+                for command in (
+                    "sync-workspace-versions --check",
+                    "release-version check",
+                    "release-version show",
+                    "release-version intent",
+                    "release-version check-compatibility",
+                ):
+                    self.assertIn(
+                        f'"${{YAML_SIGIL_RELEASE_XTASK}}" {command}',
+                        recovered,
+                    )
                 for command in (
                     "verify-traits",
                     "baseline prepare",
