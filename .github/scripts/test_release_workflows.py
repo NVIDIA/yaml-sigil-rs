@@ -163,6 +163,28 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("toolchain: stable", proposal)
         self.assertNotIn("toolchain: 1.95.0", proposal)
 
+    def test_recovered_source_uses_staged_current_release_policy(self) -> None:
+        for name in ("release-readiness", "publication"):
+            with self.subTest(job=name):
+                block = job_block(self.publish, name)
+                recovered = block.split("- name: Check out captured release source", 1)[1]
+                self.assertNotRegex(
+                    recovered,
+                    r"\bcargo(?:\s+\+\S+)?\s+xtask\s+release(?:\s|$)",
+                )
+                for command in (
+                    "verify-traits",
+                    "baseline prepare",
+                    "verify-registry",
+                    "check-packages",
+                    "prepare-validation-cargo-home",
+                    "prepare-publication-config",
+                ):
+                    self.assertIn(
+                        f'"${{YAML_SIGIL_RELEASE_XTASK}}" release {command}',
+                        recovered,
+                    )
+
     def test_admin_setting_digest_matches_read_only_preflight_policy(self) -> None:
         repository = settings.require_string(
             json.loads(
