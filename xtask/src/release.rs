@@ -28,6 +28,7 @@ use crate::safe_file;
 const REGISTRY_USER_AGENT: &str = "yaml-sigil-release-workflow/1.0";
 const REGISTRY_ATTEMPTS: usize = 30;
 const REGISTRY_RETRY_SECONDS: u64 = 10;
+const COMPILED_RELEASE_CONFIG: &str = include_str!("../../.release-plz.toml");
 #[cfg(test)]
 const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 const TRAITS_PACKAGE: &str = TRAITS_POLICY.packages[0].package;
@@ -70,7 +71,7 @@ enum ReleaseCommand {
     },
     /// Prepare a checkout-bound release-plz publication configuration.
     PreparePublicationConfig {
-        /// Reviewed source configuration. Defaults to `.release-plz.toml`.
+        /// Reviewed source configuration. Defaults to the compiled policy.
         #[arg(long)]
         source: Option<PathBuf>,
         /// New output path; existing files and symlinks are rejected.
@@ -125,8 +126,7 @@ pub fn release(root: &Path, args: ReleaseArgs) -> Result<Outcome> {
             Ok(Outcome::Success)
         }
         ReleaseCommand::PreparePublicationConfig { source, output } => {
-            let source = source.unwrap_or_else(|| root.join(".release-plz.toml"));
-            prepare_publication_config(root, &source, &output)?;
+            prepare_publication_config(root, source.as_deref(), &output)?;
             Ok(Outcome::Success)
         }
         ReleaseCommand::PrepareValidationCargoHome { output } => {
@@ -855,18 +855,27 @@ fn source_newline(body: &str) -> Result<&'static str> {
     }
 }
 
-fn prepare_publication_config(root: &Path, source: &Path, output: &Path) -> Result<()> {
-    let source_relative = release_config_relative(root, source)?;
+fn prepare_publication_config(root: &Path, source: Option<&Path>, output: &Path) -> Result<()> {
     let output = resolve_path(root, output);
     if output.exists() {
         bail!("publication config already exists: {}", output.display());
     }
-    let body = safe_file::TrustedRoot::open(root)
-        .and_then(|trusted| trusted.read_manifest(&source_relative))
-        .with_context(|| format!("read release config {}", source.display()))?;
+    let (body, source_label) = match source {
+        Some(source) => {
+            let source_relative = release_config_relative(root, source)?;
+            let body = safe_file::TrustedRoot::open(root)
+                .and_then(|trusted| trusted.read_manifest(&source_relative))
+                .with_context(|| format!("read release config {}", source.display()))?;
+            (body, source.display().to_string())
+        }
+        None => (
+            COMPILED_RELEASE_CONFIG.to_string(),
+            "compiled release policy".to_string(),
+        ),
+    };
     let original: DocumentMut = body
         .parse()
-        .with_context(|| format!("parse release config {}", source.display()))?;
+        .with_context(|| format!("parse release config {source_label}"))?;
     require_publication_fields(&original, false, None)?;
 
     let mut valid_ref_command = Command::new("git");
@@ -1734,7 +1743,7 @@ mod tests {
         let body = reviewed_publication_config("\n");
         fs::write(&source, &body).unwrap();
 
-        prepare_publication_config(&temporary, &source, &output).unwrap();
+        prepare_publication_config(&temporary, Some(&source), &output).unwrap();
 
         let actual = fs::read_to_string(&output).unwrap();
         assert_eq!(
@@ -1746,7 +1755,30 @@ mod tests {
             )
             .replacen("release_always = false", "release_always = true", 1)
         );
-        assert!(prepare_publication_config(&temporary, &source, &output).is_err());
+        assert!(prepare_publication_config(&temporary, Some(&source), &output).is_err());
+        cleanup(temporary);
+    }
+
+    #[test]
+    fn default_publication_config_uses_compiled_policy_across_checkout() {
+        let temporary = temp_root("compiled-publication-config");
+        let historical = reviewed_publication_config("\n")
+            .replace("git_tag_enable = false", "git_tag_enable = true");
+        fs::write(temporary.join(".release-plz.toml"), historical).unwrap();
+        let output = temporary.join("generated.toml");
+
+        prepare_publication_config(&temporary, None, &output).unwrap();
+
+        let newline = source_newline(COMPILED_RELEASE_CONFIG).unwrap();
+        let expected = COMPILED_RELEASE_CONFIG
+            .replacen(
+                &format!("[workspace]{newline}"),
+                &format!("[workspace]{newline}pr_branch_prefix = \":\"{newline}"),
+                1,
+            )
+            .replacen("release_always = false", "release_always = true", 1);
+        assert_eq!(fs::read_to_string(&output).unwrap(), expected);
+        assert!(!expected.contains("git_tag_enable = true"));
         cleanup(temporary);
     }
 
@@ -1756,7 +1788,7 @@ mod tests {
         let source = temporary.join("release-plz.toml");
         let output = temporary.join("generated.toml");
         fs::write(&source, reviewed_publication_config("\r\n")).unwrap();
-        prepare_publication_config(&temporary, &source, &output).unwrap();
+        prepare_publication_config(&temporary, Some(&source), &output).unwrap();
         let actual = fs::read(&output).unwrap();
         assert!(actual.windows(2).any(|window| window == b"\r\n"));
         assert!(
@@ -1773,8 +1805,12 @@ mod tests {
         )
         .unwrap();
         assert!(
-            prepare_publication_config(&temporary, &ambiguous, &temporary.join("rejected.toml"))
-                .is_err()
+            prepare_publication_config(
+                &temporary,
+                Some(&ambiguous),
+                &temporary.join("rejected.toml"),
+            )
+            .is_err()
         );
         cleanup(temporary);
     }

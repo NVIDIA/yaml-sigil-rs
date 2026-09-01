@@ -154,7 +154,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "${CAPTURED_SHA}"
           # A fresh release must still be exact current main before publication.
           if [[ "${REGISTRY_STATE}" = "absent" ]]; then
-            cargo xtask release require-current-main \
+            test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+              = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+            "${YAML_SIGIL_RELEASE_XTASK}" release require-current-main \
               --head "${CAPTURED_SHA}" \
               --fetch-url "https://github.com/${GITHUB_REPOSITORY}"
           fi
@@ -166,7 +168,10 @@ jobs:
           git diff --exit-code
 
       - name: Require exact traits availability and source
-        run: cargo xtask release verify-traits
+        run: |
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release verify-traits
 
       - name: Prepare the official tagged baseline
         id: baseline
@@ -196,13 +201,15 @@ jobs:
             "${result}" >>"${GITHUB_OUTPUT}"
 
       - name: Require the tagged baseline on crates.io
-        run: >-
-          cargo xtask release verify-registry
-          --check-version "${{ steps.baseline.outputs.version }}"
-          yaml-sigil-core
-          yaml-sigil-transcription
-          yaml-sigil-signing
-          yaml-sigil-verification
+        run: |
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release verify-registry \
+            --check-version "${{ steps.baseline.outputs.version }}" \
+            yaml-sigil-core \
+            yaml-sigil-transcription \
+            yaml-sigil-signing \
+            yaml-sigil-verification
 
       - name: Check release API compatibility
         run: |
@@ -217,17 +224,21 @@ jobs:
             --intent "${intent}"
 
       - name: Require the exact source-package inventory
-        run: >-
-          cargo xtask release check-packages
-          yaml-sigil-core
-          yaml-sigil-transcription
-          yaml-sigil-signing
-          yaml-sigil-verification
+        run: |
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release check-packages \
+            yaml-sigil-core \
+            yaml-sigil-transcription \
+            yaml-sigil-signing \
+            yaml-sigil-verification
 
       - name: Prepare validation-only Cargo configuration
         run: |
           validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-release-cargo-home"
-          cargo xtask release prepare-validation-cargo-home \
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release prepare-validation-cargo-home \
             --output "${validation_cargo_home}"
           printf 'CARGO_HOME=%s\n' "${validation_cargo_home}" >>"${GITHUB_ENV}"
 
@@ -252,9 +263,11 @@ jobs:
             --baseline-commit "${{ steps.baseline.outputs.commit }}"
 
       - name: Prepare source-only publication configuration
-        run: >-
-          cargo xtask release prepare-publication-config
-          --output "${RUNNER_TEMP}/release-plz-publication.toml"
+        run: |
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release prepare-publication-config \
+            --output "${RUNNER_TEMP}/release-plz-publication.toml"
 
       - name: Validate release-plz publication plan
         env:
@@ -424,7 +437,10 @@ jobs:
           git diff --exit-code
 
       - name: Recheck exact traits availability and source
-        run: cargo xtask release verify-traits
+        run: |
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release verify-traits
 
       - name: Prepare the official tagged baseline
         id: baseline
@@ -458,7 +474,9 @@ jobs:
           CAPTURED_SHA: ${{ steps.discover.outputs.captured_release_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          cargo xtask release verify-registry \
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release verify-registry \
             --check-version "${{ steps.baseline.outputs.version }}" \
             yaml-sigil-core \
             yaml-sigil-transcription \
@@ -473,13 +491,17 @@ jobs:
             --expected-baseline-version "${{ steps.baseline.outputs.version }}" \
             --expected-current-version "${current_version}" \
             --intent "${intent}"
-          cargo xtask release check-packages \
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release check-packages \
             yaml-sigil-core \
             yaml-sigil-transcription \
             yaml-sigil-signing \
             yaml-sigil-verification
           validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-publication-check-cargo-home"
-          cargo xtask release prepare-validation-cargo-home \
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release prepare-validation-cargo-home \
             --output "${validation_cargo_home}"
           export CARGO_HOME="${validation_cargo_home}"
           cargo package --package yaml-sigil-core --all-features
@@ -497,10 +519,12 @@ jobs:
       - name: Prepare source-only publication configuration
         run: |
           publication_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-publication-cargo-home"
-          cargo xtask release prepare-publication-cargo-home \
+          test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+            = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+          "${YAML_SIGIL_RELEASE_XTASK}" release prepare-publication-cargo-home \
             --output "${publication_cargo_home}"
           printf 'CARGO_HOME=%s\n' "${publication_cargo_home}" >>"${GITHUB_ENV}"
-          cargo xtask release prepare-publication-config \
+          "${YAML_SIGIL_RELEASE_XTASK}" release prepare-publication-config \
             --output "${RUNNER_TEMP}/release-plz-publication.toml"
 
       - name: Capture canonical publication plan
@@ -512,7 +536,9 @@ jobs:
         run: |
           # A fresh plan is captured only from exact current protected main.
           if [[ "${REGISTRY_STATE}" = "absent" ]]; then
-            cargo xtask release require-current-main \
+            test "$(sha256sum "${YAML_SIGIL_RELEASE_XTASK}" | cut -d ' ' -f 1)" \
+              = "${YAML_SIGIL_RELEASE_XTASK_SHA256}"
+            "${YAML_SIGIL_RELEASE_XTASK}" release require-current-main \
               --head "${CAPTURED_SHA}" \
               --fetch-url "https://github.com/${GITHUB_REPOSITORY}"
           fi
