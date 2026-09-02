@@ -295,9 +295,76 @@ ephemeral compilation remains permitted for validation.
 
 The xtask resolves its Buf executable through the same pinned `buf-tools`
 version used by `yaml-sigil-core` at build time. A system `buf` or `protoc`
-installation is not required. Keep the `buf-tools` pins in the root workspace
-and `xtask/Cargo.toml`, the `bufbuild/buf-action` `version` input, and this
-command documentation aligned when updating Buf.
+installation is not required. Follow the coordinated upgrade workflow below
+when changing any Buf-related version or installation control.
+
+## Coordinated Buf upgrades
+
+Publishing a new `buf-tools` or `buf-toolchain` release does not automatically
+update any YamlSigil repository. Use coordinated pull requests to update every
+applicable pin and verification surface. Do not infer one component's version
+from another component's version.
+
+The controls have distinct roles:
+
+- `buf-tools` is the Rust build dependency used by this workspace and its
+  xtask. Its version may contain a suffix such as `-hotfix.N`; do not derive it
+  mechanically from the Buf CLI version. Update the exact pins in `Cargo.toml`
+  and `xtask/Cargo.toml`, then regenerate the committed `xtask/Cargo.lock`.
+  The root workspace intentionally does not commit `Cargo.lock`, so do not add
+  it merely for a Buf upgrade. If `.github/trusted-cargo/buf-tools/` remains
+  present, its package version and complete dependency graph must match the
+  selected published `buf-tools` crate so the protected path override cannot
+  change dependency resolution. Its implementation must continue to return
+  only the authenticated protected Buf executable.
+- `buf-toolchain` installs and verifies the standalone trusted Buf executable
+  before protected candidate execution. Update the protected runner's exact
+  Buf CLI version and its policy assertions in every repository that carries
+  the shared implementation. Require the installed executable to report
+  exactly the intended Buf CLI version. Confirm the published mapping between
+  the `buf-toolchain` and Buf CLI releases instead of assuming identical
+  version strings.
+- `bufbuild/buf-action` has two separate controls: its immutable Action SHA and
+  its Buf CLI `version` input. Keep every applicable ordinary and protected
+  schema-check workflow aligned with the selected CLI version. If a workflow
+  omits `version`, report that as a consistency gap; it does not inherit the
+  Rust dependency pin.
+- `buf.lock` locks BSR or module dependencies, not the installed Buf CLI
+  version. Do not update it solely because the CLI, `buf-tools`, or
+  `buf-toolchain` changed.
+
+Coordinate these repository-specific surfaces:
+
+- In `yaml-sigil-rs`, update `Cargo.toml`, `xtask/Cargo.toml`,
+  `xtask/Cargo.lock`, `.github/trusted-cargo/buf-tools/` when present, the
+  ordinary and protected `bufbuild/buf-action` inputs under
+  `.github/workflows/`, the protected runner pin in
+  `.github/scripts/run-terminal-candidate.sh`, and the policy tests in
+  `.github/scripts/test_protected_pr_ci.py`.
+- In `yaml-sigil-spec`, update its ordinary and protected
+  `bufbuild/buf-action` configuration, protected runner pin, and policy tests.
+  It has no product `buf-tools` dependency unless its current source proves
+  otherwise.
+- In `yaml-sigil-traits`, update only the shared protected-runner and
+  policy-test surfaces that remain intentionally uniform. It otherwise has no
+  independent Buf product dependency unless its current source proves
+  otherwise.
+
+For each future coordinated upgrade:
+
+- Review the selected Buf, `buf-tools`, and `buf-toolchain` releases and
+  confirm their published mapping.
+- Make one coordinated change that updates every applicable pin and
+  verification surface.
+- Regenerate only Cargo lockfiles already committed by the affected
+  repository.
+- Verify that no unplanned protobuf-generated output changed.
+- Run the local Cargo and protected-policy suites, ShellCheck or Shuck,
+  actionlint, and Markdown checks.
+- Require successful ordinary and App-owned protected CI at the exact reviewed
+  heads.
+- Confirm that the protected sandbox used the intended authenticated Buf
+  binary and retained no artifacts.
 
 Install `rumdl`, `cargo-audit`, and `cargo-machete` with Cargo before running
 the wrapper:
