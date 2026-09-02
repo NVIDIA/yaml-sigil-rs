@@ -5,7 +5,7 @@
 
 use std::ffi::OsStr;
 use std::io::{self, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Result;
@@ -14,6 +14,16 @@ use super::{bounded_process, package_content, require_success, require_tool, ver
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
 const CARGO_LOCKFILE_PATH_ENV: &str = "CARGO_RESOLVER_LOCKFILE_PATH";
+const PROTECTED_MARKER_ENV: &str = "YAML_SIGIL_TERMINAL_CANDIDATE";
+const PROTECTED_AUDIT_ENV: &str = "YAML_SIGIL_CARGO_AUDIT";
+const PROTECTED_SEED_ENV: &str = "YAML_SIGIL_CARGO_SEED";
+const PROTECTED_STATE_ENV: &str = "YAML_SIGIL_CARGO_STATE_ROOT";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ExecutionBoundary {
+    Ordinary,
+    Protected { cargo_audit: PathBuf },
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Step {
@@ -23,18 +33,35 @@ struct Step {
 }
 
 impl Step {
-    fn command(self, root: &Path) -> Command {
+    fn command(self, root: &Path) -> io::Result<Command> {
         let root_lockfile = std::env::var_os(CARGO_LOCKFILE_PATH_ENV);
-        self.command_with_root_lockfile(root, root_lockfile.as_deref())
+        Ok(self.command_with_root_lockfile(root, root_lockfile.as_deref(), &execution_boundary()?))
     }
 
-    fn command_with_root_lockfile(self, root: &Path, root_lockfile: Option<&OsStr>) -> Command {
-        let mut command = if self.program == "buf" {
+    fn command_with_root_lockfile(
+        self,
+        root: &Path,
+        root_lockfile: Option<&OsStr>,
+        boundary: &ExecutionBoundary,
+    ) -> Command {
+        let mut command = if self.is_dependency_audit()
+            && let ExecutionBoundary::Protected { cargo_audit } = boundary
+        {
+            let mut command = Command::new(cargo_audit);
+            command.args(["audit", "--no-fetch"]);
+            command.args(&self.args[1..]);
+            command
+        } else if self.program == "buf" {
             Command::new(buf_tools::buf_bin_path())
         } else {
-            Command::new(self.program)
+            let mut command = Command::new(self.program);
+            command.args(self.args);
+            command
         };
-        command.current_dir(root).args(self.args);
+        if self.program == "buf" {
+            command.args(self.args);
+        }
+        command.current_dir(root);
         if self.uses_xtask_workspace() {
             command.env_remove(CARGO_LOCKFILE_PATH_ENV);
         } else if self.is_root_dependency_audit()
@@ -53,6 +80,10 @@ impl Step {
 
     fn is_root_dependency_audit(self) -> bool {
         self.program == "cargo" && self.args == ["audit"]
+    }
+
+    fn is_dependency_audit(self) -> bool {
+        self.program == "cargo" && self.args.first() == Some(&"audit")
     }
 }
 
@@ -169,12 +200,46 @@ pub(crate) fn run(root: &Path) -> Result<()> {
 
 fn run_step(root: &Path, step: Step) -> Result<()> {
     let output = bounded_process::output(
-        &mut step.command(root),
+        &mut step.command(root)?,
         bounded_process::VALIDATION_OUTPUT_LIMITS,
     )?;
     io::stdout().write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
     require_success(output.status, step.label)
+}
+
+fn execution_boundary() -> io::Result<ExecutionBoundary> {
+    let marker = std::env::var_os(PROTECTED_MARKER_ENV);
+    let audit = std::env::var_os(PROTECTED_AUDIT_ENV);
+    let seed = std::env::var_os(PROTECTED_SEED_ENV);
+    let state = std::env::var_os(PROTECTED_STATE_ENV);
+    if marker.is_none() && audit.is_none() && seed.is_none() && state.is_none() {
+        return Ok(ExecutionBoundary::Ordinary);
+    }
+    let Some(audit) = audit.filter(|value| !value.is_empty()) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "protected dependency-audit boundary is incomplete",
+        ));
+    };
+    if marker.as_deref() != Some(OsStr::new("1"))
+        || seed.as_ref().is_none_or(|value| value.is_empty())
+        || state.as_ref().is_none_or(|value| value.is_empty())
+        || std::env::var_os("CARGO_NET_OFFLINE").as_deref() != Some(OsStr::new("true"))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "protected dependency-audit boundary is incomplete",
+        ));
+    }
+    let cargo_audit = PathBuf::from(audit);
+    if !cargo_audit.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "protected cargo-audit path is not absolute",
+        ));
+    }
+    Ok(ExecutionBoundary::Protected { cargo_audit })
 }
 
 #[cfg(test)]
@@ -199,7 +264,7 @@ mod tests {
         let mut xtask_steps = 0;
 
         for step in steps {
-            let command = step.command(Path::new("."));
+            let command = step.command(Path::new(".")).unwrap();
             let removes_external_lock = command
                 .get_envs()
                 .any(|(name, value)| name == CARGO_LOCKFILE_PATH_ENV && value.is_none());
@@ -226,11 +291,49 @@ mod tests {
             .find(|step| step.is_root_dependency_audit())
             .expect("CI must audit the root dependency lock");
         let lockfile = Path::new("/candidate-home/Cargo.lock");
-        let command =
-            root_audit.command_with_root_lockfile(Path::new("."), Some(lockfile.as_os_str()));
+        let command = root_audit.command_with_root_lockfile(
+            Path::new("."),
+            Some(lockfile.as_os_str()),
+            &ExecutionBoundary::Ordinary,
+        );
         let arguments = command.get_args().collect::<Vec<_>>();
 
         assert_eq!(arguments, ["audit", "--file", "/candidate-home/Cargo.lock"]);
+    }
+
+    #[test]
+    fn protected_audits_use_authenticated_binary_and_seed_only() {
+        for step in AFTER_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .filter(|step| step.is_dependency_audit())
+        {
+            let command = step.command_with_root_lockfile(
+                Path::new("."),
+                None,
+                &ExecutionBoundary::Protected {
+                    cargo_audit: PathBuf::from("/trusted-tools/bin/cargo-audit"),
+                },
+            );
+            assert_eq!(command.get_program(), "/trusted-tools/bin/cargo-audit");
+            let arguments = command.get_args().collect::<Vec<_>>();
+            assert_eq!(&arguments[..2], ["audit", "--no-fetch"]);
+        }
+    }
+
+    #[test]
+    fn ordinary_audit_can_seed_a_clean_cargo_home() {
+        let clean = tempfile::tempdir().unwrap();
+        let audit = AFTER_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .find(|step| step.is_root_dependency_audit())
+            .unwrap();
+        let mut command =
+            audit.command_with_root_lockfile(Path::new("."), None, &ExecutionBoundary::Ordinary);
+        command.env("CARGO_HOME", clean.path());
+        assert_eq!(command.get_program(), "cargo");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["audit"]);
     }
 
     #[cfg(windows)]

@@ -6,6 +6,7 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -506,14 +507,15 @@ impl CargoRunner for SystemCargoRunner {
     }
 
     fn status(&mut self, root: &Path, program: &OsStr, args: &[OsString]) -> Result<CargoStatus> {
-        let status = Command::new(program)
-            .current_dir(root)
-            .args(args)
-            .status()
+        let mut command = Command::new(program);
+        command.current_dir(root).args(args);
+        let output = bounded_process::output(&mut command, VALIDATION_OUTPUT_LIMITS)
             .with_context(|| format!("run {}", program.to_string_lossy()))?;
+        io::stdout().write_all(&output.stdout)?;
+        io::stderr().write_all(&output.stderr)?;
         Ok(CargoStatus {
-            success: status.success(),
-            code: status.code(),
+            success: output.status.success(),
+            code: output.status.code(),
         })
     }
 }
@@ -1085,7 +1087,8 @@ fn ensure_candidate_changelogs(
     for policy in RUST_POLICY.packages {
         let crate_name = policy.package;
         let path = root.join(policy.changelog);
-        let body = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let body = safe_file::read_manifest(root, Path::new(policy.changelog))
+            .with_context(|| format!("read {}", path.display()))?;
         let generated_prefix = format!("## [{generated}](");
         let target_prefix = format!("## [{target}](");
         let mut changed = false;
@@ -1120,7 +1123,8 @@ fn promote_changelogs(root: &Path, rc: &Version, stable: &Version, date: &str) -
     for policy in RUST_POLICY.packages {
         let crate_name = policy.package;
         let path = root.join(policy.changelog);
-        let body = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let body = safe_file::read_manifest(root, Path::new(policy.changelog))
+            .with_context(|| format!("read {}", path.display()))?;
         let section = changelog_section(&body, rc)?;
         let promoted = format!(
             "## [{stable}](https://github.com/NVIDIA/yaml-sigil-rs/releases/tag/{crate_name}-v{stable}) - {date}\n{section}"
@@ -1791,6 +1795,38 @@ mod tests {
             insert_after_unreleased(body, section).unwrap(),
             "# Changelog\n\n## [Unreleased]\n\n## [0.2.0](new) - 2026-08-19\n\n- New.\n\n## [0.1.0](old) - 2026-01-01\n\n- Old.\n"
         );
+    }
+
+    #[test]
+    fn candidate_and_promotion_reject_oversized_changelogs_before_allocation() {
+        let root = temp_test_root("oversized-changelog");
+        for policy in RUST_POLICY.packages {
+            let path = root.join(policy.changelog);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, vec![b'x'; safe_file::MANIFEST_LIMIT + 1]).unwrap();
+        }
+        let rc = Version::parse("1.2.3-rc.1").unwrap();
+        let stable = Version::parse("1.2.3").unwrap();
+
+        for error in [
+            format!(
+                "{:#}",
+                ensure_candidate_changelogs(&root, &rc, &rc, "2026-09-02").unwrap_err()
+            ),
+            format!(
+                "{:#}",
+                promote_changelogs(&root, &rc, &stable, "2026-09-02").unwrap_err()
+            ),
+        ] {
+            assert!(
+                error.contains(&format!(
+                    "exceeds its {}-byte limit",
+                    safe_file::MANIFEST_LIMIT
+                )),
+                "unexpected bounded changelog error: {error}"
+            );
+        }
+        cleanup_temp_test_root(root);
     }
 
     #[derive(Debug, Eq, PartialEq)]
