@@ -101,6 +101,13 @@ Treat only the document bytes returned by `VerifierState::Verified` as
 authenticated. The caller remains responsible for choosing the artifact form
 and deciding which public keys are trusted.
 
+### [`yaml-sigil-wasm`](./crates/yaml-sigil-wasm/README.md)
+
+This unpublished, source-only crate exposes compose, decompose, sign, and
+verify operations to browser and Node.js WebAssembly consumers. It provides a
+narrow JavaScript boundary over the implementation crates without changing
+their native Rust APIs.
+
 ### Signing and verification flow
 
 1. A producer uses `yaml-sigil-signing` to sign a document.
@@ -149,6 +156,27 @@ Run the focused E2E fixture check with:
 ```shell
 cargo test -p yaml-sigil-conformance --test e2e_buildtime_keys
 ```
+
+### WebAssembly validation
+
+The source-only `yaml-sigil-wasm` crate targets `wasm32-unknown-unknown`. The
+repository does not publish or retain generated WebAssembly or an npm package.
+Install the Rust 1.95 target and pinned helper before running the local task.
+Node.js 20 or newer and Firefox must also be on `PATH`.
+
+```shell
+rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
+cargo install --locked wasm-pack --version 0.15.0
+cargo xtask wasm
+```
+
+The task checks the runtime crates and both boundary feature sets, runs the
+schema-enabled suite under Node.js and headless Firefox, exercises the
+generated JavaScript API, and reports optimized raw sizes. It explicitly
+removes all temporary project build output and reports cleanup failures. It
+also fails if a `.wasm` file is retained in the workspace. Read the
+[`yaml-sigil-wasm` README](crates/yaml-sigil-wasm/README.md) for selectors,
+result classes, key encodings, copy semantics, and cryptographic limitations.
 
 ## Coverage and profiling
 

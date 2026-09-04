@@ -31,7 +31,8 @@
     "platform_verifier",
     "static_checks",
     "rust",
-    "candidate_ci"
+    "candidate_ci",
+    "wasm"
   ],
   "supplemental_candidate_ci": true,
   "trusted_gitlinks": []
