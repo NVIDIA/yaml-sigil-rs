@@ -385,25 +385,72 @@ fn open_in_browser(path: &Path) -> Result<()> {
     let path = path
         .canonicalize()
         .with_context(|| path.display().to_string())?;
-    let status = if cfg!(target_os = "linux") {
-        let mut cmd = Command::new("xdg-open");
-        cmd.arg(&path);
-        run(cmd)?
-    } else if cfg!(target_os = "macos") {
-        let mut cmd = Command::new("open");
-        cmd.arg(&path);
-        run(cmd)?
-    } else if cfg!(target_os = "windows") {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "start", "", &path.display().to_string()]);
-        run(cmd)?
-    } else {
-        bail!(
-            "no default browser opener for this OS; open {}",
-            path.display()
-        );
-    };
+    open_canonical_path(&path)
+}
+
+#[cfg(target_os = "linux")]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    let mut command = Command::new("xdg-open");
+    command.arg(path);
+    let status = run(command)?;
     require_success(status, "open browser")
+}
+
+#[cfg(target_os = "macos")]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    let mut command = Command::new("open");
+    command.arg(path);
+    let status = run(command)?;
+    require_success(status, "open browser")
+}
+
+#[cfg(target_os = "windows")]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOW;
+
+    let operation = windows_wide_argument(OsStr::new("open"))?;
+    let path = windows_wide_argument(path.as_os_str())?;
+    // SAFETY: both input buffers are NUL-terminated for the duration of the
+    // call, and every other pointer is an explicitly permitted null optional
+    // parameter. ShellExecuteW receives the path as data, never shell text.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            path.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOW,
+        )
+    };
+    if result as usize as isize <= 32 {
+        bail!(
+            "Windows could not open the browser path (code {})",
+            result as usize
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_wide_argument(value: &OsStr) -> Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let mut encoded = value.encode_wide().collect::<Vec<_>>();
+    if encoded.contains(&0) {
+        bail!("Windows browser path contains a NUL code unit");
+    }
+    encoded.push(0);
+    Ok(encoded)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    bail!(
+        "no default browser opener for this OS; open {}",
+        path.display()
+    )
 }
 
 fn which_in_path(program: &str, path: &OsStr, executable_suffix: &str) -> Option<PathBuf> {
@@ -497,6 +544,21 @@ mod tests {
     fn registry_unavailable_retains_the_ordered_wait_status() {
         assert_eq!(release_exit_code(release::Outcome::Success), 0);
         assert_eq!(release_exit_code(release::Outcome::RegistryUnavailable), 3);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_browser_path_is_data_even_with_shell_metacharacters() {
+        use std::os::windows::ffi::OsStringExt as _;
+
+        let path = Path::new(r"C:\workspace & ^ (group)% name\coverage\index.html");
+        let encoded = windows_wide_argument(path.as_os_str()).unwrap();
+        assert_eq!(encoded.last(), Some(&0));
+        assert_eq!(
+            std::ffi::OsString::from_wide(&encoded[..encoded.len() - 1]),
+            path.as_os_str()
+        );
+        assert!(!include_str!("main.rs").contains("Command::new(\"cmd\")"));
     }
 
     #[test]
