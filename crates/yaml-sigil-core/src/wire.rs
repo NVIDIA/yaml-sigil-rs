@@ -6,6 +6,14 @@
 use crate::error::CoreError;
 use crate::proto_outer::decode_signature_carrier;
 
+/// Decode protobuf `SignedYamlArtifact` wire bytes.
+///
+/// # Resource usage
+///
+/// This decoder imposes no universal artifact, payload, or signature-carrier size limit.
+/// Protobuf decoding copies recognized fields into owned buffers, so allocation and copying are
+/// linear in field size. Callers handling untrusted data must enforce deployment-appropriate
+/// size limits before invocation.
 pub fn decode_signed_yaml_artifact(
     bytes: &[u8],
 ) -> Result<crate::pb::SignedYamlArtifact, CoreError> {
@@ -28,6 +36,13 @@ pub struct ProtoArtifactView {
     pub keyid: Option<String>,
 }
 
+/// Copy the payload and signature fields from a decoded `SignedYamlArtifact` into an owned view.
+///
+/// # Resource usage
+///
+/// This helper clones recognized fields into owned buffers. Allocation and copying are linear in
+/// field size. Callers handling untrusted messages must enforce deployment-appropriate size
+/// limits before invocation.
 pub fn view_signed_yaml_artifact(
     artifact: &crate::pb::SignedYamlArtifact,
 ) -> Result<ProtoArtifactView, CoreError> {
@@ -49,6 +64,10 @@ pub fn view_signed_yaml_artifact(
 }
 
 /// Extract inner signature fields from opaque carrier bytes (verification metadata stage).
+///
+/// # Resource usage
+///
+/// Protobuf decoding has the resource behavior documented on [`decode_signature_carrier`].
 pub fn view_signature_carrier(carrier: &[u8]) -> Result<ProtoArtifactView, CoreError> {
     let sig = decode_signature_carrier(carrier)?;
     let alg_wire = sig.alg.to_i32();
