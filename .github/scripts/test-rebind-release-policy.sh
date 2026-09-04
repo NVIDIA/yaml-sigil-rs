@@ -23,7 +23,18 @@ git clone --quiet --bare "${upstream}" "${remote}"
 git clone --quiet "${remote}" "${policy}"
 git clone --quiet "${remote}" "${source}"
 
-"${script_dir}/rebind-release-policy.sh" \
+# Production mode must reject a caller-selected transport before authentication.
+if env GITHUB_ACTIONS=true GITHUB_REPOSITORY=NVIDIA/yaml-sigil-rs \
+  "${script_dir}/rebind-release-policy.sh" \
+  NVIDIA/yaml-sigil-rs "${policy}" "${source}" "${initial}" "${remote}" \
+  >/dev/null 2>&1; then
+  echo "production release binding accepted a caller-selected transport" >&2
+  exit 1
+fi
+
+# Local fixture calls deliberately remove hosted identity and use the test remote.
+env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY \
+  "${script_dir}/rebind-release-policy.sh" \
   NVIDIA/yaml-sigil-rs "${policy}" "${source}" "${initial}" "${remote}"
 
 git -C "${upstream}" -c user.name=fixture -c user.email=fixture@example.invalid \
@@ -31,7 +42,8 @@ git -C "${upstream}" -c user.name=fixture -c user.email=fixture@example.invalid 
 git -C "${upstream}" push --quiet "${remote}" main
 
 # A policy checkout that is no longer current main must fail before authentication.
-if "${script_dir}/rebind-release-policy.sh" \
+if env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY \
+  "${script_dir}/rebind-release-policy.sh" \
   NVIDIA/yaml-sigil-rs "${policy}" "${source}" "${initial}" "${remote}" \
   >/dev/null 2>&1; then
   echo "stale protected policy unexpectedly passed live-main binding" >&2
@@ -39,7 +51,8 @@ if "${script_dir}/rebind-release-policy.sh" \
 fi
 
 git -C "${policy}" pull --quiet --ff-only
-"${script_dir}/rebind-release-policy.sh" \
+env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY \
+  "${script_dir}/rebind-release-policy.sh" \
   NVIDIA/yaml-sigil-rs "${policy}" "${source}" "${initial}" "${remote}"
 
 git -C "${source}" switch --quiet -c unrelated
@@ -48,7 +61,8 @@ git -C "${source}" -c user.name=fixture -c user.email=fixture@example.invalid \
 unrelated="$(git -C "${source}" rev-parse HEAD)"
 
 # A clean source outside current main lineage must never become recovery data.
-if "${script_dir}/rebind-release-policy.sh" \
+if env -u GITHUB_ACTIONS -u GITHUB_REPOSITORY \
+  "${script_dir}/rebind-release-policy.sh" \
   NVIDIA/yaml-sigil-rs "${policy}" "${source}" "${unrelated}" "${remote}" \
   >/dev/null 2>&1; then
   echo "unrelated release source unexpectedly passed main-lineage binding" >&2

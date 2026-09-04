@@ -4,3 +4,6 @@ crates/yaml-sigil-conformance/fixtures/** -text
 # Package-content inventories are canonical data consumed byte-for-byte by
 # xtask.
 xtask/package-contents/*.txt text eol=lf
+
+# Protobuf format checks compare canonical LF text on every checkout platform.
+*.proto text eol=lf
