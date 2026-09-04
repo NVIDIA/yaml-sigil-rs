@@ -111,6 +111,8 @@ fn execute() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
         Task::Ci { candidate_root } => {
+            require_alternate_candidate_support(candidate_root.is_some())
+                .map_err(anyhow::Error::msg)?;
             let candidate = resolve_candidate_root(candidate_root.as_deref().unwrap_or(&root))?;
             ci::run(&candidate)?;
         }
@@ -163,6 +165,13 @@ fn resolve_candidate_root(root: &Path) -> Result<PathBuf> {
         bail!("candidate root {} lacks Cargo.toml", candidate.display());
     }
     Ok(candidate)
+}
+
+fn require_alternate_candidate_support(explicit: bool) -> Result<(), &'static str> {
+    if explicit && cfg!(all(unix, not(target_os = "linux"))) {
+        return Err("alternate --candidate-root validation is unsupported on non-Linux Unix hosts");
+    }
+    Ok(())
 }
 
 fn run(mut cmd: Command) -> Result<ExitStatus> {
@@ -446,13 +455,23 @@ mod tests {
     }
 
     #[test]
-    fn ci_candidate_root_is_repository_scoped() {
+    fn ci_candidate_root_is_repository_scoped_and_platform_bounded() {
         let root = workspace_root();
         assert_eq!(
             resolve_candidate_root(&root).unwrap(),
             root.canonicalize().unwrap()
         );
         assert!(resolve_candidate_root(&root.join("missing-candidate")).is_err());
+        let support = require_alternate_candidate_support(true);
+        if cfg!(all(unix, not(target_os = "linux"))) {
+            assert_eq!(
+                support.unwrap_err(),
+                "alternate --candidate-root validation is unsupported on non-Linux Unix hosts"
+            );
+        } else {
+            assert!(support.is_ok());
+        }
+        assert!(require_alternate_candidate_support(false).is_ok());
     }
 
     #[test]
