@@ -174,6 +174,81 @@ fn require_alternate_candidate_support(explicit: bool) -> Result<(), &'static st
     Ok(())
 }
 
+fn resolve_validation_root(
+    default_root: &Path,
+    validation_root: Option<PathBuf>,
+    validation_head: Option<String>,
+) -> Result<PathBuf> {
+    let (validation_root, validation_head) = match (validation_root, validation_head) {
+        (None, None) => return Ok(default_root.to_path_buf()),
+        (Some(root), Some(head)) => (root, head),
+        _ => bail!("--validation-root and --validation-head must be provided together"),
+    };
+    if validation_head.len() != 40
+        || !validation_head
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        bail!("--validation-head must be a lowercase full commit SHA");
+    }
+    let root = validation_root
+        .canonicalize()
+        .with_context(|| format!("resolve validation root {}", validation_root.display()))?;
+    if !root.join("Cargo.toml").is_file() {
+        bail!("validation root {} lacks Cargo.toml", root.display());
+    }
+    let top = PathBuf::from(validation_git_line(
+        &root,
+        &["rev-parse", "--show-toplevel"],
+    )?)
+    .canonicalize()
+    .context("resolve validation Git root")?;
+    if top != root || validation_git_line(&root, &["rev-parse", "HEAD"])? != validation_head {
+        bail!("validation root is not the exact selected commit");
+    }
+    if !validation_git_output(&root, &["status", "--porcelain", "--untracked-files=no"])?.is_empty()
+    {
+        bail!("validation root contains tracked changes");
+    }
+    Ok(root)
+}
+
+fn validation_git_line(root: &Path, arguments: &[&str]) -> Result<String> {
+    let output = validation_git_output(root, arguments)?;
+    let text = std::str::from_utf8(&output).context("validation Git output is not UTF-8")?;
+    let line = text.strip_suffix('\n').unwrap_or(text);
+    if line.is_empty() || line.contains(['\r', '\n']) {
+        bail!("validation Git output is not one line");
+    }
+    Ok(line.to_string())
+}
+
+fn validation_git_output(root: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let mut command = Command::new("git");
+    command
+        .current_dir(root)
+        .args([
+            "--no-pager",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            &format!("core.hooksPath={null_device}"),
+        ])
+        .args(arguments)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", null_device);
+    let output = bounded_process::output(&mut command, bounded_process::VALIDATION_OUTPUT_LIMITS)
+        .context("run validation Git command")?;
+    if !output.status.success() {
+        bail!(
+            "validation Git command failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output.stdout)
+}
+
 fn run(mut cmd: Command) -> Result<ExitStatus> {
     eprintln!("+ {}", format_cmd(&cmd));
     let program = cmd.get_program().to_owned();
@@ -454,6 +529,33 @@ mod tests {
         path
     }
 
+    fn validation_fixture(version: &str) -> (tempfile::TempDir, String) {
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temporary.path().join("Cargo.toml"),
+            format!("[workspace]\nmembers = []\n[workspace.package]\nversion = \"{version}\"\n"),
+        )
+        .unwrap();
+        for arguments in [
+            vec!["init", "--quiet"],
+            vec!["config", "user.name", "Fixture"],
+            vec!["config", "user.email", "fixture@example.invalid"],
+            vec!["add", "Cargo.toml"],
+            vec!["commit", "--quiet", "-m", "fixture"],
+        ] {
+            assert!(
+                Command::new("git")
+                    .current_dir(temporary.path())
+                    .args(arguments)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let head = validation_git_line(temporary.path(), &["rev-parse", "HEAD"]).unwrap();
+        (temporary, head)
+    }
+
     #[test]
     fn ci_candidate_root_is_repository_scoped_and_platform_bounded() {
         let root = workspace_root();
@@ -497,6 +599,69 @@ mod tests {
     fn registry_unavailable_retains_the_ordered_wait_status() {
         assert_eq!(release_exit_code(release::Outcome::Success), 0);
         assert_eq!(release_exit_code(release::Outcome::RegistryUnavailable), 3);
+    }
+
+    #[test]
+    fn release_version_validation_uses_only_the_exact_selected_checkout() {
+        let (selected, head) = validation_fixture("0.4.0");
+        let (unused_build, _) = validation_fixture("not-semver");
+        let cli = Cli::try_parse_from([
+            "xtask",
+            "release-version",
+            "--validation-root",
+            selected.path().to_str().unwrap(),
+            "--validation-head",
+            &head,
+            "show",
+        ])
+        .unwrap();
+        let Task::ReleaseVersion(args) = cli.command else {
+            panic!("parsed the wrong command")
+        };
+        versions::release_version(unused_build.path(), args).unwrap();
+
+        assert!(
+            resolve_validation_root(
+                unused_build.path(),
+                Some(selected.path().to_path_buf()),
+                Some("b".repeat(40)),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("exact selected commit")
+        );
+        std::fs::write(
+            selected.path().join("Cargo.toml"),
+            "[workspace]\nmembers = []\n[workspace.package]\nversion = \"0.4.0\"\n\n# dirty\n",
+        )
+        .unwrap();
+        assert!(
+            resolve_validation_root(
+                unused_build.path(),
+                Some(selected.path().to_path_buf()),
+                Some(head),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("tracked changes")
+        );
+
+        let (selected, head) = validation_fixture("not-semver");
+        let (unused_build, _) = validation_fixture("0.4.0");
+        let cli = Cli::try_parse_from([
+            "xtask",
+            "release-version",
+            "--validation-root",
+            selected.path().to_str().unwrap(),
+            "--validation-head",
+            &head,
+            "show",
+        ])
+        .unwrap();
+        let Task::ReleaseVersion(args) = cli.command else {
+            panic!("parsed the wrong command")
+        };
+        assert!(versions::release_version(unused_build.path(), args).is_err());
     }
 
     #[test]

@@ -27,6 +27,12 @@ const TRAITS_PACKAGE: &str = TRAITS_POLICY.packages[0].package;
 
 #[derive(Args)]
 pub struct ReleaseVersionArgs {
+    /// Validate an exact alternate source checkout.
+    #[arg(long, requires = "validation_head")]
+    validation_root: Option<PathBuf>,
+    /// Exact commit required at the alternate validation root.
+    #[arg(long, requires = "validation_root")]
+    validation_head: Option<String>,
     #[command(subcommand)]
     command: ReleaseVersionCommand,
 }
@@ -109,21 +115,35 @@ impl ReleaseIntent {
 }
 
 pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
-    match args.command {
+    let ReleaseVersionArgs {
+        validation_root,
+        validation_head,
+        command,
+    } = args;
+    if validation_root.is_some()
+        && !matches!(
+            &command,
+            ReleaseVersionCommand::Show | ReleaseVersionCommand::Check
+        )
+    {
+        bail!("alternate release-version validation supports only show and check");
+    }
+    let root = crate::resolve_validation_root(root, validation_root, validation_head)?;
+    match command {
         ReleaseVersionCommand::Show => {
-            println!("{}", read_workspace_version(root)?);
+            println!("{}", read_workspace_version(&root)?);
         }
         ReleaseVersionCommand::Check => {
-            let version = read_workspace_version(root)?;
-            sync_workspace_dependency_versions(root, true)?;
-            validate_crates_io_traits_dependency(root)?;
-            validate_stable_traits_dependency(root, &version)?;
+            let version = read_workspace_version(&root)?;
+            sync_workspace_dependency_versions(&root, true)?;
+            validate_crates_io_traits_dependency(&root)?;
+            validate_stable_traits_dependency(&root, &version)?;
             eprintln!("release-version: workspace version is {version}");
         }
         ReleaseVersionCommand::Intent { published } => {
             println!(
                 "{}",
-                release_intent(&published, &read_workspace_version(root)?)?.as_str()
+                release_intent(&published, &read_workspace_version(&root)?)?.as_str()
             );
         }
         ReleaseVersionCommand::CheckCompatibility {
@@ -134,7 +154,7 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
             intent,
         } => {
             check_api_compatibility(
-                root,
+                &root,
                 &baseline_manifest,
                 &current_manifest,
                 &expected_baseline_version,
@@ -149,26 +169,26 @@ pub fn release_version(root: &Path, args: ReleaseVersionArgs) -> Result<()> {
             release_notes,
         } => {
             validate_date(&date)?;
-            validate_crates_io_traits_dependency(root)?;
-            let current = read_workspace_version(root)?;
+            validate_crates_io_traits_dependency(&root)?;
+            let current = read_workspace_version(&root)?;
             let target = candidate_version(&published, &current, bump)?;
-            write_workspace_version(root, &target)?;
-            sync_workspace_dependency_versions(root, false)?;
+            write_workspace_version(&root, &target)?;
+            sync_workspace_dependency_versions(&root, false)?;
             if release_notes {
-                ensure_candidate_changelogs(root, &current, &target, &date)?;
+                ensure_candidate_changelogs(&root, &current, &target, &date)?;
             }
             println!("{target}");
         }
         ReleaseVersionCommand::PromoteStable { date } => {
             validate_date(&date)?;
-            validate_crates_io_traits_dependency(root)?;
-            let current = read_workspace_version(root)?;
+            validate_crates_io_traits_dependency(&root)?;
+            let current = read_workspace_version(&root)?;
             let stable = stable_version(&current)?;
-            validate_promotable_traits_dependency(root)?;
-            promote_changelogs(root, &current, &stable, &date)?;
-            write_workspace_version(root, &stable)?;
-            promote_traits_dependency_to_stable(root)?;
-            sync_workspace_dependency_versions(root, false)?;
+            validate_promotable_traits_dependency(&root)?;
+            promote_changelogs(&root, &current, &stable, &date)?;
+            write_workspace_version(&root, &stable)?;
+            promote_traits_dependency_to_stable(&root)?;
+            sync_workspace_dependency_versions(&root, false)?;
             println!("{stable}");
         }
     }
