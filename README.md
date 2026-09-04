@@ -230,6 +230,13 @@ cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signi
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-verification
 ```
 
+To apply the current checkout's validation policy to another candidate
+checkout, pass its path explicitly:
+
+```shell
+cargo xtask ci --candidate-root ../candidate
+```
+
 These checks do not upload anything. The package-content checks only list and
 compare modeled source-package paths; full package assembly and publication
 remain release-preparation operations.
