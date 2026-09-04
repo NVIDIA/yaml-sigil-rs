@@ -7,6 +7,9 @@ Use the project-local
 when reviewing YamlSigil specification changes, importing local spec
 artifacts, or reconciling this Rust implementation after spec updates.
 
+Follow [`xtask/AGENTS.md`](xtask/AGENTS.md) when changing the developer task
+crate or its release-command boundaries.
+
 ## Agent Documentation Standards
 
 Project-local skills exist under `.agents/skills/` and should remain
@@ -210,6 +213,8 @@ cargo xtask package-content
 cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
 cargo xtask sync-workspace-versions
+cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE]
+cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
 cargo xtask coverage
 cargo xtask coverage --open
 cargo xtask coverage-open
@@ -229,7 +234,7 @@ buf lint crates/yaml-sigil-core
 buf format crates/yaml-sigil-core --diff --exit-code
 cargo fmt --all --check
 cargo fmt --manifest-path xtask/Cargo.toml --all --check
-cargo xtask release-version check
+cargo xtask sync-workspace-versions --check
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-core
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-transcription
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signing
@@ -243,41 +248,13 @@ cargo audit
 cargo audit --file xtask/Cargo.lock
 ```
 
-To apply the validator from the current checkout to another repository
-checkout, pass its root explicitly:
-
-```shell
-cargo xtask ci --candidate-root PATH
-```
-
-The command still builds and runs the xtask from the current checkout; only
-the repository content being validated comes from `PATH`.
-
-Alternate candidate-root validation is supported only where the process
-boundary owns descendants that leave their original process group. Linux uses
-the subreaper boundary and Windows uses Job Objects. On macOS and other
-non-Linux Unix hosts, `--candidate-root` fails before candidate execution;
-ordinary `cargo xtask ci` for the trusted current checkout remains supported.
-
-After a release-path change is committed, exercise the maintained current and
-historical source harness from the exact clean checkout:
-
-```shell
-cargo +stable xtask github release-train local-validate \
-  --manifest MANIFEST \
-  --release-plz PATH \
-  --release-plz-sha256 SHA256
-```
-
-`MANIFEST` is a repository-relative, bounded JSON manifest containing the exact
-current and representative historical commit SHAs and repository name. Select
-the reviewed release-plz `0.3.160` executable through the caller-owned `PATH`
-argument and provide the SHA-256 of its exact bytes. The harness authenticates
-and stages that tool before reading `GIT_TOKEN`, stages the current Rust
-validator, attaches local branches for release-plz, checks the current and
-historical sources, and runs release-plz only with `--dry-run` and a disabled
-push URL. Supply one read-capable forge token through `GIT_TOKEN`; the harness
-removes unrelated credentials and performs no publication.
+Copied-ref CI first runs protected commit/release-path policy plus fixed-path
+actionlint, ShellCheck, rumdl, cargo-machete, and `cargo-audit` against the
+committed `xtask/Cargo.lock`. The root lockfile is intentionally absent, so the
+full workspace audit inside the final `cargo xtask ci` phase is candidate
+execution, not trusted pre-execution policy evidence. Candidate tools, Cargo
+state, targets, temporary files, and materialized source stay under fresh
+runner-temporary paths; no policy or privileged step follows candidate Rust.
 
 The static package-content stage runs
 `cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
@@ -306,10 +283,10 @@ when changing any Buf-related version or installation control.
 
 ## Coordinated Buf upgrades
 
-Publishing a new `buf-tools` or `buf-toolchain` release does not automatically
-update any YamlSigil repository. Use coordinated pull requests to update every
-applicable pin and verification surface. Do not infer one component's version
-from another component's version.
+Publishing a new `buf-tools` release does not automatically update any
+YamlSigil repository. Use coordinated pull requests to update every applicable
+pin and verification surface. Do not infer its crate version from the upstream
+Buf CLI version.
 
 The controls have distinct roles:
 
@@ -318,48 +295,29 @@ The controls have distinct roles:
   mechanically from the Buf CLI version. Update the exact pins in `Cargo.toml`
   and `xtask/Cargo.toml`, then regenerate the committed `xtask/Cargo.lock`.
   The root workspace intentionally does not commit `Cargo.lock`, so do not add
-  it merely for a Buf upgrade. If `.github/trusted-cargo/buf-tools/` remains
-  present, its package version and complete dependency graph must match the
-  selected published `buf-tools` crate so the protected path override cannot
-  change dependency resolution. Its implementation must continue to return
-  only the authenticated protected Buf executable.
-- `buf-toolchain` installs and verifies the standalone trusted Buf executable
-  before protected candidate execution. Update the protected runner's exact
-  Buf CLI version and its policy assertions in every repository that carries
-  the shared implementation. Require the installed executable to report
-  exactly the intended Buf CLI version. Confirm the published mapping between
-  the `buf-toolchain` and Buf CLI releases instead of assuming identical
-  version strings.
-- `bufbuild/buf-action` has two separate controls: its immutable Action SHA and
-  its Buf CLI `version` input. Keep every applicable ordinary and protected
-  schema-check workflow aligned with the selected CLI version. If a workflow
-  omits `version`, report that as a consistency gap; it does not inherit the
-  Rust dependency pin.
+  it merely for a Buf upgrade. CI obtains the executable only through this
+  exact crate dependency; do not add a second provider-specific installer.
 - `buf.lock` locks BSR or module dependencies, not the installed Buf CLI
-  version. Do not update it solely because the CLI, `buf-tools`, or
-  `buf-toolchain` changed.
+  version. Do not update it solely because the CLI or `buf-tools` changed.
 
 Coordinate these repository-specific surfaces:
 
 - In `yaml-sigil-rs`, update `Cargo.toml`, `xtask/Cargo.toml`,
-  `xtask/Cargo.lock`, `.github/trusted-cargo/buf-tools/` when present, the
-  ordinary and protected `bufbuild/buf-action` inputs under
-  `.github/workflows/`, the protected runner pin in
-  `.github/scripts/run-terminal-candidate.sh`, and the policy tests in
-  `.github/scripts/test_protected_pr_ci.py`.
+  `xtask/Cargo.lock`, the provider-neutral Buf checks in `xtask/src/ci.rs`, and
+  their exact command documentation. Candidate CI obtains Buf through the same
+  pinned `buf-tools` dependency.
 - In `yaml-sigil-spec`, update its ordinary and protected
   `bufbuild/buf-action` configuration, protected runner pin, and policy tests.
   It has no product `buf-tools` dependency unless its current source proves
   otherwise.
-- In `yaml-sigil-traits`, update only the shared protected-runner and
-  policy-test surfaces that remain intentionally uniform. It otherwise has no
-  independent Buf product dependency unless its current source proves
-  otherwise.
+- In `yaml-sigil-traits`, update only applicable current validation surfaces.
+  It otherwise has no independent Buf product dependency unless its current
+  source proves otherwise.
 
 For each future coordinated upgrade:
 
-- Review the selected Buf, `buf-tools`, and `buf-toolchain` releases and
-  confirm their published mapping.
+- Review the selected Buf and `buf-tools` releases and confirm their published
+  mapping.
 - Make one coordinated change that updates every applicable pin and
   verification surface.
 - Regenerate only Cargo lockfiles already committed by the affected
@@ -369,19 +327,21 @@ For each future coordinated upgrade:
   actionlint, and Markdown checks.
 - Require successful ordinary and App-owned protected CI at the exact reviewed
   heads.
-- Confirm that the protected sandbox used the intended authenticated Buf
-  binary and retained no artifacts.
+- Confirm that CI used the pinned `buf-tools` executable and retained no
+  artifacts.
 
-Install `rumdl`, `cargo-audit`, and `cargo-machete` with Cargo before running
-the wrapper:
+Install `rumdl`, exact `cargo-audit` `0.22.2`, and exact `cargo-machete`
+`0.9.2` with Cargo before running the wrapper:
 
 ```shell
-cargo install rumdl
-cargo install cargo-audit
-cargo install --locked cargo-machete --version 0.9.2
+rustup toolchain install 1.98.0 --component clippy,rustfmt
+cargo +1.98.0 install rumdl
+cargo +1.98.0 install --locked cargo-audit --version 0.22.2
+cargo +1.98.0 install --locked cargo-machete --version 0.9.2
 ```
 
-Keep the cargo-machete version aligned with hosted CI. The
+Keep the cargo-audit and cargo-machete versions aligned with hosted CI, and
+require `cargo-audit --version` to report exactly `cargo-audit 0.22.2`. The
 `--with-metadata` check resolves normal, development, and build dependency
 names across all features, but remains an unused-dependency heuristic; retain
 the all-target, all-feature Clippy and test checks as the compilation proof.
@@ -409,32 +369,48 @@ switch. Local mutation commands must take an explicit repository and bind it
 to that same table and checkout.
 
 `cargo xtask ci` and every non-`github` command must remain provider-neutral
-and credential-free. The checkout-free protected-PR reporter and controller
-remain Python so that immutable protected-main policy can run without
-compiling candidate Rust. Keep
+and credential-free. The checkout-free protected-PR reporter remains Python so
+protected default-branch policy can run without compiling candidate Rust. Keep
 `.github/scripts/check-pull-request-commits.sh` identical across the YamlSigil
 repositories. Small host-setup helpers may remain shell when moving them would
 add complexity without consolidating policy.
 
 The surviving provider helpers have deliberately narrow roles:
 
-- `protected_pr_ci.py` and `test_protected_pr_ci.py` keep protected-main
-  authorization checkout-free and test that immutable policy without compiling
-  candidate Rust.
-- `cargo_egress_proxy.py` restricts protected Cargo prefetch transport to the
-  crates.io TLS endpoints; Cargo still authenticates TLS and Cargo Deny
-  independently validates resolved sources.
-- `test-cargo-egress-topology.sh` is a Linux-only, test-only Docker check of
-  that topology and its exact cleanup. It must not execute candidate or release
-  code.
+- `report_required_ci.py` and its focused fixture tests bind one terminal
+  copied-ref run and the exact verified signer, raw author/committer, and
+  author DCO identities before the scoped App creates `Required CI`.
+- `bind-candidate-pr.py` anonymously binds the open pull request, current main,
+  copied ref, exact basic verification inventory, and optional canonical
+  release branch before source materialization.
+- `materialize-candidate.sh` and its tests perform anonymous exact-head
+  materialization while rejecting filters, ancestor Cargo configuration, and
+  candidate-selected submodule behavior.
+- `install-actionlint.sh` stages the checksum-verified Linux actionlint binary
+  before candidate materialization, so no Action runs after candidate source
+  exists.
+- `check-trusted-tool-pins.sh` admits only the exact reviewed Rust baselines
+  and rejects any workflow `tool:` scalar that names a floating or unexpected
+  cargo-audit version without modeling workflow topology.
 - `check-pull-request-commits.sh` enforces the shared exact-range, linear
   history, and DCO policy across all three YamlSigil repositories.
+- `check-release-pull-request.sh` adds the canonical branch, single-commit, and
+  release-file boundary for explicit version changes.
+- `attach-release-source.sh` binds an already-qualified source only to local
+  main refs immediately before the protected release-plz publication call; it
+  never updates a remote.
+- `rebind-release-policy.sh` anonymously confirms the post-approval policy
+  checkout is still exact live `main` and the source remains on its lineage
+  immediately before the publisher or finalizer receives release authority.
 - `remove-preinstalled-aws-tap.sh` performs one bounded macOS host cleanup
   before Rust setup.
 
-Release intent, proposal mutation, publication authorization, baseline
-selection, proposal generation, and release-object reconciliation belong in
-the Rust commands described above, not in additional Python or shell helpers.
+Release qualification, same-source recovery, and deterministic release-object
+finalization belong in the narrow `cargo xtask github release` commands, not in
+additional Python or shell helpers. Local version preparation and content
+validation remain provider-neutral under `cargo xtask release`. The exact
+release-plz dry run is a separate maintainer-operated acceptance step because
+release-plz requires read-only forge association context.
 
 Validate shell scripts under `.github/scripts` with Shuck before landing
 changes. Install it from the `shuck-cli` crate and run it from the repository
@@ -454,16 +430,13 @@ shellcheck .github/scripts/check-pull-request-commits.sh
 Hosted CI runs its pinned ShellCheck Action for these provider-specific scripts.
 Keep this validation outside `cargo xtask ci`.
 
-Hosted CI runs the provider-neutral Rust and Cargo portion of this sequence on
-NVIDIA's `linux-amd64-cpu8` runner and GitHub's moving `macos-latest` and
-`windows-latest` labels. Every matrix leg checks formatting, synchronized
-release versions, package contents, Clippy, tests, unused dependencies, and
-both dependency audits against that platform's resolved dependency graph.
-Linux commit-policy, Markdown, Protobuf, provider-workflow, and aggregation
-jobs run on `linux-amd64-cpu4`. A separate GitHub-hosted Linux, macOS, and
-Windows matrix runs the protected checkout verifier regressions; its Windows
-leg creates an actual directory junction and a short-name-shaped path. The
-local command does not launch other operating systems.
+Hosted CI pins its authoritative stable baseline to Rust `1.98.0` and runs an
+independent Rust `1.95.0` lane on NVIDIA's `linux-amd64-cpu8` runner.
+GitHub-hosted macOS and Windows jobs are advisory. Explicitly admitted copied
+refs run the same provider-neutral source checks without secrets, OIDC,
+protected environments, cache saves, or retained artifacts. Only
+`Candidate CI (Linux)` feeds the checkout-free App reporter;
+advisory conclusions never affect `Required CI`.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

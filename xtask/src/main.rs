@@ -6,14 +6,11 @@
 mod bounded_process;
 mod cargo_metadata_output;
 mod ci;
-mod crate_archive;
 mod github;
 mod package_content;
 mod package_content_policy;
 mod release;
-mod release_baseline;
 mod release_policy;
-mod release_proposal;
 mod safe_file;
 mod spec_update;
 mod versions;
@@ -46,11 +43,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Task {
     /// Run the repository's provider-neutral non-release validation sequence.
-    Ci {
-        /// Validate another repository checkout with this xtask implementation.
-        #[arg(long, value_name = "PATH")]
-        candidate_root: Option<PathBuf>,
-    },
+    Ci,
     /// Compare modeled source-package paths with committed exact inventories.
     PackageContent,
     /// Record the E2E test with samply into `target/profile/profile.json`.
@@ -81,8 +74,6 @@ enum Task {
         #[arg(long)]
         check: bool,
     },
-    /// Manage provider-neutral release version transactions.
-    ReleaseVersion(versions::ReleaseVersionArgs),
     /// Run provider-neutral release preparation and verification.
     Release(release::ReleaseArgs),
     /// Run bounded GitHub release-automation operations.
@@ -110,12 +101,7 @@ fn execute() -> Result<ExitCode> {
     let root = workspace_root();
     let cli = Cli::parse();
     match cli.command {
-        Task::Ci { candidate_root } => {
-            require_alternate_candidate_support(candidate_root.is_some())
-                .map_err(anyhow::Error::msg)?;
-            let candidate = resolve_candidate_root(candidate_root.as_deref().unwrap_or(&root))?;
-            ci::run(&candidate)?;
-        }
+        Task::Ci => ci::run(&root)?,
         Task::PackageContent => {
             package_content::run(&root)?;
         }
@@ -133,21 +119,10 @@ fn execute() -> Result<ExitCode> {
         Task::SyncWorkspaceVersions { check } => {
             versions::sync_workspace_dependency_versions(&root, check)?;
         }
-        Task::ReleaseVersion(args) => versions::release_version(&root, args)?,
-        Task::Release(args) => {
-            return release::release(&root, args)
-                .map(|outcome| ExitCode::from(release_exit_code(outcome)));
-        }
+        Task::Release(args) => release::run(&root, args)?,
         Task::Github(args) => github::run(&root, args).map_err(anyhow::Error::msg)?,
     }
     Ok(ExitCode::SUCCESS)
-}
-
-fn release_exit_code(outcome: release::Outcome) -> u8 {
-    match outcome {
-        release::Outcome::Success => 0,
-        release::Outcome::RegistryUnavailable => 3,
-    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -155,23 +130,6 @@ fn workspace_root() -> PathBuf {
         .parent()
         .expect("xtask manifest lives in xtask/")
         .to_path_buf()
-}
-
-fn resolve_candidate_root(root: &Path) -> Result<PathBuf> {
-    let candidate = root
-        .canonicalize()
-        .with_context(|| format!("resolve candidate root {}", root.display()))?;
-    if !candidate.join("Cargo.toml").is_file() {
-        bail!("candidate root {} lacks Cargo.toml", candidate.display());
-    }
-    Ok(candidate)
-}
-
-fn require_alternate_candidate_support(explicit: bool) -> Result<(), &'static str> {
-    if explicit && cfg!(all(unix, not(target_os = "linux"))) {
-        return Err("alternate --candidate-root validation is unsupported on non-Linux Unix hosts");
-    }
-    Ok(())
 }
 
 fn run(mut cmd: Command) -> Result<ExitStatus> {
@@ -438,6 +396,7 @@ fn require_tool(program: &str, install_command: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     const AGENT_GUIDANCE: &str = include_str!("../../AGENTS.md");
@@ -455,23 +414,8 @@ mod tests {
     }
 
     #[test]
-    fn ci_candidate_root_is_repository_scoped_and_platform_bounded() {
-        let root = workspace_root();
-        assert_eq!(
-            resolve_candidate_root(&root).unwrap(),
-            root.canonicalize().unwrap()
-        );
-        assert!(resolve_candidate_root(&root.join("missing-candidate")).is_err());
-        let support = require_alternate_candidate_support(true);
-        if cfg!(all(unix, not(target_os = "linux"))) {
-            assert_eq!(
-                support.unwrap_err(),
-                "alternate --candidate-root validation is unsupported on non-Linux Unix hosts"
-            );
-        } else {
-            assert!(support.is_ok());
-        }
-        assert!(require_alternate_candidate_support(false).is_ok());
+    fn clap_command_is_valid() {
+        Cli::command().debug_assert();
     }
 
     #[test]
@@ -491,12 +435,6 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains(CARGO_LLVM_COV_INSTALL));
-    }
-
-    #[test]
-    fn registry_unavailable_retains_the_ordered_wait_status() {
-        assert_eq!(release_exit_code(release::Outcome::Success), 0);
-        assert_eq!(release_exit_code(release::Outcome::RegistryUnavailable), 3);
     }
 
     #[test]
