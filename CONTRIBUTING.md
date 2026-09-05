@@ -29,31 +29,18 @@ documentation that you cannot defend without the agent open.
 
 Use an accurate Conventional Commit type and breaking-change marker when the
 change itself establishes its release impact. Do not edit workspace or crate
-versions on an ordinary feature or fix branch. The release-proposal workflow
-calculates and commits versions on its dedicated `release-plz-*` branch.
-
-When the required `major`, `minor`, or `patch` advance is not discoverable from
-the commits, state the intended impact in the contribution pull request. A
-repository writer can dispatch the `Release proposal` workflow with
-`next-candidate` and the matching bump selection. The workflow uses that
-dispatch input directly; pull-request text is not release authority. A
-background event may create one default `patch` proposal when none exists, but
-it never revises an existing proposal. Incorporating later changes or choosing
-a different version line requires another explicit writer dispatch.
-
-When the release-proposal GitHub App is unavailable or cannot safely update its
-owned branch, repository writers use the permanent manual release-proposal
-fallback in `RELEASING.md`. Contributors still express version intent here and
-do not edit versions on their change branches.
+versions on an ordinary feature or fix branch. State release impact in the pull
+request when the commits do not make it clear. Maintainers select the exact
+stable or prerelease version later and prepare the dedicated
+`release-plz-manual-<version>` pull request described in `RELEASING.md`.
 
 All four published crates share `[workspace.package].version`. Never change a
-member version independently. A release-version change is complete only after
-running both commands and committing every resulting tracked change in the
-same release pull request:
+member version independently. A version change belongs only in the canonical
+single-commit release pull request and must pass both checks:
 
 ```shell
-cargo xtask sync-workspace-versions
 cargo xtask sync-workspace-versions --check
+cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
 ```
 
 Official RC and stable publication rejects an unsynchronized or dirty source
@@ -61,72 +48,50 @@ tree. Pull requests do not publish preview versions.
 
 ## Pull-request CI
 
-Pull-request CI is orchestrated only by workflow and policy loaded from current
-protected `main`. A repository writer must review the exact latest pull-request
-head and comment `/ok to test <head-sha>`. Only that exact lowercase,
-40-character SHA command starts candidate validation; every new head requires
-a new review and command.
+The repository uses `copy-pr-bot` for explicit contributor admission. A
+repository writer reviews the exact latest pull-request head and comments:
 
-Changes to workflow policy, protected validation tools, manifests, lockfiles,
-toolchain or dependency policy, release automation, `xtask`, Buf
-configuration, or other paths classified as security-sensitive use a different
-boundary. Each commit must preserve the original human author while a current
-repository writer becomes the verified committer, and its message must contain
-exact DCO trailers for both identities. For a fork, maintainer edits must remain
-enabled on the original pull request. After reviewing that adopted history, a
-writer comments `/ok to test-and-adopt <head-sha>`. Ordinary changes must not
-use the adoption command, and sensitive changes must not use the ordinary
-command.
+```text
+/ok to test <full-40-character-head-sha>
+```
 
-Record the authorization comment ID and time. GitHub event delivery may take
-up to 20 minutes, so the absence of a run or acknowledgement during that
-window is not a reason to repeat the command. After 25 minutes, inspect the
-Actions run list and the original comment, and distinguish a queued run from a
-missing event before posting at most one replacement command for the still
-current head.
+The bot copies only that authorized head to `pull-request/<number>`. Draft and
+ready pull requests do not synchronize automatically. Every new head requires
+a new review and exact-SHA authorization; a stale authorization never runs the
+new head.
 
-An authorization is invalid after any head, base, protected-policy, comment
-body or timestamp, repository identity, or writer-permission change. Never
-accept a late acknowledgement or job result for an invalidated binding.
+Contributor admission has two deliberate human steps. First, a writer posts
+the exact-head command above. After the authoritative candidate lanes finish,
+the configured `ddurst-nvidia` reviewer approves that run's exact
+`protected-automation` reporter deployment. The reporter then repeats every
+live binding before the App writes `Required CI`. This per-deployment approval
+does not authorize a release finalizer or a different candidate head.
 
-The protected parent uses a contents-read token only to fetch and verify the
-exact authorized head. Candidate-controlled processes then run as a
-purpose-created disposable operating-system identity with read-only source and
-tool inputs, a minimal environment, and no repository credential, secret,
-OIDC, write permission, cache save, or retained artifact. The runner-command
-directory is inaccessible to that identity, no trusted Action or post-step
-follows candidate execution, and the job fails unless every candidate process
-is quiescent and the identity is removed.
+Candidate setup completes before source materialization. The checkout uses
+anonymous Git transport, rejects requested Git filters, disables Git LFS, and
+ignores candidate-selected submodule configuration. Candidate execution
+receives no repository credential, secret, OIDC permission, protected
+environment, trusted cache-save path, or retained artifact. No privileged
+post-step consumes candidate-writable state.
 
 Every human-authored pull-request commit must form a linear history from
 current `main`, be GitHub Verified, and contain the exact DCO identity required
-for direct or adopted history. The contributor's fork branch remains the
-pull-request head; a writer's command authorizes testing only and does not
+for that author. A writer's command authorizes testing only and does not
 authorize integration.
 
 Before final authorization, fetch current upstream `main`, rebase the original
 contributor branch with `git rebase --gpg-sign <upstream>/main`, and push the
 rewritten branch back to the same fork with `--force-with-lease`. Confirm every
 rewritten commit is GitHub Verified and DCO-compliant, then request testing for
-the new exact SHA. Do not copy the contribution onto a repository-owned branch
-merely to run CI.
+the new exact SHA.
 
-Changes to the candidate validation implementation or its protected tool and
-workflow configuration also run the candidate's exact `cargo xtask ci` on
-GitHub-hosted Linux, macOS, and Windows workers. This isolated supplement does
-not replace the protected-main validator. A maintainer reviews the completed
-results and separately decides whether to integrate the pull request.
-
-Protected checkout verifier regressions also run on those three host
-platforms. The Windows leg uses a real directory junction and a
-short-name-shaped path to prove fail-closed handling without retaining
-artifacts.
-
-Repository Actions execution protection is an additional platform control,
-not the source of `/ok to test` authority. When that policy is in **Evaluate**
-mode, its warnings are telemetry only: they neither allow nor block a workflow.
-The protected `issue_comment` controller and its exact-SHA reauthorization
-remain the operational boundary.
+The authoritative candidate result is `Candidate CI (Linux)` on the NVIDIA
+runner. A separate protected, checkout-free reporter binds the workflow ID,
+run and attempt, repository, open pull request, copied ref, current head,
+authoritative job conclusion, and zero-artifact result before the
+repository-scoped App creates `Required CI` on that exact head. Stable macOS
+and Windows jobs are advisory and cannot influence the required verdict. The
+independent Rust `1.95.0` Linux lane protects the documented minimum version.
 
 #### Signing Off Your Work
 

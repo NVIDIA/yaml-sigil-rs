@@ -1,6 +1,7 @@
 [workspace]
 release = false
 release_always = false
+pr_branch_prefix = "release-plz-manual-"
 changelog_update = true
 # release-plz publishes source crates only. The protected App finalizer owns
 # annotated tags and immutable, zero-asset GitHub Releases.

@@ -206,13 +206,16 @@ divergences.
 Release preparation publishes only `yaml-sigil-core`,
 `yaml-sigil-transcription`, `yaml-sigil-signing`, and
 `yaml-sigil-verification` to crates.io. The workspace default, conformance,
-test-key, and xtask packages remain unpublished.
+test-key, and xtask packages remain unpublished. Publication creates no
+executable artifacts or GitHub Release assets.
 
-When preparing a workspace version change, align internal dependency versions
-with:
+Maintainers prepare one local, signed release pull request for an explicitly
+selected version. See [`RELEASING.md`](RELEASING.md) for the complete
+procedure. The typed preparation and non-publishing validation commands are:
 
 ```shell
-cargo xtask sync-workspace-versions
+cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE]
+cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
 ```
 
 ## Developer validation
