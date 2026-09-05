@@ -480,17 +480,7 @@ fn classify_release_pull_request(
     let associated: Vec<AssociatedPullRequest> = github.get(&format!(
         "repos/{REPOSITORY}/commits/{source_sha}/pulls?per_page=100"
     ))?;
-    let matching = associated
-        .iter()
-        .filter(|pull| {
-            pull.state == "closed"
-                && pull.merged_at.is_some()
-                && pull.merge_commit_sha.as_deref() == Some(source_sha)
-        })
-        .collect::<Vec<_>>();
-    if associated.len() >= 100 {
-        return Err("source pull-request association inventory is not bounded".to_string());
-    }
+    let matching = select_merged_associations(&associated)?;
     let mut pulls = Vec::with_capacity(matching.len());
     for item in matching {
         let pull: PullRequest = github.get(&format!("repos/{REPOSITORY}/pulls/{}", item.number))?;
@@ -519,18 +509,7 @@ fn classify_release_pull_request(
     }
 
     let pull = &pulls[release_indexes[0]];
-    let expected_branch = format!("{MANUAL_BRANCH_PREFIX}{version}");
-    if pull.state != "closed"
-        || pull.merged_at.is_none()
-        || pull.merge_commit_sha.as_deref() != Some(source_sha)
-        || pull.base.reference != "main"
-        || pull.base.repo.full_name != REPOSITORY
-        || pull.base.sha != source.parents[0].sha
-        || pull.head.reference != expected_branch
-        || pull.head.repo.full_name != REPOSITORY
-        || pull.changed_files == 0
-        || pull.changed_files > 9
-    {
+    if !canonical_release_pull(pull, version, &source.parents[0].sha) {
         return Err("merged release pull request differs from canonical policy".to_string());
     }
 
@@ -541,7 +520,7 @@ fn classify_release_pull_request(
     if commits.len() != 1 {
         return Err("release pull request must contain exactly one reviewed commit".to_string());
     }
-    let signature = release_head_signature(github, pull.number, &pull.head.sha)?;
+    let signature = release_head_signature(github, pull.number, &pull.head.sha, source_sha)?;
     require_reviewed_release_head(&commits[0], &signature, &pull.head.sha, &pull.base.sha)?;
     if commits[0].commit.tree.sha != source.commit.tree.sha {
         return Err("release squash tree differs from the reviewed release tree".to_string());
@@ -553,6 +532,33 @@ fn classify_release_pull_request(
     ))?;
     validate_release_files(&files, pull.changed_files)?;
     Ok(true)
+}
+
+fn select_merged_associations(
+    associated: &[AssociatedPullRequest],
+) -> Result<Vec<&AssociatedPullRequest>, String> {
+    if associated.len() >= 100 {
+        return Err("source pull-request association inventory is not bounded".to_string());
+    }
+    // The commit-scoped endpoint binds this response to the requested source;
+    // current REST responses no longer carry a duplicate merge SHA field.
+    Ok(associated
+        .iter()
+        .filter(|pull| pull.state == "closed" && pull.merged_at.is_some())
+        .collect())
+}
+
+fn canonical_release_pull(pull: &PullRequest, version: &Version, source_parent: &str) -> bool {
+    let expected_branch = format!("{MANUAL_BRANCH_PREFIX}{version}");
+    pull.state == "closed"
+        && pull.merged_at.is_some()
+        && pull.base.reference == "main"
+        && pull.base.repo.full_name == REPOSITORY
+        && pull.base.sha == source_parent
+        && pull.head.reference == expected_branch
+        && pull.head.repo.full_name == REPOSITORY
+        && pull.changed_files > 0
+        && pull.changed_files <= 9
 }
 
 fn validate_release_files(files: &[PullFile], changed_files: u64) -> Result<(), String> {
@@ -651,15 +657,18 @@ fn release_head_signature(
     github: &mut impl Transport,
     pull_number: u64,
     head_sha: &str,
+    merge_sha: &str,
 ) -> Result<CommitSignature, String> {
     if pull_number == 0 || pull_number > i32::MAX as u64 {
         return Err("release pull-request number is outside the GraphQL bound".to_string());
     }
     require_sha(head_sha, "release pull-request signature head SHA")?;
+    require_sha(merge_sha, "release pull-request merge SHA")?;
     let response: SignatureResponse = github.graphql(&json!({
         "query": concat!(
             "query($owner:String!,$name:String!,$number:Int!){",
             "repository(owner:$owner,name:$name){pullRequest(number:$number){",
+            "mergeCommit{oid}",
             "commits(first:2){totalCount nodes{commit{oid signature{",
             "__typename email isValid state wasSignedByGitHub ",
             "signer{databaseId login __typename}}}}pageInfo{hasNextPage}}}}}"
@@ -670,22 +679,26 @@ fn release_head_signature(
             "number": pull_number,
         },
     }))?;
-    validate_signature_response(response, head_sha)
+    validate_signature_response(response, head_sha, merge_sha)
 }
 
 fn validate_signature_response(
     response: SignatureResponse,
     head_sha: &str,
+    merge_sha: &str,
 ) -> Result<CommitSignature, String> {
     if response.errors.is_some() {
         return Err("GitHub GraphQL signature query returned errors".to_string());
     }
-    let connection = response
+    let pull = response
         .data
         .and_then(|data| data.repository)
         .and_then(|repository| repository.pull_request)
-        .map(|pull| pull.commits)
         .ok_or_else(|| "GitHub GraphQL returned no release commit inventory".to_string())?;
+    if pull.merge_commit.as_ref().map(|commit| commit.oid.as_str()) != Some(merge_sha) {
+        return Err("release pull request merge commit differs".to_string());
+    }
+    let connection = pull.commits;
     if connection.total_count != 1
         || connection.nodes.len() != 1
         || connection.page_info.has_next_page
@@ -1565,7 +1578,14 @@ struct SignatureRepository {
 
 #[derive(Deserialize)]
 struct SignaturePullRequest {
+    #[serde(rename = "mergeCommit")]
+    merge_commit: Option<SignatureMergeCommit>,
     commits: SignatureConnection,
+}
+
+#[derive(Deserialize)]
+struct SignatureMergeCommit {
+    oid: String,
 }
 
 #[derive(Deserialize)]
@@ -1621,7 +1641,6 @@ struct PullRequest {
     number: u64,
     state: String,
     merged_at: Option<String>,
-    merge_commit_sha: Option<String>,
     changed_files: u64,
     base: PullRef,
     head: PullRef,
@@ -1632,7 +1651,6 @@ struct AssociatedPullRequest {
     number: u64,
     state: String,
     merged_at: Option<String>,
-    merge_commit_sha: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2043,11 +2061,18 @@ mod tests {
         }
     }
 
-    fn signature_response(oid: &str, signature: Option<CommitSignature>) -> SignatureResponse {
+    fn signature_response(
+        oid: &str,
+        merge_oid: &str,
+        signature: Option<CommitSignature>,
+    ) -> SignatureResponse {
         SignatureResponse {
             data: Some(SignatureData {
                 repository: Some(SignatureRepository {
                     pull_request: Some(SignaturePullRequest {
+                        merge_commit: Some(SignatureMergeCommit {
+                            oid: merge_oid.to_string(),
+                        }),
                         commits: SignatureConnection {
                             total_count: 1,
                             nodes: vec![SignatureNode {
@@ -2104,6 +2129,55 @@ mod tests {
             }
         );
         assert!(ordinary_decision(Operation::Recover).is_err());
+    }
+
+    #[test]
+    fn versioned_pull_responses_bind_without_removed_merge_sha_field() {
+        let association = || {
+            serde_json::from_value::<AssociatedPullRequest>(json!({
+                "number": 90,
+                "state": "closed",
+                "merged_at": "2026-09-05T00:00:00Z",
+            }))
+            .unwrap()
+        };
+        let observed = association();
+        assert_eq!(
+            select_merged_associations(&[observed]).unwrap()[0].number,
+            90
+        );
+        let oversized = (0..100).map(|_| association()).collect::<Vec<_>>();
+        assert!(select_merged_associations(&oversized).is_err());
+
+        let unmerged: AssociatedPullRequest = serde_json::from_value(json!({
+            "number": 90,
+            "state": "open",
+            "merged_at": null,
+        }))
+        .unwrap();
+        assert!(select_merged_associations(&[unmerged]).unwrap().is_empty());
+
+        let mut pull: PullRequest = serde_json::from_value(json!({
+            "number": 90,
+            "state": "closed",
+            "merged_at": "2026-09-05T00:00:00Z",
+            "changed_files": 9,
+            "base": {
+                "ref": "main",
+                "sha": TEST_POLICY_SHA,
+                "repo": {"full_name": REPOSITORY},
+            },
+            "head": {
+                "ref": "release-plz-manual-0.5.0-rc.2",
+                "sha": TEST_SOURCE_SHA,
+                "repo": {"full_name": REPOSITORY},
+            },
+        }))
+        .unwrap();
+        let version = Version::parse("0.5.0-rc.2").unwrap();
+        assert!(canonical_release_pull(&pull, &version, TEST_POLICY_SHA));
+        pull.base.reference = "develop".to_string();
+        assert!(!canonical_release_pull(&pull, &version, TEST_POLICY_SHA));
     }
 
     #[test]
@@ -2648,7 +2722,8 @@ mod tests {
     #[test]
     fn release_signature_inventory_is_exact_and_bounded() {
         let exact = validate_signature_response(
-            signature_response(TEST_SOURCE_SHA, Some(release_signature())),
+            signature_response(TEST_SOURCE_SHA, TEST_SOURCE_SHA, Some(release_signature())),
+            TEST_SOURCE_SHA,
             TEST_SOURCE_SHA,
         )
         .unwrap();
@@ -2656,17 +2731,31 @@ mod tests {
 
         assert!(
             validate_signature_response(
-                signature_response(TEST_DRIFT_SHA, Some(release_signature())),
+                signature_response(TEST_DRIFT_SHA, TEST_SOURCE_SHA, Some(release_signature()),),
+                TEST_SOURCE_SHA,
                 TEST_SOURCE_SHA,
             )
             .is_err()
         );
         assert!(
-            validate_signature_response(signature_response(TEST_SOURCE_SHA, None), TEST_SOURCE_SHA)
-                .is_err()
+            validate_signature_response(
+                signature_response(TEST_SOURCE_SHA, TEST_SOURCE_SHA, None),
+                TEST_SOURCE_SHA,
+                TEST_SOURCE_SHA,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_signature_response(
+                signature_response(TEST_SOURCE_SHA, TEST_DRIFT_SHA, Some(release_signature()),),
+                TEST_SOURCE_SHA,
+                TEST_SOURCE_SHA,
+            )
+            .is_err()
         );
 
-        let mut ambiguous = signature_response(TEST_SOURCE_SHA, Some(release_signature()));
+        let mut ambiguous =
+            signature_response(TEST_SOURCE_SHA, TEST_SOURCE_SHA, Some(release_signature()));
         ambiguous
             .data
             .as_mut()
@@ -2680,11 +2769,12 @@ mod tests {
             .commits
             .page_info
             .has_next_page = true;
-        assert!(validate_signature_response(ambiguous, TEST_SOURCE_SHA).is_err());
+        assert!(validate_signature_response(ambiguous, TEST_SOURCE_SHA, TEST_SOURCE_SHA).is_err());
 
-        let mut errors = signature_response(TEST_SOURCE_SHA, Some(release_signature()));
+        let mut errors =
+            signature_response(TEST_SOURCE_SHA, TEST_SOURCE_SHA, Some(release_signature()));
         errors.errors = Some(json!([{"message": "partial"}]));
-        assert!(validate_signature_response(errors, TEST_SOURCE_SHA).is_err());
+        assert!(validate_signature_response(errors, TEST_SOURCE_SHA, TEST_SOURCE_SHA).is_err());
     }
 
     #[test]
