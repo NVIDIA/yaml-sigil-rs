@@ -3,7 +3,7 @@
 
 //! Provider-neutral workspace version and dependency consistency checks.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -124,19 +124,7 @@ fn validate_metadata(
         bail!("Cargo metadata selected an unexpected workspace root");
     }
 
-    let mut publishable = Vec::new();
-    for package in metadata
-        .packages
-        .iter()
-        .filter(|package| package.source.is_none())
-    {
-        if publishes_to_crates_io(package.publish.as_deref()).map_err(anyhow::Error::msg)? {
-            publishable.push(package);
-        }
-    }
-    if publishable.len() != RUST_POLICY.packages.len() {
-        bail!("workspace must contain exactly four crates.io release packages");
-    }
+    let publishable = ordered_publishable_packages(metadata)?;
     for (package, policy) in publishable.iter().zip(RUST_POLICY.packages) {
         validate_package(&expected_root, package, policy.package, expected)?;
     }
@@ -146,6 +134,40 @@ fn validate_metadata(
         validate_resolved_traits(metadata, &publishable)?;
     }
     Ok(())
+}
+
+fn ordered_publishable_packages(metadata: &Metadata) -> Result<Vec<&Package>> {
+    let mut packages_by_name = BTreeMap::new();
+    for package in metadata
+        .packages
+        .iter()
+        .filter(|package| package.source.is_none())
+    {
+        if !publishes_to_crates_io(package.publish.as_deref()).map_err(anyhow::Error::msg)? {
+            continue;
+        }
+        let name = package.name.as_ref();
+        if !RUST_POLICY
+            .packages
+            .iter()
+            .any(|policy| policy.package == name)
+        {
+            bail!("unexpected crates.io release package {name}");
+        }
+        if packages_by_name.insert(name, package).is_some() {
+            bail!("duplicate crates.io release package {name}");
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(RUST_POLICY.packages.len());
+    for policy in RUST_POLICY.packages {
+        let package = packages_by_name
+            .remove(policy.package)
+            .ok_or_else(|| anyhow!("missing crates.io release package {}", policy.package))?;
+        ordered.push(package);
+    }
+    debug_assert!(packages_by_name.is_empty());
+    Ok(ordered)
 }
 
 fn cargo_metadata(root: &Path, with_dependencies: bool) -> Result<Metadata> {
@@ -381,7 +403,7 @@ mod tests {
     use super::*;
     use crate::cargo_metadata_output::{parse_bounded, test_support as fixture};
 
-    fn metadata(root: &Path, version: &str, core_requirement: &str) -> Metadata {
+    fn metadata_document(root: &Path, version: &str, core_requirement: &str) -> serde_json::Value {
         let registry = CRATES_IO_SOURCE;
         let traits_dependency = || {
             fixture::dependency(
@@ -456,8 +478,12 @@ mod tests {
                 &root.join("registry/yaml-sigil-traits/src/lib.rs"),
             )],
         ));
+        fixture::metadata(root, packages)
+    }
+
+    fn metadata(root: &Path, version: &str, core_requirement: &str) -> Metadata {
         parse_bounded(
-            &fixture::encoded(&fixture::metadata(root, packages)),
+            &fixture::encoded(&metadata_document(root, version, core_requirement)),
             "invalid release fixture",
         )
         .unwrap()
@@ -494,6 +520,90 @@ mod tests {
         let version = Version::parse("0.5.0-rc.2").unwrap();
         let metadata = metadata(&root, version.to_string().as_str(), "^0.5.0-rc.2");
         validate_metadata(&root, &metadata, &version, true).unwrap();
+    }
+
+    #[test]
+    fn four_crate_validation_accepts_permuted_metadata_package_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let version = Version::parse("0.5.0-rc.2").unwrap();
+        let mut metadata = metadata(&root, version.to_string().as_str(), "^0.5.0-rc.2");
+        let transcription = metadata
+            .packages
+            .iter()
+            .position(|package| package.name == "yaml-sigil-transcription")
+            .unwrap();
+        let signing = metadata
+            .packages
+            .iter()
+            .position(|package| package.name == "yaml-sigil-signing")
+            .unwrap();
+        metadata.packages.swap(transcription, signing);
+
+        validate_metadata(&root, &metadata, &version, true).unwrap();
+    }
+
+    #[test]
+    fn four_crate_validation_rejects_missing_extra_or_duplicate_packages() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let version = Version::parse("0.5.0-rc.2").unwrap();
+
+        let mut missing = metadata(&root, version.to_string().as_str(), "^0.5.0-rc.2");
+        missing
+            .packages
+            .retain(|package| package.name != "yaml-sigil-signing");
+        let error = validate_metadata(&root, &missing, &version, true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("missing crates.io release package yaml-sigil-signing")
+        );
+
+        let mut extra_document =
+            metadata_document(&root, version.to_string().as_str(), "^0.5.0-rc.2");
+        extra_document["packages"]
+            .as_array_mut()
+            .unwrap()
+            .push(fixture::package(
+                "yaml-sigil-extra",
+                version.to_string().as_str(),
+                None,
+                &root.join("crates/yaml-sigil-extra/Cargo.toml"),
+                Some(&["crates-io"]),
+                Vec::new(),
+                vec![fixture::target(
+                    "yaml-sigil-extra",
+                    "lib",
+                    &root.join("crates/yaml-sigil-extra/src/lib.rs"),
+                )],
+            ));
+        let extra = parse_bounded(
+            &fixture::encoded(&extra_document),
+            "invalid release fixture",
+        )
+        .unwrap();
+        let error = validate_metadata(&root, &extra, &version, true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unexpected crates.io release package yaml-sigil-extra")
+        );
+
+        let mut duplicate = metadata(&root, version.to_string().as_str(), "^0.5.0-rc.2");
+        let signing = duplicate
+            .packages
+            .iter()
+            .find(|package| package.name == "yaml-sigil-signing")
+            .unwrap()
+            .clone();
+        duplicate.packages.push(signing);
+        let error = validate_metadata(&root, &duplicate, &version, true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate crates.io release package yaml-sigil-signing")
+        );
     }
 
     #[test]
@@ -540,5 +650,33 @@ mod tests {
         let expected = Version::parse("0.5.0-rc.2").unwrap();
         let metadata = metadata(&root, "0.5.0-rc.3", "^0.5.0-rc.3");
         assert!(validate_metadata(&root, &metadata, &expected, true).is_err());
+    }
+
+    #[test]
+    fn four_crate_validation_rejects_wrong_manifest_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let version = Version::parse("0.5.0-rc.2").unwrap();
+        let mut document = metadata_document(&root, version.to_string().as_str(), "^0.5.0-rc.2");
+        let signing = document["packages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|package| package["name"] == "yaml-sigil-signing")
+            .unwrap();
+        signing["manifest_path"] = serde_json::Value::String(
+            root.join("unexpected/yaml-sigil-signing/Cargo.toml")
+                .display()
+                .to_string(),
+        );
+        let metadata =
+            parse_bounded(&fixture::encoded(&document), "invalid release fixture").unwrap();
+
+        let error = validate_metadata(&root, &metadata, &version, true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("has an unexpected manifest path")
+        );
     }
 }
