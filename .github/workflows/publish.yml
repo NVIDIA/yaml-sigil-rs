@@ -245,6 +245,9 @@ jobs:
           ${{ steps.recheck-auto.outputs.publish == 'true' ||
               steps.recheck-recover.outputs.publish == 'true' }}
         env:
+          # release-plz resolves the explicit Cargo publish registry by name.
+          CARGO_REGISTRIES_CRATES_IO_INDEX: sparse+https://index.crates.io/
+          CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
         run: |
           # Re-read anonymous live main as the last policy operation before the
