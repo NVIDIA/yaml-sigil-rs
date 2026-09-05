@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs;
-use std::path::Path;
+use std::io::ErrorKind;
+use std::path::{Component, Path};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -157,6 +158,7 @@ fn copy_file(source_root: &Path, source_rel: &str, dest_root: &Path, dest_rel: &
     }
 
     let dest = dest_root.join(dest_rel);
+    checked_destination(dest_root, &dest)?;
     fs::create_dir_all(
         dest.parent()
             .with_context(|| format!("derive parent for {}", dest.display()))?,
@@ -171,13 +173,61 @@ fn mirror_fixtures(checkout: &Path, root: &Path) -> Result<()> {
     let source = checkout.join("conformance");
     let dest = root.join("crates/yaml-sigil-conformance/fixtures");
 
+    checked_destination(root, &dest)?;
     if dest.exists() {
         fs::remove_dir_all(&dest).with_context(|| format!("remove {}", dest.display()))?;
     }
     fs::create_dir_all(&dest).with_context(|| format!("create {}", dest.display()))?;
 
     for fixture_dir in FIXTURE_DIRS {
-        copy_tree(checkout, &source.join(fixture_dir), &dest.join(fixture_dir))?;
+        copy_tree(
+            checkout,
+            &source.join(fixture_dir),
+            root,
+            &dest.join(fixture_dir),
+        )?;
+    }
+    Ok(())
+}
+
+fn checked_destination(root: &Path, dest: &Path) -> Result<()> {
+    let canonical_root = fs::canonicalize(root)
+        .with_context(|| format!("resolve destination root {}", root.display()))?;
+    let relative = dest.strip_prefix(root).with_context(|| {
+        format!(
+            "destination {} is outside root {}",
+            dest.display(),
+            root.display()
+        )
+    })?;
+    let mut current = canonical_root.clone();
+
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            bail!("destination is not a normalized path: {}", dest.display());
+        };
+        current.push(component);
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => break,
+            Err(error) => return Err(error).with_context(|| format!("stat {}", current.display())),
+        };
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "refusing to modify symlinked destination component {}",
+                current.display()
+            );
+        }
+
+        let canonical_current = fs::canonicalize(&current)
+            .with_context(|| format!("resolve destination {}", current.display()))?;
+        if !canonical_current.starts_with(&canonical_root) {
+            bail!(
+                "refusing to modify {} resolved outside destination root {}",
+                current.display(),
+                root.display()
+            );
+        }
     }
     Ok(())
 }
@@ -204,7 +254,8 @@ fn checked_source_metadata(source_root: &Path, source: &Path) -> Result<fs::Meta
     Ok(metadata)
 }
 
-fn copy_tree(source_root: &Path, source: &Path, dest: &Path) -> Result<()> {
+fn copy_tree(source_root: &Path, source: &Path, dest_root: &Path, dest: &Path) -> Result<()> {
+    checked_destination(dest_root, dest)?;
     let file_type = checked_source_metadata(source_root, source)?.file_type();
     if file_type.is_file() {
         fs::create_dir_all(
@@ -226,7 +277,12 @@ fn copy_tree(source_root: &Path, source: &Path, dest: &Path) -> Result<()> {
         if entry.file_name() == "README.md" {
             continue;
         }
-        copy_tree(source_root, &entry.path(), &dest.join(entry.file_name()))?;
+        copy_tree(
+            source_root,
+            &entry.path(),
+            dest_root,
+            &dest.join(entry.file_name()),
+        )?;
     }
     Ok(())
 }
@@ -262,6 +318,7 @@ mod tests {
         let source_root = root.join("checkout");
         let dest_root = root.join("workspace");
         fs::create_dir(&source_root).expect("create source root");
+        fs::create_dir(&dest_root).expect("create destination root");
         fs::write(source_root.join("schema.json"), b"schema").expect("write source");
 
         copy_file(&source_root, "schema.json", &dest_root, "imported.json")
@@ -279,13 +336,15 @@ mod tests {
         let root = test_dir("omit-fixture-readmes");
         let source_root = root.join("checkout");
         let source = source_root.join("conformance/base64");
-        let dest = root.join("workspace/fixtures/base64");
+        let dest_root = root.join("workspace");
+        let dest = dest_root.join("fixtures/base64");
         fs::create_dir_all(&source).expect("create fixture source");
+        fs::create_dir(&dest_root).expect("create destination root");
         fs::write(source.join("README.md"), b"upstream documentation")
             .expect("write fixture README");
         fs::write(source.join("valid.txt"), b"fixture").expect("write fixture data");
 
-        copy_tree(&source_root, &source, &dest).expect("copy fixture tree");
+        copy_tree(&source_root, &source, &dest_root, &dest).expect("copy fixture tree");
 
         assert_eq!(
             fs::read(dest.join("valid.txt")).expect("read copied fixture"),
@@ -304,6 +363,7 @@ mod tests {
         let source_root = root.join("checkout");
         let dest_root = root.join("workspace");
         fs::create_dir(&source_root).expect("create source root");
+        fs::create_dir(&dest_root).expect("create destination root");
         let outside = root.join("outside.json");
         fs::write(&outside, b"outside").expect("write outside file");
         symlink(&outside, source_root.join("schema.json")).expect("create source symlink");
@@ -327,6 +387,7 @@ mod tests {
         let dest_root = root.join("workspace");
         fs::create_dir(&source_root).expect("create source root");
         fs::create_dir(&outside_dir).expect("create outside directory");
+        fs::create_dir(&dest_root).expect("create destination root");
         fs::write(outside_dir.join("schema.json"), b"outside").expect("write outside file");
         symlink(&outside_dir, source_root.join("schema")).expect("create parent symlink");
 
@@ -351,9 +412,11 @@ mod tests {
         let root = test_dir("tree-parent-symlink");
         let source_root = root.join("checkout");
         let outside_dir = root.join("outside");
-        let dest = root.join("workspace/fixtures");
+        let dest_root = root.join("workspace");
+        let dest = dest_root.join("fixtures");
         fs::create_dir(&source_root).expect("create source root");
         fs::create_dir(&outside_dir).expect("create outside directory");
+        fs::create_dir(&dest_root).expect("create destination root");
         let outside_fixture_dir = outside_dir.join("fixture-dir");
         fs::create_dir(&outside_fixture_dir).expect("create outside fixture directory");
         fs::write(outside_fixture_dir.join("fixture.txt"), b"outside")
@@ -363,6 +426,7 @@ mod tests {
         let error = copy_tree(
             &source_root,
             &source_root.join("conformance/fixture-dir"),
+            &dest_root,
             &dest,
         )
         .expect_err("symlinked tree root must fail");
@@ -370,5 +434,117 @@ mod tests {
         assert!(error.to_string().contains("resolved outside source root"));
         assert!(!dest.exists());
         fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[cfg(unix)]
+    #[derive(Clone, Copy, Debug)]
+    enum DestinationOperation {
+        CopyFile,
+        MirrorFixtures,
+        CopyTree,
+    }
+
+    #[cfg(unix)]
+    fn assert_destination_symlink_rejected(operation: DestinationOperation, parent: bool) {
+        use std::os::unix::fs::symlink;
+
+        let name = match operation {
+            DestinationOperation::CopyFile => "copy-file",
+            DestinationOperation::MirrorFixtures => "mirror",
+            DestinationOperation::CopyTree => "copy-tree",
+        };
+        let root = test_dir(&format!(
+            "destination-{name}-{}",
+            if parent { "parent" } else { "final" }
+        ));
+        let workspace = root.join("workspace");
+        let link_rel = match (operation, parent) {
+            (DestinationOperation::CopyFile, false) => "imported.json",
+            (DestinationOperation::CopyTree, false) => "fixture.txt",
+            (DestinationOperation::MirrorFixtures, false) => {
+                "crates/yaml-sigil-conformance/fixtures"
+            }
+            (DestinationOperation::CopyFile | DestinationOperation::CopyTree, true) => "redirect",
+            (DestinationOperation::MirrorFixtures, true) => "crates/yaml-sigil-conformance",
+        };
+        let link = workspace.join(link_rel);
+        let outside = root.join("outside");
+        let outside_is_dir = parent || matches!(operation, DestinationOperation::MirrorFixtures);
+        fs::create_dir_all(link.parent().expect("destination parent"))
+            .expect("create destination parent");
+        if outside_is_dir {
+            fs::create_dir(&outside).expect("create outside directory");
+            fs::write(outside.join("sentinel"), b"outside").expect("write outside sentinel");
+        } else {
+            fs::write(&outside, b"outside").expect("write outside file");
+        }
+        symlink(&outside, &link).expect("create destination symlink");
+
+        let source_root = root.join("checkout");
+        fs::create_dir(&source_root).expect("create source root");
+        let result = match operation {
+            DestinationOperation::CopyFile => {
+                fs::write(source_root.join("schema.json"), b"schema").expect("write source");
+                let dest_rel = if parent {
+                    "redirect/imported.json"
+                } else {
+                    "imported.json"
+                };
+                copy_file(&source_root, "schema.json", &workspace, dest_rel)
+            }
+            DestinationOperation::MirrorFixtures => mirror_fixtures(&source_root, &workspace),
+            DestinationOperation::CopyTree => {
+                let source = source_root.join("fixture.txt");
+                fs::write(&source, b"fixture").expect("write source fixture");
+                let dest = workspace.join(if parent {
+                    "redirect/fixture.txt"
+                } else {
+                    "fixture.txt"
+                });
+                copy_tree(&source_root, &source, &workspace, &dest)
+            }
+        };
+        let error = result.expect_err("destination symlink must fail");
+
+        assert!(
+            error.to_string().contains("symlinked destination"),
+            "{operation:?}: {error:#}"
+        );
+        if outside_is_dir {
+            assert!(outside.join("sentinel").exists());
+            assert_eq!(
+                fs::read_dir(&outside)
+                    .expect("read outside directory")
+                    .count(),
+                1
+            );
+        } else {
+            assert_eq!(fs::read(&outside).expect("read outside file"), b"outside");
+        }
+        fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn destination_operations_reject_symlinked_final_paths() {
+        for operation in [
+            DestinationOperation::CopyFile,
+            DestinationOperation::MirrorFixtures,
+            DestinationOperation::CopyTree,
+        ] {
+            assert_destination_symlink_rejected(operation, false);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn destination_operations_reject_symlinked_parents() {
+        for operation in [
+            DestinationOperation::CopyFile,
+            DestinationOperation::MirrorFixtures,
+            DestinationOperation::CopyTree,
+        ] {
+            assert_destination_symlink_rejected(operation, true);
+        }
     }
 }

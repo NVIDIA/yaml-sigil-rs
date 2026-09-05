@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-  repository_dispatch:
-    types:
-      - official-release-published
   workflow_dispatch:
     inputs:
       mode:
@@ -18,204 +15,27 @@ on:
           - next-candidate
           - promote-stable
       bump:
-        description: Override an otherwise non-discoverable version-line change.
+        description: Select the next-candidate line; stable promotion uses patch.
         required: true
-        default: auto
+        default: patch
         type: choice
         options:
-          - auto
           - patch
           - minor
           - major
 
-permissions:
-  contents: read
-
-concurrency:
-  group: release-proposal-${{ github.repository }}
-  cancel-in-progress: true
+permissions: {}
 
 jobs:
-  app_pending:
-    name: GitHub App pending
-    if: ${{ vars.YAML_SIGIL_RELEASE_PR_APP_CLIENT_ID == '' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Explain deferred activation
-        run: >-
-          echo "Release proposal automation remains inactive until the
-          organization-owned GitHub App is installed and configured."
-
   proposal:
-    name: Prepare release proposal
-    if: ${{ vars.YAML_SIGIL_RELEASE_PR_APP_CLIENT_ID != '' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    name: Run trusted proposal workflow
     permissions:
+      checks: read
       contents: read
       pull-requests: read
-    steps:
-      - name: Create least-privilege GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.YAML_SIGIL_RELEASE_PR_APP_CLIENT_ID }}
-          private-key: ${{ secrets.YAML_SIGIL_RELEASE_PR_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - name: Check out main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-        with:
-          cache: false
-
-      # This section would benefit by a change to the action allowlist
-      - name: Install release-plz
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
-        with:
-          checksum: true
-          fallback: cargo-binstall
-          tool: release-plz@0.3.160
-
-      - name: Require the expected repository and current main
-        run: |
-          # Prevent a copied workflow from operating in another repository.
-          if [[ "${GITHUB_REPOSITORY}" != "NVIDIA/yaml-sigil-rs" ]]; then
-            echo "This workflow runs only in NVIDIA/yaml-sigil-rs." >&2
-            exit 1
-          fi
-          # Manual proposals must use the protected default branch as source.
-          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
-            echo "Release proposals must be dispatched from main." >&2
-            exit 1
-          fi
-          # Bind the generated proposal to the event's exact main commit.
-          if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
-            echo "The checked-out main commit does not match the triggering commit." >&2
-            exit 1
-          fi
-          # release-plz requires an attached branch with an upstream to resolve
-          # repository history. Keep the event-bound commit while attaching it.
-          git switch --force-create main "${GITHUB_SHA}"
-          git branch --set-upstream-to=origin/main main
-          # Branch attachment must preserve the exact event source commit.
-          if [[ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]]; then
-            echo "Attaching main changed the triggering commit." >&2
-            exit 1
-          fi
-
-      # All four crates form one version transaction. Do not advance while any
-      # manifest version integrated on main is still awaiting publication.
-      - name: Require the current source version on crates.io
-        id: published
-        run: |
-          version="$(cargo xtask release-version show)"
-          echo "version=${version}" >>"${GITHUB_OUTPUT}"
-          # Exit 3 means at least one crate is awaiting publication. That is an
-          # ordered wait state, while any other error must fail the run.
-          if bash .github/scripts/verify-crates-io-packages.sh \
-            --check-version "${version}" \
-            yaml-sigil-core \
-            yaml-sigil-transcription \
-            yaml-sigil-signing \
-            yaml-sigil-verification; then
-            echo "available=true" >>"${GITHUB_OUTPUT}"
-          else
-            status="$?"
-            # Registry failures are errors; only an exact 404 is a wait state.
-            if [[ "${status}" -ne 3 ]]; then
-              exit "${status}"
-            fi
-            echo "available=false" >>"${GITHUB_OUTPUT}"
-            echo "${version} is not yet published for every crate; no later proposal is created."
-          fi
-
-      - name: Resolve release mode and bump intent
-        id: intent
-        if: ${{ steps.published.outputs.available == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MANUAL_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
-          REQUESTED_BUMP: ${{ inputs.bump || 'auto' }}
-          REQUESTED_MODE: ${{ inputs.mode || 'next-candidate' }}
-        run: bash .github/scripts/resolve-release-intent.sh
-
-      - name: Generate and validate release transaction
-        id: generate
-        if: ${{ steps.published.outputs.available == 'true' }}
-        env:
-          EFFECTIVE_BUMP: ${{ steps.intent.outputs.bump }}
-          GITHUB_TOKEN: ${{ github.token }}
-          MODE: ${{ steps.intent.outputs.mode }}
-          PUBLISHED_VERSION: ${{ steps.published.outputs.version }}
-          RELEASE_MARKER: ${{ steps.intent.outputs.marker }}
-        run: bash .github/scripts/generate-release-proposal.sh
-
-      - name: Create or update release pull request
-        id: release-pr
-        if: ${{ steps.published.outputs.available == 'true' }}
-        env:
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          RELEASE_BODY_FILE: ${{ runner.temp }}/release-pr-body.md
-          RELEASE_BRANCH: release-plz-next
-          RELEASE_DRAFT: ${{ steps.generate.outputs.draft }}
-          RELEASE_TITLE: ${{ steps.generate.outputs.title }}
-        run: bash .github/scripts/update-release-pull-request.sh
-
-      - name: Check out generated Verified commit
-        if: ${{ steps.published.outputs.available == 'true' }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ steps.release-pr.outputs.commit_sha }}
-
-      - name: Attach generated release branch
-        if: ${{ steps.published.outputs.available == 'true' }}
-        env:
-          RELEASE_BRANCH: release-plz-next
-          RELEASE_COMMIT: ${{ steps.release-pr.outputs.commit_sha }}
-        run: |
-          # release-plz needs an attached branch and upstream. Bind both local
-          # refs to the exact App commit already verified by the helper.
-          git update-ref "refs/remotes/origin/${RELEASE_BRANCH}" "${RELEASE_COMMIT}"
-          git switch --force-create "${RELEASE_BRANCH}" "${RELEASE_COMMIT}"
-          git branch --set-upstream-to="origin/${RELEASE_BRANCH}" "${RELEASE_BRANCH}"
-          # Branch attachment must preserve the exact generated commit twice.
-          if [[ "$(git rev-parse HEAD)" != "${RELEASE_COMMIT}" \
-            || "$(git rev-parse '@{upstream}')" != "${RELEASE_COMMIT}" ]]; then
-            echo "Attaching the release branch changed the generated commit." >&2
-            exit 1
-          fi
-
-      - name: Recheck clean synchronized release source
-        if: ${{ steps.published.outputs.available == 'true' }}
-        env:
-          # Resolve manifests whose publish allowlist names crates-io.
-          CARGO_REGISTRIES_CRATES_IO_INDEX: https://github.com/rust-lang/crates.io-index
-          GIT_TOKEN: ${{ github.token }}
-        run: |
-          cargo xtask sync-workspace-versions --check
-          cargo xtask release-version check
-          test -z "$(git status --porcelain --untracked-files=no)"
-          cargo metadata --no-deps --format-version 1 >/dev/null
-          # Resolve unpublished workspace crates only inside the dry-run
-          # Cargo home.
-          validation_cargo_home="${RUNNER_TEMP}/yaml-sigil-rs-proposal-cargo-home"
-          bash .github/scripts/prepare-unpublished-workspace-dependencies.sh \
-            "${validation_cargo_home}"
-          # The read-only job token permits forge checks; dry-run cannot publish.
-          CARGO_HOME="${validation_cargo_home}" \
-            release-plz release --dry-run --forge github --config .release-plz.toml
-          test -z "$(git status --porcelain --untracked-files=no)"
+    uses: ./.github/workflows/release-proposal.yml
+    with:
+      source-event: ${{ github.event_name }}
+      mode: ${{ inputs.mode || 'next-candidate' }}
+      bump: ${{ inputs.bump || 'patch' }}
+    secrets: inherit

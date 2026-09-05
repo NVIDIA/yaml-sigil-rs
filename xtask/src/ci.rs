@@ -3,14 +3,27 @@
 
 //! Local entry point for the repository's provider-neutral validation sequence.
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::io::{self, Write as _};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Result;
 
-use super::{package_content, require_success, require_tool, run as run_command, versions};
+use super::{bounded_process, package_content, require_success, require_tool, versions};
 
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str = "cargo install --locked cargo-machete --version 0.9.2";
+const CARGO_LOCKFILE_PATH_ENV: &str = "CARGO_RESOLVER_LOCKFILE_PATH";
+const PROTECTED_MARKER_ENV: &str = "YAML_SIGIL_TERMINAL_CANDIDATE";
+const PROTECTED_AUDIT_ENV: &str = "YAML_SIGIL_CARGO_AUDIT";
+const PROTECTED_SEED_ENV: &str = "YAML_SIGIL_CARGO_SEED";
+const PROTECTED_STATE_ENV: &str = "YAML_SIGIL_CARGO_STATE_ROOT";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ExecutionBoundary {
+    Ordinary,
+    Protected { cargo_audit: PathBuf },
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Step {
@@ -20,14 +33,57 @@ struct Step {
 }
 
 impl Step {
-    fn command(self, root: &Path) -> Command {
-        let mut command = if self.program == "buf" {
+    fn command(self, root: &Path) -> io::Result<Command> {
+        let root_lockfile = std::env::var_os(CARGO_LOCKFILE_PATH_ENV);
+        Ok(self.command_with_root_lockfile(root, root_lockfile.as_deref(), &execution_boundary()?))
+    }
+
+    fn command_with_root_lockfile(
+        self,
+        root: &Path,
+        root_lockfile: Option<&OsStr>,
+        boundary: &ExecutionBoundary,
+    ) -> Command {
+        let mut command = if self.is_dependency_audit()
+            && let ExecutionBoundary::Protected { cargo_audit } = boundary
+        {
+            let mut command = Command::new(cargo_audit);
+            command.args(["audit", "--no-fetch"]);
+            command.args(&self.args[1..]);
+            command
+        } else if self.program == "buf" {
             Command::new(buf_tools::buf_bin_path())
         } else {
-            Command::new(self.program)
+            let mut command = Command::new(self.program);
+            command.args(self.args);
+            command
         };
-        command.current_dir(root).args(self.args);
+        if self.program == "buf" {
+            command.args(self.args);
+        }
+        command.current_dir(root);
+        if self.uses_xtask_workspace() {
+            command.env_remove(CARGO_LOCKFILE_PATH_ENV);
+        } else if self.is_root_dependency_audit()
+            && let Some(lockfile) = root_lockfile
+        {
+            command.args(["--file"]).arg(lockfile);
+        }
         command
+    }
+
+    fn uses_xtask_workspace(self) -> bool {
+        self.args
+            .iter()
+            .any(|argument| matches!(*argument, "xtask/Cargo.toml" | "xtask/Cargo.lock"))
+    }
+
+    fn is_root_dependency_audit(self) -> bool {
+        self.program == "cargo" && self.args == ["audit"]
+    }
+
+    fn is_dependency_audit(self) -> bool {
+        self.program == "cargo" && self.args.first() == Some(&"audit")
     }
 }
 
@@ -132,14 +188,58 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
 pub(crate) fn run(root: &Path) -> Result<()> {
     require_tool("cargo-machete", CARGO_MACHETE_INSTALL_GUIDANCE)?;
     for step in BEFORE_PACKAGE_CONTENT {
-        require_success(run_command(step.command(root))?, step.label)?;
+        run_step(root, *step)?;
     }
     versions::sync_workspace_dependency_versions(root, true)?;
     package_content::run(root)?;
     for step in AFTER_PACKAGE_CONTENT {
-        require_success(run_command(step.command(root))?, step.label)?;
+        run_step(root, *step)?;
     }
     Ok(())
+}
+
+fn run_step(root: &Path, step: Step) -> Result<()> {
+    let output = bounded_process::output(
+        &mut step.command(root)?,
+        bounded_process::VALIDATION_OUTPUT_LIMITS,
+    )?;
+    io::stdout().write_all(&output.stdout)?;
+    io::stderr().write_all(&output.stderr)?;
+    require_success(output.status, step.label)
+}
+
+fn execution_boundary() -> io::Result<ExecutionBoundary> {
+    let marker = std::env::var_os(PROTECTED_MARKER_ENV);
+    let audit = std::env::var_os(PROTECTED_AUDIT_ENV);
+    let seed = std::env::var_os(PROTECTED_SEED_ENV);
+    let state = std::env::var_os(PROTECTED_STATE_ENV);
+    if marker.is_none() && audit.is_none() && seed.is_none() && state.is_none() {
+        return Ok(ExecutionBoundary::Ordinary);
+    }
+    let Some(audit) = audit.filter(|value| !value.is_empty()) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "protected dependency-audit boundary is incomplete",
+        ));
+    };
+    if marker.as_deref() != Some(OsStr::new("1"))
+        || seed.as_ref().is_none_or(|value| value.is_empty())
+        || state.as_ref().is_none_or(|value| value.is_empty())
+        || std::env::var_os("CARGO_NET_OFFLINE").as_deref() != Some(OsStr::new("true"))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "protected dependency-audit boundary is incomplete",
+        ));
+    }
+    let cargo_audit = PathBuf::from(audit);
+    if !cargo_audit.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "protected cargo-audit path is not absolute",
+        ));
+    }
+    Ok(ExecutionBoundary::Protected { cargo_audit })
 }
 
 #[cfg(test)]
@@ -156,5 +256,161 @@ mod tests {
         );
         assert!(AGENT_GUIDANCE.contains(CARGO_MACHETE_INSTALL_GUIDANCE));
         assert!(AGENT_GUIDANCE.contains("cargo-machete --with-metadata"));
+    }
+
+    #[test]
+    fn xtask_commands_retain_the_committed_xtask_lock() {
+        let steps = BEFORE_PACKAGE_CONTENT.iter().chain(AFTER_PACKAGE_CONTENT);
+        let mut xtask_steps = 0;
+
+        for step in steps {
+            let command = step.command(Path::new(".")).unwrap();
+            let removes_external_lock = command
+                .get_envs()
+                .any(|(name, value)| name == CARGO_LOCKFILE_PATH_ENV && value.is_none());
+            assert_eq!(
+                removes_external_lock,
+                step.uses_xtask_workspace(),
+                "unexpected lockfile environment for {}",
+                step.label
+            );
+            xtask_steps += usize::from(step.uses_xtask_workspace());
+        }
+
+        assert!(
+            xtask_steps > 0,
+            "CI must retain explicit xtask-workspace steps"
+        );
+    }
+
+    #[test]
+    fn root_audit_reads_the_cargo_generated_external_lock() {
+        let root_audit = AFTER_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .find(|step| step.is_root_dependency_audit())
+            .expect("CI must audit the root dependency lock");
+        let lockfile = Path::new("/candidate-home/Cargo.lock");
+        let command = root_audit.command_with_root_lockfile(
+            Path::new("."),
+            Some(lockfile.as_os_str()),
+            &ExecutionBoundary::Ordinary,
+        );
+        let arguments = command.get_args().collect::<Vec<_>>();
+
+        assert_eq!(arguments, ["audit", "--file", "/candidate-home/Cargo.lock"]);
+    }
+
+    #[test]
+    fn protected_audits_use_authenticated_binary_and_seed_only() {
+        for step in AFTER_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .filter(|step| step.is_dependency_audit())
+        {
+            let command = step.command_with_root_lockfile(
+                Path::new("."),
+                None,
+                &ExecutionBoundary::Protected {
+                    cargo_audit: PathBuf::from("/trusted-tools/bin/cargo-audit"),
+                },
+            );
+            assert_eq!(command.get_program(), "/trusted-tools/bin/cargo-audit");
+            let arguments = command.get_args().collect::<Vec<_>>();
+            assert_eq!(&arguments[..2], ["audit", "--no-fetch"]);
+        }
+    }
+
+    #[test]
+    fn ordinary_audit_can_seed_a_clean_cargo_home() {
+        let clean = tempfile::tempdir().unwrap();
+        let audit = AFTER_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .find(|step| step.is_root_dependency_audit())
+            .unwrap();
+        let mut command =
+            audit.command_with_root_lockfile(Path::new("."), None, &ExecutionBoundary::Ordinary);
+        command.env("CARGO_HOME", clean.path());
+        assert_eq!(command.get_program(), "cargo");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["audit"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn candidate_working_directory_does_not_shadow_cargo() {
+        let (candidate, marker) = candidate_with_cargo_decoy();
+        let cargo_step = BEFORE_PACKAGE_CONTENT
+            .iter()
+            .copied()
+            .find(|step| step.program == "cargo")
+            .expect("protected validation must contain a Cargo step");
+
+        run_step(candidate.path(), cargo_step).unwrap();
+        assert!(
+            !marker.exists(),
+            "candidate cargo.exe shadowed the protected validation step"
+        );
+
+        let package_result = crate::package_content::check_test_package(candidate.path());
+        assert!(
+            !marker.exists(),
+            "candidate cargo.exe shadowed package-content validation"
+        );
+        assert_eq!(package_result.unwrap(), 4);
+    }
+
+    #[cfg(windows)]
+    fn candidate_with_cargo_decoy() -> (tempfile::TempDir, std::path::PathBuf) {
+        let candidate = tempfile::tempdir().unwrap();
+        let root = candidate.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\n\
+             name = \"candidate-package\"\n\
+             version = \"0.1.0\"\n\
+             edition = \"2024\"\n\
+             license = \"Apache-2.0\"\n\
+             exclude = [\"cargo.exe\", \"cargo-decoy.rs\", \"shadow-marker\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub fn value() -> u8 {\n    1\n}\n",
+        )
+        .unwrap();
+
+        let marker = root.join("shadow-marker");
+        let decoy_build = tempfile::tempdir().unwrap();
+        let decoy_source = decoy_build.path().join("cargo-decoy.rs");
+        let decoy_executable = decoy_build.path().join("cargo.exe");
+        std::fs::write(
+            &decoy_source,
+            format!(
+                "fn main() {{ std::fs::write({:?}, b\"shadowed\").unwrap(); }}\n",
+                marker.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let output = std::process::Command::new("rustc")
+            .arg(&decoy_source)
+            .arg("--crate-name")
+            .arg("candidate_cargo_decoy")
+            .arg("-o")
+            .arg(&decoy_executable)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "failed to compile harmless cargo.exe decoy: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        std::fs::copy(decoy_executable, root.join("cargo.exe")).unwrap();
+        assert!(
+            !std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .any(|entry| entry == root)
+        );
+        (candidate, marker)
     }
 }

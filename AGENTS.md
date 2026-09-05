@@ -243,6 +243,42 @@ cargo audit
 cargo audit --file xtask/Cargo.lock
 ```
 
+To apply the validator from the current checkout to another repository
+checkout, pass its root explicitly:
+
+```shell
+cargo xtask ci --candidate-root PATH
+```
+
+The command still builds and runs the xtask from the current checkout; only
+the repository content being validated comes from `PATH`.
+
+Alternate candidate-root validation is supported only where the process
+boundary owns descendants that leave their original process group. Linux uses
+the subreaper boundary and Windows uses Job Objects. On macOS and other
+non-Linux Unix hosts, `--candidate-root` fails before candidate execution;
+ordinary `cargo xtask ci` for the trusted current checkout remains supported.
+
+After a release-path change is committed, exercise the maintained current and
+historical source harness from the exact clean checkout:
+
+```shell
+cargo +stable xtask github release-train local-validate \
+  --manifest MANIFEST \
+  --release-plz PATH \
+  --release-plz-sha256 SHA256
+```
+
+`MANIFEST` is a repository-relative, bounded JSON manifest containing the exact
+current and representative historical commit SHAs and repository name. Select
+the reviewed release-plz `0.3.160` executable through the caller-owned `PATH`
+argument and provide the SHA-256 of its exact bytes. The harness authenticates
+and stages that tool before reading `GIT_TOKEN`, stages the current Rust
+validator, attaches local branches for release-plz, checks the current and
+historical sources, and runs release-plz only with `--dry-run` and a disabled
+push URL. Supply one read-capable forge token through `GIT_TOKEN`; the harness
+removes unrelated credentials and performs no publication.
+
 The static package-content stage runs
 `cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
 each of the four publishable crates and compares Cargo's modeled paths with the
@@ -265,9 +301,76 @@ ephemeral compilation remains permitted for validation.
 
 The xtask resolves its Buf executable through the same pinned `buf-tools`
 version used by `yaml-sigil-core` at build time. A system `buf` or `protoc`
-installation is not required. Keep the `buf-tools` pins in the root workspace
-and `xtask/Cargo.toml`, the `bufbuild/buf-action` `version` input, and this
-command documentation aligned when updating Buf.
+installation is not required. Follow the coordinated upgrade workflow below
+when changing any Buf-related version or installation control.
+
+## Coordinated Buf upgrades
+
+Publishing a new `buf-tools` or `buf-toolchain` release does not automatically
+update any YamlSigil repository. Use coordinated pull requests to update every
+applicable pin and verification surface. Do not infer one component's version
+from another component's version.
+
+The controls have distinct roles:
+
+- `buf-tools` is the Rust build dependency used by this workspace and its
+  xtask. Its version may contain a suffix such as `-hotfix.N`; do not derive it
+  mechanically from the Buf CLI version. Update the exact pins in `Cargo.toml`
+  and `xtask/Cargo.toml`, then regenerate the committed `xtask/Cargo.lock`.
+  The root workspace intentionally does not commit `Cargo.lock`, so do not add
+  it merely for a Buf upgrade. If `.github/trusted-cargo/buf-tools/` remains
+  present, its package version and complete dependency graph must match the
+  selected published `buf-tools` crate so the protected path override cannot
+  change dependency resolution. Its implementation must continue to return
+  only the authenticated protected Buf executable.
+- `buf-toolchain` installs and verifies the standalone trusted Buf executable
+  before protected candidate execution. Update the protected runner's exact
+  Buf CLI version and its policy assertions in every repository that carries
+  the shared implementation. Require the installed executable to report
+  exactly the intended Buf CLI version. Confirm the published mapping between
+  the `buf-toolchain` and Buf CLI releases instead of assuming identical
+  version strings.
+- `bufbuild/buf-action` has two separate controls: its immutable Action SHA and
+  its Buf CLI `version` input. Keep every applicable ordinary and protected
+  schema-check workflow aligned with the selected CLI version. If a workflow
+  omits `version`, report that as a consistency gap; it does not inherit the
+  Rust dependency pin.
+- `buf.lock` locks BSR or module dependencies, not the installed Buf CLI
+  version. Do not update it solely because the CLI, `buf-tools`, or
+  `buf-toolchain` changed.
+
+Coordinate these repository-specific surfaces:
+
+- In `yaml-sigil-rs`, update `Cargo.toml`, `xtask/Cargo.toml`,
+  `xtask/Cargo.lock`, `.github/trusted-cargo/buf-tools/` when present, the
+  ordinary and protected `bufbuild/buf-action` inputs under
+  `.github/workflows/`, the protected runner pin in
+  `.github/scripts/run-terminal-candidate.sh`, and the policy tests in
+  `.github/scripts/test_protected_pr_ci.py`.
+- In `yaml-sigil-spec`, update its ordinary and protected
+  `bufbuild/buf-action` configuration, protected runner pin, and policy tests.
+  It has no product `buf-tools` dependency unless its current source proves
+  otherwise.
+- In `yaml-sigil-traits`, update only the shared protected-runner and
+  policy-test surfaces that remain intentionally uniform. It otherwise has no
+  independent Buf product dependency unless its current source proves
+  otherwise.
+
+For each future coordinated upgrade:
+
+- Review the selected Buf, `buf-tools`, and `buf-toolchain` releases and
+  confirm their published mapping.
+- Make one coordinated change that updates every applicable pin and
+  verification surface.
+- Regenerate only Cargo lockfiles already committed by the affected
+  repository.
+- Verify that no unplanned protobuf-generated output changed.
+- Run the local Cargo and protected-policy suites, ShellCheck or Shuck,
+  actionlint, and Markdown checks.
+- Require successful ordinary and App-owned protected CI at the exact reviewed
+  heads.
+- Confirm that the protected sandbox used the intended authenticated Buf
+  binary and retained no artifacts.
 
 Install `rumdl`, `cargo-audit`, and `cargo-machete` with Cargo before running
 the wrapper:
@@ -288,6 +391,50 @@ Hosted CI declares these checks as independent steps. Keep its command coverage,
 changing the validation sequence. Do not make the xtask read, parse, or test
 provider-specific workflow files. Validate provider configuration with its
 native tooling.
+
+The only permitted provider-specific xtask namespace is
+`cargo xtask github`. Keep it limited to typed, repository-owned GitHub
+operations that consolidate release automation. It must not become an
+arbitrary `gh api` passthrough or a replacement for actionlint. It must never
+parse, embed, snapshot, or validate workflow YAML, triggers, job names,
+permissions, secrets, expressions, Action pins, or historical workflow files.
+Accept tokens only through environment variables; never log them, serialize
+them into fixtures, or pass them as command-line arguments.
+
+Within GitHub Actions, bind repository selection to GitHub's default
+`GITHUB_ACTIONS` and `GITHUB_REPOSITORY` variables and require an exact match
+with a compiled repository-policy table and the local package family. Do not
+use the mutable `CI` variable or configurable environment values as a trust
+switch. Local mutation commands must take an explicit repository and bind it
+to that same table and checkout.
+
+`cargo xtask ci` and every non-`github` command must remain provider-neutral
+and credential-free. The checkout-free protected-PR reporter and controller
+remain Python so that immutable protected-main policy can run without
+compiling candidate Rust. Keep
+`.github/scripts/check-pull-request-commits.sh` identical across the YamlSigil
+repositories. Small host-setup helpers may remain shell when moving them would
+add complexity without consolidating policy.
+
+The surviving provider helpers have deliberately narrow roles:
+
+- `protected_pr_ci.py` and `test_protected_pr_ci.py` keep protected-main
+  authorization checkout-free and test that immutable policy without compiling
+  candidate Rust.
+- `cargo_egress_proxy.py` restricts protected Cargo prefetch transport to the
+  crates.io TLS endpoints; Cargo still authenticates TLS and Cargo Deny
+  independently validates resolved sources.
+- `test-cargo-egress-topology.sh` is a Linux-only, test-only Docker check of
+  that topology and its exact cleanup. It must not execute candidate or release
+  code.
+- `check-pull-request-commits.sh` enforces the shared exact-range, linear
+  history, and DCO policy across all three YamlSigil repositories.
+- `remove-preinstalled-aws-tap.sh` performs one bounded macOS host cleanup
+  before Rust setup.
+
+Release intent, proposal mutation, publication authorization, baseline
+selection, proposal generation, and release-object reconciliation belong in
+the Rust commands described above, not in additional Python or shell helpers.
 
 Validate shell scripts under `.github/scripts` with Shuck before landing
 changes. Install it from the `shuck-cli` crate and run it from the repository
@@ -313,8 +460,10 @@ NVIDIA's `linux-amd64-cpu8` runner and GitHub's moving `macos-latest` and
 release versions, package contents, Clippy, tests, unused dependencies, and
 both dependency audits against that platform's resolved dependency graph.
 Linux commit-policy, Markdown, Protobuf, provider-workflow, and aggregation
-jobs run on `linux-amd64-cpu4`. The local command does not launch other
-operating systems.
+jobs run on `linux-amd64-cpu4`. A separate GitHub-hosted Linux, macOS, and
+Windows matrix runs the protected checkout verifier regressions; its Windows
+leg creates an actual directory junction and a short-name-shaped path. The
+local command does not launch other operating systems.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

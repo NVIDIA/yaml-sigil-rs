@@ -2,14 +2,16 @@
 release = false
 release_always = false
 changelog_update = true
-# Tags and GitHub Releases carry version metadata and changelog text only.
-# release-plz does not build or attach binary assets.
-git_tag_enable = true
-git_release_enable = true
+# release-plz publishes source crates only. The protected App finalizer owns
+# annotated tags and immutable, zero-asset GitHub Releases.
+git_tag_enable = false
+git_release_enable = false
 git_release_type = "auto"
 publish_allow_dirty = false
 publish_no_verify = false
 publish_timeout = "5m"
+# The workflow runs the exact analyzer directly and fails on every error.
+semver_check = false
 
 [[package]]
 name = "yaml-sigil-core"
@@ -19,8 +21,11 @@ publish = true
 publish_all_features = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-core/CHANGELOG.md"
-git_tag_enable = true
-git_release_enable = true
+git_tag_enable = false
+git_tag_name = "yaml-sigil-core-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-core-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"
 
 [[package]]
@@ -30,8 +35,11 @@ release = true
 publish = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-transcription/CHANGELOG.md"
-git_tag_enable = true
-git_release_enable = true
+git_tag_enable = false
+git_tag_name = "yaml-sigil-transcription-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-transcription-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"
 
 [[package]]
@@ -42,8 +50,11 @@ publish = true
 publish_all_features = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-signing/CHANGELOG.md"
-git_tag_enable = true
-git_release_enable = true
+git_tag_enable = false
+git_tag_name = "yaml-sigil-signing-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-signing-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"
 
 [[package]]
@@ -54,6 +65,9 @@ publish = true
 publish_all_features = true
 changelog_update = true
 changelog_path = "crates/yaml-sigil-verification/CHANGELOG.md"
-git_tag_enable = true
-git_release_enable = true
+git_tag_enable = false
+git_tag_name = "yaml-sigil-verification-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-verification-v{{ version }}"
+git_release_body = "{{ changelog }}"
 git_release_type = "auto"

@@ -35,9 +35,11 @@ calculates and commits versions on its dedicated `release-plz-*` branch.
 When the required `major`, `minor`, or `patch` advance is not discoverable from
 the commits, state the intended impact in the contribution pull request. A
 repository writer can dispatch the `Release proposal` workflow with
-`next-candidate` and the matching bump override. The workflow records an
-explicit override in the release pull request so later updates preserve it.
-Dispatch `auto` to clear that override and return to automatic calculation.
+`next-candidate` and the matching bump selection. The workflow uses that
+dispatch input directly; pull-request text is not release authority. A
+background event may create one default `patch` proposal when none exists, but
+it never revises an existing proposal. Incorporating later changes or choosing
+a different version line requires another explicit writer dispatch.
 
 When the release-proposal GitHub App is unavailable or cannot safely update its
 owned branch, repository writers use the permanent manual release-proposal
@@ -55,23 +57,76 @@ cargo xtask sync-workspace-versions --check
 ```
 
 Official RC and stable publication rejects an unsynchronized or dirty source
-tree. Pull-request snapshots are different. Their `0.pr` versions are applied
-only in an ephemeral checkout and may be published from that intentionally
-dirty tree without mutating the contributor's branch.
+tree. Pull requests do not publish preview versions.
 
 ## Pull-request CI
 
-Pull-request CI runs from a repository-owned `pull-request/<number>` branch at
-the exact latest pull-request head. Do not push to these branches. Signed
-commits from trusted organization members are copied automatically after the
-pull request is ready for review; draft pull requests do not auto-sync.
+Pull-request CI is orchestrated only by workflow and policy loaded from current
+protected `main`. A repository writer must review the exact latest pull-request
+head and comment `/ok to test <head-sha>`. Only that exact lowercase,
+40-character SHA command starts candidate validation; every new head requires
+a new review and command.
 
-If the copy bot requests validation, a maintainer must review the exact latest
-head and comment `/ok to test <head-sha>`. Automated App-authored commits and
-other untrusted heads require this SHA-bound approval. Every new untrusted head
-requires a new review and comment. The copied branch reports checks to the
-matching pull-request head and is removed when the pull request closes or
-merges.
+Changes to workflow policy, protected validation tools, manifests, lockfiles,
+toolchain or dependency policy, release automation, `xtask`, Buf
+configuration, or other paths classified as security-sensitive use a different
+boundary. Each commit must preserve the original human author while a current
+repository writer becomes the verified committer, and its message must contain
+exact DCO trailers for both identities. For a fork, maintainer edits must remain
+enabled on the original pull request. After reviewing that adopted history, a
+writer comments `/ok to test-and-adopt <head-sha>`. Ordinary changes must not
+use the adoption command, and sensitive changes must not use the ordinary
+command.
+
+Record the authorization comment ID and time. GitHub event delivery may take
+up to 20 minutes, so the absence of a run or acknowledgement during that
+window is not a reason to repeat the command. After 25 minutes, inspect the
+Actions run list and the original comment, and distinguish a queued run from a
+missing event before posting at most one replacement command for the still
+current head.
+
+An authorization is invalid after any head, base, protected-policy, comment
+body or timestamp, repository identity, or writer-permission change. Never
+accept a late acknowledgement or job result for an invalidated binding.
+
+The protected parent uses a contents-read token only to fetch and verify the
+exact authorized head. Candidate-controlled processes then run as a
+purpose-created disposable operating-system identity with read-only source and
+tool inputs, a minimal environment, and no repository credential, secret,
+OIDC, write permission, cache save, or retained artifact. The runner-command
+directory is inaccessible to that identity, no trusted Action or post-step
+follows candidate execution, and the job fails unless every candidate process
+is quiescent and the identity is removed.
+
+Every human-authored pull-request commit must form a linear history from
+current `main`, be GitHub Verified, and contain the exact DCO identity required
+for direct or adopted history. The contributor's fork branch remains the
+pull-request head; a writer's command authorizes testing only and does not
+authorize integration.
+
+Before final authorization, fetch current upstream `main`, rebase the original
+contributor branch with `git rebase --gpg-sign <upstream>/main`, and push the
+rewritten branch back to the same fork with `--force-with-lease`. Confirm every
+rewritten commit is GitHub Verified and DCO-compliant, then request testing for
+the new exact SHA. Do not copy the contribution onto a repository-owned branch
+merely to run CI.
+
+Changes to the candidate validation implementation or its protected tool and
+workflow configuration also run the candidate's exact `cargo xtask ci` on
+GitHub-hosted Linux, macOS, and Windows workers. This isolated supplement does
+not replace the protected-main validator. A maintainer reviews the completed
+results and separately decides whether to integrate the pull request.
+
+Protected checkout verifier regressions also run on those three host
+platforms. The Windows leg uses a real directory junction and a
+short-name-shaped path to prove fail-closed handling without retaining
+artifacts.
+
+Repository Actions execution protection is an additional platform control,
+not the source of `/ok to test` authority. When that policy is in **Evaluate**
+mode, its warnings are telemetry only: they neither allow nor block a workflow.
+The protected `issue_comment` controller and its exact-SHA reauthorization
+remain the operational boundary.
 
 #### Signing Off Your Work
 

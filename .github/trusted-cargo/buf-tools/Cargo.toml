@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "buf-tools"
+version = "1.72.0-hotfix.1"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+# Keep the published crate's dependency graph exactly so Cargo's path override
+# cannot change resolution. The protected adapter only changes how the already
+# authenticated Buf executable is located inside the terminal sandbox.
+[dev-dependencies]
+hex = "0.4"
+minisign-verify = "0.2.5"
+semver = "1"
+sha2 = "0.11"
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+
+[build-dependencies]
+dirs = "6"
+flate2 = "1"
+hex = "0.4"
+minisign-verify = "0.2.5"
+semver = "1"
+sha2 = "0.11"
+tar = "0.4"
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+ureq = "3"
+
+# This protected adapter is deliberately outside the product workspace.
+[workspace]
