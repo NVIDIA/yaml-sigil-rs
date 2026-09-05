@@ -433,10 +433,12 @@ Keep this validation outside `cargo xtask ci`.
 Hosted CI pins its authoritative stable baseline to Rust `1.98.0` and runs an
 independent Rust `1.95.0` lane on NVIDIA's `linux-amd64-cpu8` runner.
 GitHub-hosted macOS and Windows jobs are advisory. Explicitly admitted copied
-refs run the same provider-neutral source checks without secrets, OIDC,
-protected environments, cache saves, or retained artifacts. Only
-`Candidate CI (Linux)` feeds the checkout-free App reporter;
-advisory conclusions never affect `Required CI`.
+refs run public-workspace `cargo check` and `cargo test` without secrets,
+OIDC, protected environments, cache saves, or retained artifacts. Complete
+provider-neutral source, package, version-policy, and release-branch
+validation remains authoritative on NVIDIA Linux. Only `Candidate CI (Linux)`
+feeds the checkout-free App reporter; advisory conclusions never affect
+`Required CI`.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

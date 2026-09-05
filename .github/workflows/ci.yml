@@ -178,27 +178,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache: false
-          components: clippy,rustfmt
           toolchain: 1.98.0
-
-      # This section would benefit by a change to the action allowlist
-      - name: Install Rust validation tools
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
-        with:
-          checksum: true
-          fallback: none
-          tool: cargo-audit@0.22.2,cargo-machete@0.9.2
-
-      - name: Verify exact dependency-audit tool
-        run: cargo-audit --version | grep -Fx 'cargo-audit 0.22.2'
-        shell: bash
-
-      - name: Install Markdown validator
-        # Refresh this immutable pin frequently to keep pace with rumdl releases.
-        uses: rvben/rumdl@95a982d941d00cf41a0dcef4d0788bd15a29be1b # v0.2.54
-        with:
-          install-only: true
-          version: "0.2.54"
 
       - name: Restore Rust inputs without saving
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -207,10 +187,13 @@ jobs:
           cache-targets: false
           save-if: false
 
-      # The portability lanes are advisory and run the same provider-neutral
-      # validation contract without producing trusted state or artifacts.
-      - name: Run provider-neutral CI
-        run: cargo xtask ci
+      # GitHub-hosted advisory lanes cover public workspace portability only.
+      # Source-package and release policy remain authoritative on Linux.
+      - name: Check public workspace
+        run: cargo check --workspace --all-targets --all-features
+
+      - name: Test public workspace
+        run: cargo test --workspace --all-features
 
   candidate_stable:
     name: Candidate CI (Linux Rust 1.98.0)
@@ -586,23 +569,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache: false
-          components: clippy,rustfmt
           toolchain: 1.98.0
-
-      # This section would benefit by a change to the action allowlist
-      - name: Install validation tools before candidate materialization
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
-        with:
-          checksum: true
-          fallback: none
-          tool: cargo-audit@0.22.2,cargo-machete@0.9.2
-
-      - name: Install Markdown validator before candidate materialization
-        # Refresh this immutable pin frequently to keep pace with rumdl releases.
-        uses: rvben/rumdl@95a982d941d00cf41a0dcef4d0788bd15a29be1b # v0.2.54
-        with:
-          install-only: true
-          version: "0.2.54"
 
       # Advisory lanes stage the same protected binder and materializer with
       # anonymous Git before any candidate-controlled path exists.
@@ -639,22 +606,13 @@ jobs:
           --output "${GITHUB_OUTPUT}"
         shell: bash
 
-      - name: Freeze fixed candidate tool paths
+      - name: Freeze fixed Cargo path
         id: tools
         shell: bash
         run: |
           cargo_source="$(command -v cargo)"
           cargo_bin="${RUNNER_TEMP}/candidate-tools/$(basename "${cargo_source}")"
           install -m 0500 "${cargo_source}" "${cargo_bin}"
-          audit_source="$(command -v cargo-audit)"
-          audit_bin="${RUNNER_TEMP}/candidate-tools/$(basename "${audit_source}")"
-          install -m 0500 "${audit_source}" "${audit_bin}"
-          "${audit_bin}" --version | grep -Fx 'cargo-audit 0.22.2'
-          for tool in cargo-machete rumdl; do
-            source_path="$(command -v "${tool}")"
-            install -m 0500 "${source_path}" \
-              "${RUNNER_TEMP}/candidate-tools/$(basename "${source_path}")"
-          done
           test -x "${cargo_bin}"
           echo "cargo=${cargo_bin}" >> "${GITHUB_OUTPUT}"
           echo "path=${RUNNER_TEMP}/candidate-tools:${PATH}" \
@@ -670,14 +628,15 @@ jobs:
           "${GITHUB_REPOSITORY}" "${HEAD_SHA}" "${COPIED_REF}"
         working-directory: ${{ runner.temp }}/candidate-source
 
-      # Advisory candidate execution is terminal and cannot influence the App
-      # verdict or feed any later cache, artifact, policy, or privileged step.
-      - name: Run exact candidate
+      # Both portability commands share one terminal candidate-execution
+      # boundary. Source-package and release policy remain Linux-only.
+      - name: Check and test public workspace
         env:
           CARGO_BIN: ${{ steps.tools.outputs.cargo }}
           PATH: ${{ steps.tools.outputs.path }}
-        run: >-
-          "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- ci
+        run: |
+          "${CARGO_BIN}" check --workspace --all-targets --all-features
+          "${CARGO_BIN}" test --workspace --all-features
         shell: bash
         working-directory: ${{ runner.temp }}/candidate-source
 
