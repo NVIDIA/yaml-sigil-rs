@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.5.0-rc.1...yaml-sigil-core-v0.5.0-rc.2) - 2026-09-05
+
+### Other
+
+- consolidate repository history
+
 ## [0.5.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.4.0-rc.2...yaml-sigil-core-v0.5.0-rc.1) - 2026-08-21
 
 ### Fixed
