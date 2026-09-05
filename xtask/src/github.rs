@@ -40,6 +40,9 @@ const RELEASE_AUTHOR_EMAIL: &str = "267424412+ddurst-nvidia@users.noreply.github
 const DCO_TRAILER: &str =
     "Signed-off-by: ddurst <267424412+ddurst-nvidia@users.noreply.github.com>";
 const MANUAL_BRANCH_PREFIX: &str = "release-plz-manual-";
+const CRATES_IO_USER_AGENT: &str =
+    "yaml-sigil-release-verifier/1.0 (https://github.com/NVIDIA/yaml-sigil-rs)";
+const CRATES_IO_REQUEST_DELAY: Duration = Duration::from_secs(1);
 const CRATE_RESPONSE_LIMITS: OutputLimits = OutputLimits {
     stdout: 32 * 1024 * 1024,
     stderr: 64 * 1024,
@@ -995,25 +998,35 @@ fn accumulate_archive_work(
     Ok(())
 }
 
+fn crates_io_request_command(request_args: &[&str], sleep: impl FnOnce(Duration)) -> Command {
+    let mut command = Command::new("curl");
+    command.args(["--disable", "--user-agent", CRATES_IO_USER_AGENT]);
+    command.args(request_args);
+    sleep(CRATES_IO_REQUEST_DELAY);
+    command
+}
+
 fn curl_response(url: &str) -> Result<(u16, Vec<u8>), String> {
     if !url.starts_with("https://crates.io/api/v1/crates/") || url.contains(['\0', '\r', '\n']) {
         return Err("crates.io request URL is not fixed and safe".to_string());
     }
-    let mut command = Command::new("curl");
-    command.args([
-        "--silent",
-        "--show-error",
-        "--location",
-        "--max-time",
-        "60",
-        "--proto",
-        "=https",
-        "--proto-redir",
-        "=https",
-        "--write-out",
-        "\n%{http_code}",
-        url,
-    ]);
+    let mut command = crates_io_request_command(
+        &[
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            "60",
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--write-out",
+            "\n%{http_code}",
+            url,
+        ],
+        thread::sleep,
+    );
     for token in [
         "CARGO_REGISTRY_TOKEN",
         "CARGO_REGISTRIES_CRATES_IO_TOKEN",
@@ -2522,6 +2535,32 @@ mod tests {
         assert!(
             verify_published_archive(package, &version, source, &wrong_checksum, &archive).is_err()
         );
+    }
+
+    #[test]
+    fn crates_io_request_uses_exact_identity_and_pacing() {
+        const URL: &str = "https://crates.io/api/v1/crates/yaml-sigil-core/0.6.0";
+        let observed_delay = Cell::new(None);
+        let command = crates_io_request_command(&["--silent", URL], |delay| {
+            observed_delay.set(Some(delay));
+        });
+        let args = command
+            .get_args()
+            .map(|argument| argument.to_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(observed_delay.get(), Some(Duration::from_secs(1)));
+        assert_eq!(
+            args,
+            [
+                "--disable",
+                "--user-agent",
+                CRATES_IO_USER_AGENT,
+                "--silent",
+                URL,
+            ]
+        );
+        assert!(!CRATES_IO_USER_AGENT.to_ascii_lowercase().contains("curl"));
     }
 
     #[test]
