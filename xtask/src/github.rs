@@ -1703,6 +1703,7 @@ struct CargoVcsInfo {
 #[serde(deny_unknown_fields)]
 struct CargoVcsGit {
     sha1: String,
+    #[serde(default)]
     dirty: bool,
 }
 
@@ -2599,7 +2600,7 @@ mod tests {
     }
 
     #[test]
-    fn published_vcs_info_rejects_dirty_unknown_and_noncanonical_identity() {
+    fn published_vcs_info_rejects_dirty_unknown_missing_and_malformed_identity() {
         let package = &RUST_POLICY.packages[0];
         let version = Version::parse("0.6.0").unwrap();
         let source = "0123456789abcdef0123456789abcdef01234567";
@@ -2613,8 +2614,32 @@ mod tests {
                 "path_in_vcs": package.path_in_vcs,
             }),
             json!({
+                "git": {"sha1": source, "dirty": false},
+                "path_in_vcs": package.path_in_vcs,
+                "other": true,
+            }),
+            json!({
+                "git": {"dirty": false},
+                "path_in_vcs": package.path_in_vcs,
+            }),
+            json!({
+                "git": {"sha1": source, "dirty": false},
+            }),
+            json!({
+                "git": "invalid",
+                "path_in_vcs": package.path_in_vcs,
+            }),
+            json!({
                 "git": {"sha1": source.to_uppercase(), "dirty": false},
                 "path_in_vcs": package.path_in_vcs,
+            }),
+            json!({
+                "git": {"sha1": "1123456789abcdef0123456789abcdef01234567"},
+                "path_in_vcs": package.path_in_vcs,
+            }),
+            json!({
+                "git": {"sha1": source},
+                "path_in_vcs": "wrong/path",
             }),
         ] {
             let archive = crate_archive_with_vcs(package, &version, &vcs);
@@ -2622,6 +2647,33 @@ mod tests {
             assert!(
                 verify_published_archive(package, &version, source, &record, &archive).is_err()
             );
+        }
+
+        let archive = crate_archive_with_vcs_bytes(package, &version, b"{");
+        let record = registry_fixture(&version, &archive);
+        assert!(verify_published_archive(package, &version, source, &record, &archive).is_err());
+    }
+
+    #[test]
+    fn published_vcs_info_accepts_clean_dirty_forms_for_exact_identity() {
+        let package = &RUST_POLICY.packages[0];
+        let version = Version::parse("0.6.0").unwrap();
+        let source = "0123456789abcdef0123456789abcdef01234567";
+        for git in [
+            json!({"sha1": source}),
+            json!({"sha1": source, "dirty": false}),
+        ] {
+            let archive = crate_archive_with_vcs(
+                package,
+                &version,
+                &json!({
+                    "git": git,
+                    "path_in_vcs": package.path_in_vcs,
+                }),
+            );
+            let record = registry_fixture(&version, &archive);
+
+            verify_published_archive(package, &version, source, &record, &archive).unwrap();
         }
     }
 
@@ -2862,10 +2914,17 @@ mod tests {
         version: &Version,
         vcs: &serde_json::Value,
     ) -> Vec<u8> {
+        crate_archive_with_vcs_bytes(package, version, &serde_json::to_vec(vcs).unwrap())
+    }
+
+    fn crate_archive_with_vcs_bytes(
+        package: &PackagePolicy,
+        version: &Version,
+        body: &[u8],
+    ) -> Vec<u8> {
         let mut encoded = GzEncoder::new(Vec::new(), Compression::default());
         {
             let mut builder = tar::Builder::new(&mut encoded);
-            let body = serde_json::to_vec(vcs).unwrap();
             let mut header = tar::Header::new_gnu();
             header.set_size(body.len() as u64);
             header.set_mode(0o644);
@@ -2874,7 +2933,7 @@ mod tests {
                 .append_data(
                     &mut header,
                     format!("{}-{version}/.cargo_vcs_info.json", package.package),
-                    body.as_slice(),
+                    body,
                 )
                 .unwrap();
             builder.finish().unwrap();
