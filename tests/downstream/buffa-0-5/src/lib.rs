@@ -2,6 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Byte-level interoperability fixture generated with Buffa 0.5.2.
+//!
+//! The independently generated types and the stable facade exchange bytes
+//! without sharing generated Rust types or a Buffa version.
+//!
+//! ```
+//! use yaml_sigil_core::{
+//!     AlgorithmId,
+//!     pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
+//! };
+//! use yaml_sigil_core_downstream_buffa_0_5::{
+//!     decode_independent, encode_independent,
+//! };
+//!
+//! let independent_wire = encode_independent();
+//! let borrowed = SignedYamlArtifactRef::decode(&independent_wire).unwrap();
+//! assert_eq!(borrowed.payload(), b"message\n");
+//!
+//! let signature =
+//!     YamlSigilSignature::new(AlgorithmId::EcdsaP256Sha256, vec![4, 5, 6]);
+//! let facade_wire =
+//!     SignedYamlArtifact::new(b"other\n".to_vec(), Some(signature))
+//!         .encode_to_vec()
+//!         .unwrap();
+//! assert_eq!(
+//!     decode_independent(&facade_wire).unwrap(),
+//!     (b"other\n".to_vec(), 2, vec![4, 5, 6]),
+//! );
+//! ```
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/compat_include.rs"));

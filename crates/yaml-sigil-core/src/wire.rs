@@ -10,10 +10,11 @@ use crate::proto_outer::decode_signature_carrier;
 ///
 /// # Resource usage
 ///
-/// This decoder imposes no universal artifact, payload, or signature-carrier size limit.
-/// Protobuf decoding copies recognized fields into owned buffers, so allocation and copying are
-/// linear in field size. Callers handling untrusted data must enforce deployment-appropriate
-/// size limits before invocation.
+/// YamlSigil `v1alpha1` defines no maximum complete artifact size, and this
+/// decoder adds no deployment-specific limit. It copies recognized fields
+/// into owned buffers with work and allocation linear in field size.
+/// Applications accepting potentially untrusted input should apply their
+/// chosen whole-artifact bound before this call.
 pub fn decode_signed_yaml_artifact(
     bytes: &[u8],
 ) -> Result<crate::pb::SignedYamlArtifact, CoreError> {
@@ -41,9 +42,9 @@ pub struct ProtoArtifactView {
 ///
 /// # Resource usage
 ///
-/// This helper clones recognized fields into owned buffers. Allocation and copying are linear in
-/// field size. Callers handling untrusted messages must enforce deployment-appropriate size
-/// limits before invocation.
+/// This helper clones recognized fields into owned buffers with work and
+/// allocation linear in field size. Apply any local limit before constructing
+/// `artifact` from potentially untrusted input.
 pub fn view_signed_yaml_artifact(
     artifact: &crate::pb::SignedYamlArtifact,
 ) -> Result<ProtoArtifactView, CoreError> {
@@ -93,7 +94,7 @@ mod tests {
         assert!(matches!(err, crate::error::CoreError::ProtobufDecode(_)));
     }
 
-    /// Protobuf `buffa` decode/view round-trip.
+    /// Protobuf facade decode/view round-trip.
     #[test]
     fn encode_signed_yaml_artifact_then_decode_matches() {
         let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);

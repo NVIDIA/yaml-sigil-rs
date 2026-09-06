@@ -9,6 +9,14 @@
 //! encode is infallible here).
 //!
 //! Convenience wrappers [`sign_yaml`] and [`sign_proto`] call [`sign`] with a fixed [`OutputForm`].
+//!
+//! # Resource boundaries
+//!
+//! The signing entry points enforce no configurable maximum payload or
+//! complete output artifact size. YAML and protobuf output construction
+//! allocates in proportion to the payload and encoded signature data. Apply
+//! any local payload or output policy outside these methods. Such a policy is
+//! operational hardening, not YamlSigil `v1alpha1` conformance.
 
 mod proto_carrier;
 pub mod transcription;
@@ -130,6 +138,10 @@ fn normalize_yaml_payload(
 ///
 /// For protobuf output, `append_missing_final_newline` is
 /// ignored and the payload bytes are signed and emitted without modification.
+///
+/// This method does not enforce a deployment-specific complete-artifact size
+/// limit for either output form. Callers can choose a lower bound, a higher
+/// bound, or no additional whole-artifact bound.
 #[instrument(level = "info", skip(req), fields(alg = ?req.algorithm, form = ?req.output_form))]
 pub fn sign(req: &SignRequest<'_>) -> SignOutcome {
     sign_inner(req)
@@ -233,7 +245,9 @@ fn emit_proto_artifact(
     Ok(yaml_sigil_core::compose_proto_outer(payload, &carrier))
 }
 
-/// Convenience: sign with YAML output (thin wrapper over [`sign`]).
+/// Sign with YAML output through [`sign`].
+///
+/// This wrapper has the resource behavior documented on [`sign`].
 #[instrument(level = "info", skip(params), fields(alg = ?params.algorithm))]
 pub fn sign_yaml(params: &SignYamlParams<'_>) -> Result<Vec<u8>, SignError> {
     let req = SignRequest {
@@ -252,7 +266,9 @@ pub fn sign_yaml(params: &SignYamlParams<'_>) -> Result<Vec<u8>, SignError> {
     }
 }
 
-/// Convenience: sign with protobuf output (thin wrapper over [`sign`]).
+/// Sign with protobuf output through [`sign`].
+///
+/// This wrapper has the resource behavior documented on [`sign`].
 #[instrument(level = "info", skip(params), fields(alg = ?params.algorithm))]
 pub fn sign_proto(params: &SignProtoParams<'_>) -> Result<Vec<u8>, SignError> {
     let req = SignRequest {
@@ -307,6 +323,10 @@ fn sign_digest(
 }
 
 /// In-process default signer that delegates to the crate's free functions.
+///
+/// This unit type retains the unconfigured resource behavior of [`sign`]. A
+/// future implementation-configurable signer can be added alongside it
+/// without changing this type.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultSigner;
 
@@ -327,6 +347,8 @@ impl Signer for DefaultSigner {
 /// The body is `async { sign(req) }` — no `tokio::spawn_blocking`. The signing
 /// path is CPU-bound, deterministic, and short; offloading to a blocking pool
 /// would add latency without protecting any meaningful reactor.
+///
+/// This unit type retains the unconfigured resource behavior of [`sign`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultAsyncSigner;
 
