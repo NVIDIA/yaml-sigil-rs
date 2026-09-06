@@ -197,9 +197,13 @@ cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
 ```
 
-Update `docs/conformance-validation.md` in the same change when you change
-fixtures, fixture plumbing, expected outcomes, exposed behavior, or deliberate
-divergences.
+After reviewing a new specification revision, update the immutable
+specification links in `crates/yaml-sigil-core/README.md` and
+`crates/yaml-sigil-conformance/README.md`. Add a matching import review entry
+to `docs/conformance-validation.md`, including when imported bytes and runtime
+behavior remain unchanged. Update the same document whenever fixture plumbing,
+expected outcomes, exposed behavior, or deliberate divergences change outside
+an import.
 
 ## Release preparation
 

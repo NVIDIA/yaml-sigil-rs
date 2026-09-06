@@ -57,6 +57,10 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    git status --short
    ```
 
+   Record the full specification commit in
+   `crates/yaml-sigil-conformance/README.md` before refreshing it. Use that
+   commit as `<old-spec-ref>` during delta review.
+
 2. Refresh this repository's imported local artifacts from the target spec ref.
    The command defaults to `origin/main` and uses the public spec repository
    URL:
@@ -146,17 +150,26 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    - `crates/yaml-sigil-conformance/` and `docs/conformance-validation.md`:
      fixture coverage, divergence catalog, and API gaps discovered by
      conformance changes.
+   - `crates/yaml-sigil-core/README.md` and
+     `crates/yaml-sigil-conformance/README.md`: immutable links to the reviewed
+     specification commit.
    - Root, conformance, and crate-local `THIRD_PARTY_NOTICES.md` files:
      imported attribution, independently packaged material, source terms,
      warranty disclaimers, patent/IP caveats, and non-endorsement language.
-   - `Cargo.toml` and `Cargo.lock`: update `yaml-sigil-traits` when the public
-     trait contract changes.
+   - `Cargo.toml`: update `yaml-sigil-traits` when the public trait contract or
+     coordinated dependency release changes. The root workspace intentionally
+     does not commit `Cargo.lock`; do not add it during a specification update.
    - This skill: keep the map current when code moves, new crates take
      ownership of spec behavior, or a spec update reveals a cleaner review path.
 
-   If none of the reviewed spec changes affect these surfaces, record that
-   conclusion in the commit or MR description and leave implementation code
-   unchanged.
+   For every completed review, replace the full commit ID in both immutable
+   README links and add a dated entry to the import review notes in
+   `docs/conformance-validation.md`. Record which imported artifacts,
+   conformance outcomes, public contracts, notices, and runtime behaviors did
+   or did not change. Do this even when the importer produces no byte changes
+   or the upstream delta affects only conformance generators and repository
+   tooling. Leave implementation code unchanged when the review finds no
+   implementation impact.
 
 6. Run the quality loop appropriate to the change:
 
