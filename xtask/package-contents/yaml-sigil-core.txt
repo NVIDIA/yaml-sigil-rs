@@ -18,6 +18,7 @@ src/decomposition.rs
 src/error.rs
 src/lib.rs
 src/payload.rs
+src/pb.rs
 src/proto_outer.rs
 src/signature_doc.rs
 src/tier_a_schema.rs
