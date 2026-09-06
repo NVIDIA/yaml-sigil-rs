@@ -73,7 +73,8 @@ fn verify_with<V: ConformanceVerifier>(v: &V, file: &str, opts: VerifierOptions)
 }
 
 /// Drive the sixteen `yaml-signature-conformance/` fixtures through the supplied
-/// [`Verifier`]; the assertion table depends on the verifier's advertised
+/// [`Verifier`](yaml_sigil_verification::Verifier); the assertion table depends
+/// on the verifier's advertised
 /// [`AdvertisedConformanceProfile`].
 pub fn run_yaml_signature_suite<V: ConformanceVerifier>(v: &V) {
     assert_universal_metadata_failures(v);

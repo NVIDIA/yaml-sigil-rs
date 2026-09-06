@@ -3,6 +3,19 @@
 
 //! Shared YamlSigil v1alpha1 primitives: artifact decomposition, payload invariants,
 //! algorithm string mapping, and stable protobuf wire types.
+//!
+//! # Resource boundaries
+//!
+//! YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
+//! size. Applications accepting potentially untrusted artifacts should apply
+//! a deployment-appropriate whole-input bound before calling this crate. The
+//! 16,384-octet YAML signature-carrier constraint remains independent of a
+//! complete-artifact bound. Rejecting an artifact under local resource policy
+//! does not make it malformed or non-conforming.
+//!
+//! Current entry points do not add a configurable whole-artifact limit.
+//! Protobuf format limits, parser safeguards, address-space limits, allocator
+//! limits, and deployment controls still apply.
 
 mod generated_proto {
     #![allow(clippy::all)]

@@ -48,6 +48,16 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
   only advances source text or does not require Rust implementation changes.
 - Do not add gRPC servers, clients, gateways, transport adapters, or generated
   service stubs for signing, verification, or transcription service IDL.
+- Keep Buffa-generated protobuf modules private to `yaml-sigil-core`. Preserve
+  the stable private-field `yaml_sigil_core::pb` facade, unknown-field and raw
+  enum-number forwarding, Buffa 0.5 wire vectors, and both downstream facade
+  fixtures.
+- Treat whole-artifact limits as optional operational hardening for
+  `v1alpha1`. Do not turn the `4 MiB` example or a future opt-in default into a
+  current specification or conformance requirement. Keep the 16,384-octet
+  YAML signature-carrier rule separate.
+- Review a future `v1alpha2` normative resource policy on its own terms. Its
+  possibility does not establish a current normative limit.
 
 ## Workflow
 
@@ -138,8 +148,10 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    - `crates/yaml-sigil-core/src/signature_doc.rs` and
      `crates/yaml-sigil-core/src/tier_a_schema.rs`: YAML signature document
      parsing, schema validation, and metadata extraction.
-   - `crates/yaml-sigil-core/src/proto_outer.rs` and `src/wire.rs`: protobuf
-     envelope structure, strictness, and wire encode/decode behavior.
+   - `crates/yaml-sigil-core/src/pb.rs`, `src/proto_outer.rs`, and
+     `src/wire.rs`: the private generated-code boundary, stable facade,
+     protobuf envelope structure, strictness, unknown-field forwarding, and
+     wire encode/decode behavior.
    - `crates/yaml-sigil-signing/`: signing flow, output form behavior,
      canonical envelope generation, key and payload preconditions.
    - `crates/yaml-sigil-transcription/`: YAML/protobuf compose, decompose, and
@@ -150,6 +162,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    - `crates/yaml-sigil-conformance/` and `docs/conformance-validation.md`:
      fixture coverage, divergence catalog, and API gaps discovered by
      conformance changes.
+   - `crates/yaml-sigil-core/tests/protobuf_wire_compatibility.rs` and
+     `tests/downstream/`: compatibility with characterized wire behavior and
+     independently generated protobuf consumers.
    - `crates/yaml-sigil-core/README.md` and
      `crates/yaml-sigil-conformance/README.md`: immutable links to the reviewed
      specification commit.
