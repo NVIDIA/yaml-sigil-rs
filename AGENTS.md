@@ -215,6 +215,7 @@ cargo xtask update-spec --ref origin/dev/example-branch
 cargo xtask sync-workspace-versions
 cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE]
 cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
+cargo xtask wasm
 cargo xtask coverage
 cargo xtask coverage --open
 cargo xtask coverage-open
@@ -247,6 +248,24 @@ cargo-machete --with-metadata
 cargo audit
 cargo audit --file xtask/Cargo.lock
 ```
+
+`cargo xtask wasm` is a separate provider-neutral local check for the
+unpublished `yaml-sigil-wasm` boundary. It requires Rust 1.95.0 with
+`wasm32-unknown-unknown`, `wasm-pack` 0.15.0, Node.js 20 or newer, and
+Firefox:
+
+```shell
+rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
+cargo install --locked wasm-pack --version 0.15.0
+cargo xtask wasm
+```
+
+The task checks each runtime crate and both boundary feature sets for the
+WebAssembly target, runs tests in Node.js and headless Firefox, and exercises
+the generated Node.js bindings. It directs every generated executable into a
+fresh temporary directory, reports cleanup failure, and rejects retained
+`.wasm` files in the workspace. Keep it out of hosted workflows unless a
+separate review establishes an artifact-safe need for that additional lane.
 
 Copied-ref CI first runs protected commit/release-path policy plus fixed-path
 actionlint, ShellCheck, rumdl, cargo-machete, and `cargo-audit` against the
