@@ -51,6 +51,19 @@ free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
+The unpublished WebAssembly boundary adds local regression coverage in
+`crates/yaml-sigil-wasm/tests/wasm.rs` and
+`crates/yaml-sigil-wasm/tests/generated_api.cjs`. Its opt-in bounded operations
+accept exact byte ceilings and return `resource_error` above them, while the
+existing operations accept otherwise valid complete artifacts larger than
+4 MiB. These operational rejections do not classify artifacts as malformed or
+non-conforming. Tests also preserve YAML and protobuf round trips, algorithm
+verification, newline repair, selector errors, and output-copy behavior on
+Node.js and Firefox. Native admission tests in
+`crates/yaml-sigil-wasm/src/resource.rs` verify that rejected sizes never
+invoke the byte-copy or processing closure. Imported fixtures and expected
+conformance outcomes remain unchanged; this adds no deliberate divergence.
+
 The current fixture and regression set covers:
 
 - YAML decomposition marker handling, unsigned artifacts, malformed carrier
