@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add opaque owned protobuf messages and zero-copy borrowed views that retain
+  unknown fields and unknown algorithm numbers.
+
+### Changed
+
+- *(protobuf)* [**breaking**] Keep generated Buffa types private and require
+  callers to use the stable `yaml_sigil_core::pb` construction, access,
+  decode, and fallible encode methods.
+
 ## [0.5.0](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.5.0-rc.2...yaml-sigil-core-v0.5.0) - 2026-09-06
 
 ### Other

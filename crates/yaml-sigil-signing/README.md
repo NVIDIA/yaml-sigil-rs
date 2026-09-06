@@ -25,3 +25,21 @@ crate's free functions and default signers use the RustCrypto types above.
 
 `SigningKey` debug output is redacted by design. Do not log private keys, seed
 material, tokens, or raw signatures on trusted fact surfaces.
+
+## Resource boundaries
+
+Signing adds no deployment-specific maximum complete artifact size for YAML
+or protobuf output. It allocates in proportion to the payload and encoded
+signature data. Apply any local payload policy before signing and any output
+policy to the returned artifact. Checking only the returned bytes does not
+bound work or allocation already performed.
+
+The transcoding functions also accept a complete source artifact and
+construct a complete destination artifact without a configurable
+whole-artifact limit. Applications accepting potentially untrusted input
+should bound it before either transcoding direction.
+
+YamlSigil `v1alpha1` defines no maximum complete artifact size. A local limit
+is operational hardening, not conformance, and a caller may choose a lower
+value, a higher value, or no additional limit. The 16,384-octet YAML
+signature-carrier constraint remains separate.

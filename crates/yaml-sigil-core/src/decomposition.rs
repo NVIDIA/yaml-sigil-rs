@@ -87,7 +87,12 @@ fn find_last_marker(bytes: &[u8]) -> Option<usize> {
     last_marker
 }
 
-/// Run Artifact Decomposition on UTF-8 artifact bytes (no prior YAML parse).
+/// Run Artifact Decomposition on UTF-8 artifact bytes with no prior YAML parse.
+///
+/// This linear scan accepts a complete YAML artifact and does not impose an
+/// additional whole-artifact size limit. Apply any deployment-specific input
+/// bound before this call. The signature-carrier parser applies its separate
+/// 16,384-octet constraint after decomposition.
 #[tracing::instrument(level = "debug", skip(artifact), fields(len = artifact.len()))]
 pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
     if !utf8_ok(artifact) || bom_at_zero(artifact) {
