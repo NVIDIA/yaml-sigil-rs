@@ -94,6 +94,11 @@ pub fn verifier_capabilities() -> VerifierCapabilities {
 }
 
 /// Verify `input_bytes` using the selected artifact form (mirrors `Verify` with a `Form` enum).
+///
+/// # Resource usage
+///
+/// For [`ArtifactForm::Proto`], this function has the resource behavior documented on
+/// [`verify_proto`].
 #[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
 pub fn verify(
     input_bytes: &[u8],
@@ -105,6 +110,11 @@ pub fn verify(
 }
 
 /// Verify with optional parser observations (IDL `VerifyRequest.include_parser_observations`).
+///
+/// # Resource usage
+///
+/// For [`ArtifactForm::Proto`], this function has the resource behavior documented on
+/// [`verify_proto`].
 #[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
 pub fn verify_with_metadata(
     input_bytes: &[u8],
@@ -145,6 +155,12 @@ pub fn verify_yaml(
 }
 
 /// Verify protobuf `SignedYamlArtifact` wire bytes.
+///
+/// # Resource usage
+///
+/// Protobuf pre-verification has the resource behavior documented on [`pre_verify_proto`]. A
+/// successful verification also copies the payload into the returned [`VerifierState`], with
+/// allocation and copying linear in payload size.
 #[tracing::instrument(level = "info", skip_all, fields(len = wire.len()))]
 pub fn verify_proto(
     wire: &[u8],
@@ -239,6 +255,11 @@ pub(crate) fn verify_extracted_signature(
 }
 
 /// Structural + metadata pre-verify (IDL `PreVerify`).
+///
+/// # Resource usage
+///
+/// For [`ArtifactForm::Proto`], this function has the resource behavior documented on
+/// [`pre_verify_proto`].
 pub fn pre_verify(
     input_bytes: &[u8],
     form: ArtifactForm,
@@ -262,11 +283,23 @@ pub fn pre_verify_yaml(artifact: &[u8], allow_unsigned: bool) -> PreVerifyRespon
 }
 
 /// Lightweight structural peek for protobuf wire (no keys, no crypto).
+///
+/// # Resource usage
+///
+/// This path delegates to [`yaml_sigil_core::decompose_proto_outer`] and imposes no universal
+/// artifact, payload, or signature-carrier size limit. It copies recognized outer and inner
+/// fields into owned buffers, with allocation and copying linear in field size. Callers handling
+/// untrusted data must enforce deployment-appropriate size limits before invocation.
 pub fn pre_verify_proto(wire: &[u8]) -> PreVerifyResponse {
     pre_verify(wire, ArtifactForm::Proto, false, false)
 }
 
 /// Boolean summary of [`pre_verify`] without crypto (IDL `CanPreVerify`).
+///
+/// # Resource usage
+///
+/// For [`ArtifactForm::Proto`], this function has the resource behavior documented on
+/// [`pre_verify_proto`].
 pub fn can_pre_verify(input_bytes: &[u8], form: ArtifactForm, allow_unsigned: bool) -> bool {
     match pre_verify(input_bytes, form, allow_unsigned, false).outcome {
         PreVerifyOutcome::Ok => true,
@@ -288,6 +321,13 @@ pub fn verify_from_pre_verify_yaml(
 }
 
 /// Run only the verification stage using a prior protobuf [`PreVerifyResponse`].
+///
+/// # Resource usage
+///
+/// This function does not decode protobuf wire input. It operates on the owned buffers in `pre`,
+/// and successful verification copies the payload into the returned [`VerifierState`], with
+/// allocation and copying linear in payload size. Enforce deployment-appropriate limits before
+/// constructing the pre-verification response from untrusted data.
 pub fn verify_from_pre_verify_proto(
     pre: &PreVerifyResponse,
     keys: &PublicKeys<'_>,
@@ -300,6 +340,11 @@ pub fn verify_from_pre_verify_proto(
 }
 
 /// Run only the verification stage using a successful [`PreVerifyResponse`] (IDL `VerifyFromPreVerify`).
+///
+/// # Resource usage
+///
+/// For protobuf pre-verification responses, this function has the resource behavior documented
+/// on [`verify_from_pre_verify_proto`].
 pub fn verify_from_pre_verify(
     pre: &PreVerifyResponse,
     keys: &PublicKeys<'_>,
@@ -312,6 +357,9 @@ pub fn verify_from_pre_verify(
 }
 
 /// In-process default verifier that delegates to the crate's free functions.
+///
+/// Its protobuf entry points have the resource behavior documented on [`pre_verify_proto`] and
+/// [`verify_proto`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultVerifier;
 
@@ -374,6 +422,9 @@ impl Verifier for DefaultVerifier {
 /// In-process default async verifier that delegates to the crate's free
 /// functions. Bodies are `async { sync_fn(...) }` — verification work is
 /// CPU-bound; no `tokio::spawn_blocking` is used.
+///
+/// Its protobuf entry points have the resource behavior documented on [`pre_verify_proto`] and
+/// [`verify_proto`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultAsyncVerifier;
 
