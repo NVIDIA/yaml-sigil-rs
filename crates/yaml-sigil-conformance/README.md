@@ -26,7 +26,7 @@ not the portable contract in
 
 The artifacts under `fixtures/` are curated imports from the
 [YamlSigil specification conformance suite][upstream-conformance] at commit
-`07d76b3624265af9632568abcb4bac5143af5a8e`. The upstream documentation is
+`bcfa1e05a61fc27c6fd814a3910e7a24a560f038`. The upstream documentation is
 authoritative for the fixture inventory, expected outcomes, provenance,
 regeneration process, and deliberately incomplete coverage.
 
@@ -49,4 +49,4 @@ artifacts and notices. When the imported specification revision changes,
 update the pinned upstream link in this README and add a matching entry to
 `docs/conformance-validation.md` in the same commit.
 
-[upstream-conformance]: https://github.com/NVIDIA/yaml-sigil-spec/tree/07d76b3624265af9632568abcb4bac5143af5a8e/conformance
+[upstream-conformance]: https://github.com/NVIDIA/yaml-sigil-spec/tree/bcfa1e05a61fc27c6fd814a3910e7a24a560f038/conformance

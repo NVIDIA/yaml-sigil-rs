@@ -87,6 +87,18 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-09-06: Reviewed and imported `yaml-sigil-spec` `origin/main` at
+  `bcfa1e05a61fc27c6fd814a3910e7a24a560f038`. The specification delta since
+  `07d76b3624265af9632568abcb4bac5143af5a8e` changes repository and
+  conformance-rebuilder tooling. The latest P-256 changes reject invalid
+  private and nonce scalars and validate vendored ACVP public keys before
+  fixture generation. The local proto, JSON Schema, curated fixture bytes,
+  expected outcomes, imported notices, and runtime behavior are unchanged.
+
+  `yaml-sigil-traits` advances to `0.4.0-rc.4` at
+  `04a5cecd79dc605b8ab41cc29f302bad95a6b620`. Its pinned specification now
+  matches this import. The public trait and DTO shapes are unchanged, so the
+  Rust implementation requires no API reconciliation.
 - 2026-08-24: Scoped Compose payload-stream validation to YAML form and added
   protobuf round-trip regressions for invalid UTF-8, BOM-prefixed, and
   non-line-terminated payload bytes. Specification inputs, schemas, fixture
