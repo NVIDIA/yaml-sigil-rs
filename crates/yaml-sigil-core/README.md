@@ -17,8 +17,8 @@ unless they need these lower-level helpers directly.
 - YAML artifact decomposition and payload validation.
 - YAML signature-document parsing and serialization with
   [`noyalib`](https://crates.io/crates/noyalib).
-- Protobuf `SignedYamlArtifact` helpers generated with
-  [`buffa`](https://crates.io/crates/buffa).
+- Stable owned and borrowed protobuf `SignedYamlArtifact` helpers backed by
+  private [`buffa`](https://crates.io/crates/buffa) generated code.
 - Algorithm mapping for the `yaml-sigil` wire and YAML names.
 - Optional JSON Schema validation with the `json-schema-validate` feature.
 
@@ -31,6 +31,66 @@ Code generation obtains a pinned, verified Buf executable from the
 [`buf-tools`](https://crates.io/crates/buf-tools) build dependency and feeds its
 descriptor set to [`buffa-build`](https://crates.io/crates/buffa-build).
 Neither a system `buf` nor a system `protoc` installation is required.
+
+## Protobuf facade
+
+The public `pb` module exposes opaque owned messages and zero-copy borrowed
+views. Only `yaml-sigil-core` depends on Buffa directly. Consumers using a
+different protobuf implementation or Buffa release exchange encoded bytes
+with the facade instead of sharing generated Rust types.
+
+```rust
+use yaml_sigil_core::{
+    AlgorithmId,
+    pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
+};
+
+let signature =
+    YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
+let artifact =
+    SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
+
+let mut wire = Vec::with_capacity(artifact.encoded_len().unwrap());
+artifact.encode_into(&mut wire).unwrap();
+
+let decoded = SignedYamlArtifactRef::decode(&wire).unwrap();
+assert_eq!(decoded.payload(), b"message\n");
+```
+
+Borrowed payload, `keyid`, and signature accessors point into the input. Use
+`to_owned` when data must outlive that input. Owned decode and re-encode retain
+unknown fields and raw unknown algorithm numbers. Call
+`discard_unknown_fields` to remove retained unknown data explicitly.
+
+`DecodeError` and `EncodeError` expose non-exhaustive category enums through
+`kind`. Their fields remain private, and their `Debug` and `Display` output
+does not retain or print payload, signature, carrier, or unknown-field bytes.
+Include a wildcard arm when matching an error category.
+
+Code that previously constructed generated structs with public fields should
+use `SignedYamlArtifact::new`, `YamlSigilSignature::new`, and their mutation
+methods. Replace Buffa `Message` trait calls with the facade's `decode`,
+`encoded_len`, `encode_to_vec`, and `encode_into` methods. All encode methods
+are fallible. Use `AlgorithmId` for recognized values and
+`algorithm_wire_value` when forwarding an unknown protobuf enum number.
+
+## Resource boundaries
+
+YamlSigil `v1alpha1` defines no maximum complete artifact size. The facade
+does not add a deployment-specific byte limit. Applications accepting
+potentially untrusted input should apply their selected whole-artifact bound
+before YAML or protobuf processing. A deployment can choose a lower value, a
+higher value, or no additional limit.
+
+`4 MiB` is an example and the intended default for future opt-in bounded APIs.
+It is not a YamlSigil or gRPC protocol requirement, and this crate does not
+enforce it today. The existing 16,384-octet YAML signature-carrier constraint
+is separate from complete artifact size. Protobuf format limits, parser
+safeguards, address-space limits, allocator limits, and deployment controls
+still apply when no additional whole-artifact limit is selected.
+
+Whole-artifact limits do not affect conformance results. Rejecting an artifact
+under a local resource policy does not make it malformed or non-conforming.
 
 ## The Signature Document
 
