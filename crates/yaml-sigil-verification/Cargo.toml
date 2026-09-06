@@ -54,7 +54,6 @@ yaml-sigil-transcription = { workspace = true, default-features = false }
 json-schema-validate = ["yaml-sigil-core/json-schema-validate"]
 
 [dev-dependencies]
-buffa = { workspace = true }
 rand_core = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 yaml-sigil-signing = { workspace = true }

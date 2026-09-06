@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "yaml-sigil-core-downstream-buffa-0-5"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata.cargo-machete]
+ignored = ["buf-tools", "buffa-build"]
+
+[dependencies]
+buffa = "=0.5.2"
+yaml-sigil-core = { path = "../../../crates/yaml-sigil-core" }
+
+[build-dependencies]
+buf-tools = "=1.72.0-hotfix.2"
+buffa-build = "=0.5.2"
