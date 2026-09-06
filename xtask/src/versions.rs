@@ -99,6 +99,29 @@ pub(crate) fn sync_workspace_dependency_versions(root: &Path, check: bool) -> Re
     Ok(changed)
 }
 
+pub(crate) fn set_workspace_release_version(
+    root: &Path,
+    expected_current: &Version,
+    selected: &Version,
+) -> Result<()> {
+    let path = root.join("Cargo.toml");
+    let manifest = safe_file::read_manifest(root, Path::new("Cargo.toml"))
+        .context("read workspace Cargo.toml for exact release selection")?;
+    let mut document = manifest
+        .parse::<DocumentMut>()
+        .context("parse workspace Cargo.toml for exact release selection")?;
+    let version = document
+        .get_mut("workspace")
+        .and_then(|workspace| workspace.get_mut("package"))
+        .and_then(|package| package.get_mut("version"))
+        .ok_or_else(|| anyhow!("missing [workspace.package] version"))?;
+    if version.as_str() != Some(expected_current.to_string().as_str()) {
+        bail!("workspace version changed from release-plz-derived {expected_current}");
+    }
+    *version = toml_edit::value(selected.to_string());
+    write_manifest(&path, &document.to_string())
+}
+
 pub(crate) fn validate(root: &Path, expected: &Version, resolve_traits: bool) -> Result<Metadata> {
     let metadata = cargo_metadata(root, resolve_traits)?;
     validate_metadata(root, &metadata, expected, resolve_traits)?;
@@ -369,7 +392,7 @@ fn validate_resolved_traits(metadata: &Metadata, packages: &[&Package]) -> Resul
     Ok(())
 }
 
-fn write_manifest(path: &Path, body: &str) -> Result<()> {
+pub(crate) fn write_manifest(path: &Path, body: &str) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("inspect manifest {}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
@@ -494,6 +517,36 @@ mod tests {
         assert!(parse_release_version("1.2.3").is_ok());
         assert!(parse_release_version("1.2.3-rc.4").is_ok());
         assert!(parse_release_version("1.2.3+build").is_err());
+    }
+
+    #[test]
+    fn exact_release_selection_replaces_only_the_expected_workspace_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let manifest = directory.path().join("Cargo.toml");
+        fs::write(
+            &manifest,
+            "[workspace]\n[workspace.package]\nversion = \"0.5.0-rc.3\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+
+        set_workspace_release_version(
+            directory.path(),
+            &Version::parse("0.5.0-rc.3").unwrap(),
+            &Version::parse("0.5.0").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(&manifest).unwrap(),
+            "[workspace]\n[workspace.package]\nversion = \"0.5.0\"\nedition = \"2024\"\n"
+        );
+        assert!(
+            set_workspace_release_version(
+                directory.path(),
+                &Version::parse("0.5.0-rc.3").unwrap(),
+                &Version::parse("0.5.0").unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
