@@ -73,6 +73,23 @@ The public extension-trait contract lives in the separately published
 `yaml-sigil-traits` crate. Do not edit, generate, or publish traits from this
 repository.
 
+Keep generated protobuf code crate-private inside `yaml-sigil-core`. Expose
+protobuf messages only through the private-field types in
+`yaml_sigil_core::pb`, and do not expose Buffa traits, generated modules,
+views, fields, or errors in public signatures. Of the published crates, only
+`yaml-sigil-core` depends directly on Buffa. Preserve unknown fields and raw
+unknown algorithm numbers across owned decode and re-encode. Keep the Buffa
+0.5 wire-characterization tests and both `tests/downstream` facade fixtures
+passing when changing protobuf code or dependencies.
+
+YamlSigil `v1alpha1` defines no maximum complete artifact size. Treat an
+external whole-artifact limit as optional operational hardening, not a
+conformance requirement. `4 MiB` is an example and the intended default for a
+future opt-in bounded API, not a current YamlSigil or gRPC requirement. Keep
+the 16,384-octet YAML signature-carrier constraint separate. A future
+`v1alpha2` proposal may define normative resource policy, but do not imply that
+it exists today.
+
 ## Third-party material and attribution
 
 `THIRD_PARTY_NOTICES.md` is the canonical attribution and redistribution
@@ -261,6 +278,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo test --locked --manifest-path xtask/Cargo.toml
+cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-core-only
+cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-buffa-0-5
 cargo-machete --with-metadata
 cargo deny check bans licenses sources -D warnings
 cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources -D warnings -A unnecessary-skip -A unmatched-skip
@@ -561,7 +580,7 @@ The workspace uses `resolver = "3"` and Rust edition 2024.
 
 | Area | Features | Notes |
 |------|----------|-------|
-| Protobuf codegen | n/a | Generated with `buffa` from the local `yaml_sigil.proto`, using Buf from `buf-tools`. |
+| Protobuf codegen | n/a | Generated privately with `buffa` from the local `yaml_sigil.proto`, using Buf from `buf-tools`; public access uses `yaml_sigil_core::pb`. |
 | YAML parser | n/a | YAML signature documents are parsed with `noyalib`. |
 | JSON Schema helper | `json-schema-validate` | Exposes validation against the local signature-document schema. |
 
@@ -575,6 +594,11 @@ Any conformance-related change must update `docs/conformance-validation.md` in
 the same commit. This includes fixture imports, fixture remapping, expected
 outcome changes, ignored tests, public API surfaced because of a fixture, and
 deliberate divergences.
+
+Whole-artifact deployment limits do not change conformance outcomes. A local
+resource-policy rejection does not make the artifact malformed or
+non-conforming. Preserve this distinction when documenting or adding optional
+bounded APIs.
 
 When a fixture would require going far outside the natural patterns of the Rust
 crates in use, prefer recording a divergence in

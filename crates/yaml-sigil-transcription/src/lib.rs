@@ -1,7 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! YamlSigil v1alpha1 Transcription API: bytes-only Compose / Decompose.
+//! YamlSigil v1alpha1 Transcription API for bytes-only compose and decompose.
+//!
+//! # Resource boundaries
+//!
+//! Compose and decompose add no deployment-specific maximum complete artifact
+//! size for either form. They allocate output in proportion to the supplied or
+//! recovered components. Applications accepting potentially untrusted input
+//! should apply their chosen whole-artifact bound before decomposition. The
+//! 16,384-octet YAML signature-carrier constraint remains a separate rule at
+//! metadata parsing boundaries.
 
 use tracing::instrument;
 use yaml_sigil_core::{
@@ -76,6 +85,10 @@ fn contains_constrained_marker(carrier: &[u8]) -> bool {
 }
 
 /// Assemble envelope-form bytes from an abstract Artifact.
+///
+/// This method does not enforce a complete-output byte limit for YAML or
+/// protobuf. Apply any deployment-specific component policy before this call
+/// and any output policy to the returned artifact.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]
 pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
     if let Err(e) = validate_compose_invocation(req) {
@@ -106,11 +119,11 @@ pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
 ///
 /// # Resource usage
 ///
-/// For [`TranscriptionForm::Protobuf`], this function has the resource behavior documented on
-/// [`yaml_sigil_core::decompose_proto_outer`]. It imposes no universal artifact, payload, or
-/// signature-carrier size limit, and it copies recognized fields into owned buffers with
-/// allocation and copying linear in field size. Callers handling untrusted data must enforce
-/// deployment-appropriate size limits before invocation.
+/// Both forms accept a complete artifact without adding a
+/// deployment-specific whole-artifact limit. YAML decomposition scans the
+/// complete input. Protobuf decomposition has the resource behavior documented
+/// on [`yaml_sigil_core::decompose_proto_outer`]. Both return owned component
+/// buffers. Apply any local input bound before this call.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]
 pub fn decompose(req: &DecomposeRequest<'_>) -> DecomposeResponse {
     let outer = match validate_decompose_invocation(req) {
@@ -125,7 +138,9 @@ pub fn decompose(req: &DecomposeRequest<'_>) -> DecomposeResponse {
 
 /// In-process default transcriber that delegates to the crate's free functions.
 ///
-/// Protobuf decomposition has the resource behavior documented on [`decompose`].
+/// Both forms have the resource behavior documented on [`compose`] and
+/// [`decompose`]. This unit type remains unconfigured so a future configured
+/// transcriber can be added alongside it.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultTranscriber;
 
@@ -145,7 +160,8 @@ impl Transcriber for DefaultTranscriber {
 /// functions. Bodies are `async { sync_fn(...) }` — the work is structural,
 /// CPU-bound, and short.
 ///
-/// Protobuf decomposition has the resource behavior documented on [`decompose`].
+/// Both forms have the resource behavior documented on [`compose`] and
+/// [`decompose`]. This unit type remains unconfigured.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultAsyncTranscriber;
 
