@@ -120,8 +120,9 @@ release-plz, accept a forge credential, or publish.
 At the exact signed and DCO-compliant pull-request head, run the release-plz
 acceptance check below. The local branch must track the canonical remote
 release branch because release-plz queries its pull-request association.
-Supply an approved read-only forge token through `READ_ONLY_GIT_TOKEN`; only
-the dry-run process receives it.
+Supply an approved read-only forge token through `READ_ONLY_GIT_TOKEN`. It is
+exposed as `GIT_TOKEN` to the full dry-run process tree (release-plz, Cargo,
+and their children), not just the top-level release-plz process.
 
 ```bash
 (
