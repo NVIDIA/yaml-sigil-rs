@@ -1,5 +1,7 @@
 /target/
 /xtask/target/
+/tests/downstream/target/
+/tests/downstream/Cargo.lock
 /.rumdl_cache/
 /Cargo.lock
 __pycache__/

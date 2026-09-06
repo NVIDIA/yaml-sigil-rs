@@ -13,6 +13,10 @@ members = [
     "crates/yaml-sigil-test-keys",
     "crates/yaml-sigil-conformance",
 ]
+exclude = [
+    "tests/downstream/buffa-0-5",
+    "tests/downstream/core-only",
+]
 
 [workspace.package]
 version = "0.6.0-rc.0"
@@ -38,8 +42,8 @@ yaml-sigil-signing = { version = "0.6.0-rc.0", path = "crates/yaml-sigil-signing
 
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 buf-tools = "=1.72.0-hotfix.2"
-buffa = "0.5"
-buffa-build = "0.5"
+buffa = "=0.9.2"
+buffa-build = "=0.9.2"
 # Keep precomputed tables explicit for workspace consumers with defaults off.
 ed25519-dalek = { version = "2.1", default-features = false, features = [
     "alloc",
