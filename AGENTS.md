@@ -426,6 +426,17 @@ validation remain provider-neutral under `cargo xtask release`. The exact
 release-plz dry run is a separate maintainer-operated acceptance step because
 release-plz requires read-only forge association context.
 
+Release preparation always lets pinned release-plz update derive the
+transaction first. Only starting its derived version as a prerelease or
+promoting the current same-core prerelease to stable may invoke pinned
+release-plz set-version afterward. The xtask restores member workspace
+inheritance and verifies that release-plz synchronized every internal
+requirement. It rejects a pre-existing root `Cargo.lock` and removes only a
+lockfile generated during its bounded release operations. Land any external
+`yaml-sigil-traits` dependency change before creating the release branch. Run
+the exact-head dry run from the canonical tracking branch, never from detached
+HEAD.
+
 Validate shell scripts under `.github/scripts` with Shuck before landing
 changes. Install it from the `shuck-cli` crate and run it from the repository
 root:

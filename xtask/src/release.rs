@@ -5,7 +5,9 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::path::Path;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -89,6 +91,7 @@ fn prepare(root: &Path, selected: &Version) -> Result<()> {
     versions::parse_release_version(&selected.to_string())?;
     validate_policy(root)?;
     require_release_plz(root)?;
+    require_root_lock_absent(root)?;
     require_clean(root)?;
     require_origin_main_base(root)?;
     let current = versions::current(root)?;
@@ -100,32 +103,170 @@ fn prepare(root: &Path, selected: &Version) -> Result<()> {
         bail!("release preparation requires branch {MANUAL_BRANCH_PREFIX}{selected}");
     }
 
-    // This is the sole local release-plz mutation: it derives the reviewed
-    // manifests and changelogs but has no forge or registry credentials.
-    let mut update = release_plz(root);
-    update.args(["update", "--config", RELEASE_CONFIG]);
-    run_release_plz(&mut update, "release-plz update")?;
+    // release-plz remains the release proposal engine: update first derives
+    // the reviewed manifest and changelog transaction without credentials.
+    let mut update = release_plz_update(root);
+    without_persisted_root_lock(root, "release-plz update", || {
+        run_release_plz(&mut update, "release-plz update")
+    })?;
 
-    // release-plz exclusively owns the version, dependency, and changelog
-    // edits; the maintainer-selected version is a strict postcondition.
-    versions::validate(root, selected, false)?;
+    let derived = versions::current(root)?;
+    if &derived != selected {
+        apply_exact_version(root, &current, &derived, selected)?;
+    }
+
+    // The maintainer-selected version remains a strict postcondition after
+    // release-plz's derivation and its bounded exact-selection compatibility
+    // path.
+    without_persisted_root_lock(root, "release metadata validation", || {
+        versions::validate(root, selected, false).map(|_| ())
+    })?;
     require_managed_diff(root)?;
+    require_root_lock_absent(root)?;
     eprintln!(
         "release: prepared {selected}; inspect the complete diff before signing the release commit"
     );
     Ok(())
 }
 
+fn apply_exact_version(
+    root: &Path,
+    original: &Version,
+    derived: &Version,
+    selected: &Version,
+) -> Result<()> {
+    let adjustment = require_exact_version_adjustment(original, derived, selected)?;
+    let inherited_manifests = snapshot_inherited_manifests(root)?;
+
+    // Pinned release-plz performs the exact prerelease-to-stable selection
+    // only after update has derived the changelog and preliminary version.
+    let mut set_version = release_plz_set_version(root, selected);
+    without_persisted_root_lock(root, "release-plz set-version", || {
+        run_release_plz(&mut set_version, "release-plz set-version")
+    })?;
+    require_managed_diff(root)?;
+
+    restore_inherited_manifests(root, selected, &inherited_manifests)?;
+    versions::set_workspace_release_version(root, derived, selected)?;
+    // set-version, rather than the xtask, must have synchronized every
+    // internal requirement. This check deliberately refuses to repair one.
+    without_persisted_root_lock(root, "release dependency validation", || {
+        versions::sync_workspace_dependency_versions(root, true).map(|_| ())
+    })?;
+    eprintln!("release: {adjustment}; adjusted release-plz-derived {derived} to {selected}");
+    Ok(())
+}
+
+fn require_exact_version_adjustment(
+    original: &Version,
+    derived: &Version,
+    selected: &Version,
+) -> Result<&'static str> {
+    let same_core = derived.major == selected.major
+        && derived.minor == selected.minor
+        && derived.patch == selected.patch;
+    let stable_promotion = !original.pre.is_empty()
+        && selected.pre.is_empty()
+        && original.major == selected.major
+        && original.minor == selected.minor
+        && original.patch == selected.patch
+        && !derived.pre.is_empty()
+        && derived >= original
+        && derived < selected;
+    if same_core && stable_promotion {
+        return Ok("promoted the current prerelease to stable");
+    }
+    let new_prerelease = original.pre.is_empty()
+        && !selected.pre.is_empty()
+        && derived.pre.is_empty()
+        && original < selected
+        && selected < derived;
+    if same_core && new_prerelease {
+        return Ok("started the release-plz-derived version as a prerelease");
+    }
+    bail!(
+        "release-plz derived {derived}, not selected release {selected}; only a new \
+         prerelease or promotion of the current same-core prerelease is supported"
+    )
+}
+
+#[derive(Debug)]
+struct InheritedManifest {
+    path: PathBuf,
+    body: String,
+}
+
+fn snapshot_inherited_manifests(root: &Path) -> Result<Vec<InheritedManifest>> {
+    RUST_POLICY
+        .packages
+        .iter()
+        .map(|policy| {
+            let path = Path::new(policy.path_in_vcs).join("Cargo.toml");
+            let body = safe_file::read_manifest(root, &path)
+                .with_context(|| format!("read inherited manifest {}", path.display()))?;
+            expected_literal_manifest(&body, &Version::new(0, 0, 0))
+                .with_context(|| format!("validate inherited manifest {}", path.display()))?;
+            Ok(InheritedManifest { path, body })
+        })
+        .collect()
+}
+
+fn restore_inherited_manifests(
+    root: &Path,
+    selected: &Version,
+    manifests: &[InheritedManifest],
+) -> Result<()> {
+    for manifest in manifests {
+        let actual = safe_file::read_manifest(root, &manifest.path)
+            .with_context(|| format!("read updated manifest {}", manifest.path.display()))?;
+        let expected = expected_literal_manifest(&manifest.body, selected)?;
+        if actual != expected {
+            bail!(
+                "release-plz set-version changed {} beyond its inherited package version",
+                manifest.path.display()
+            );
+        }
+    }
+    for manifest in manifests {
+        versions::write_manifest(&root.join(&manifest.path), &manifest.body)?;
+    }
+    Ok(())
+}
+
+fn expected_literal_manifest(body: &str, selected: &Version) -> Result<String> {
+    let mut document = body
+        .parse::<DocumentMut>()
+        .context("parse inherited package manifest")?;
+    let version = document
+        .get_mut("package")
+        .and_then(Item::as_table_like_mut)
+        .and_then(|package| package.get_mut("version"))
+        .ok_or_else(|| anyhow!("package manifest lacks inherited version"))?;
+    let inherited = version
+        .as_table_like()
+        .filter(|table| table.len() == 1)
+        .and_then(|table| table.get("workspace"))
+        .and_then(Item::as_bool);
+    if inherited != Some(true) {
+        bail!("package version must inherit from the workspace");
+    }
+    *version = toml_edit::value(selected.to_string());
+    Ok(document.to_string())
+}
+
 pub(crate) fn check(root: &Path, expected: &Version) -> Result<()> {
     versions::parse_release_version(&expected.to_string())?;
     validate_policy(root)?;
+    require_root_lock_absent(root)?;
     require_clean(root)?;
     if versions::current(root)? != *expected {
         bail!("workspace version does not equal expected release {expected}");
     }
-    versions::sync_workspace_dependency_versions(root, true)?;
-    versions::validate(root, expected, true)?;
-    require_no_tracked_root_lock(root)?;
+    without_persisted_root_lock(root, "release source validation", || {
+        versions::sync_workspace_dependency_versions(root, true)?;
+        versions::validate(root, expected, true).map(|_| ())
+    })?;
+    require_root_lock_absent(root)?;
     require_clean(root)?;
     eprintln!("release: validated exact four-crate release {expected}");
     Ok(())
@@ -291,6 +432,51 @@ fn require_no_tracked_root_lock(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn require_root_lock_absent(root: &Path) -> Result<()> {
+    require_no_tracked_root_lock(root)?;
+    require_root_lock_absent_on_disk(root)
+}
+
+fn require_root_lock_absent_on_disk(root: &Path) -> Result<()> {
+    match fs::symlink_metadata(root.join("Cargo.lock")) {
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("inspect root Cargo.lock"),
+        Ok(_) => bail!("the root Cargo.lock must be absent"),
+    }
+}
+
+fn without_persisted_root_lock<T>(
+    root: &Path,
+    label: &str,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    require_root_lock_absent_on_disk(root)?;
+    let result = operation();
+    let cleanup = remove_generated_root_lock(root, label);
+    match (result, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(cleanup_error)) => Err(error.context(format!(
+            "{label} also left an unsafe root Cargo.lock: {cleanup_error:#}"
+        ))),
+    }
+}
+
+fn remove_generated_root_lock(root: &Path, label: &str) -> Result<()> {
+    let path = root.join("Cargo.lock");
+    let metadata = match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).context("inspect generated root Cargo.lock"),
+        Ok(metadata) => metadata,
+    };
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        bail!("{label} left a root Cargo.lock that is not a regular file");
+    }
+    fs::remove_file(&path).with_context(|| format!("remove {label}-generated root Cargo.lock"))?;
+    require_root_lock_absent_on_disk(root)
+}
+
 fn require_clean(root: &Path) -> Result<()> {
     let status = git_output(root, &["status", "--porcelain=v1", "--untracked-files=all"])?;
     if !status.is_empty() {
@@ -327,6 +513,28 @@ fn release_plz(root: &Path) -> Command {
     for name in TOKEN_ENVIRONMENTS {
         command.env_remove(name);
     }
+    command
+}
+
+fn release_plz_update(root: &Path) -> Command {
+    let mut command = release_plz(root);
+    command.args([
+        "update",
+        "--manifest-path",
+        "Cargo.toml",
+        "--config",
+        RELEASE_CONFIG,
+    ]);
+    command
+}
+
+fn release_plz_set_version(root: &Path, selected: &Version) -> Command {
+    let mut command = release_plz(root);
+    command.arg("set-version");
+    for policy in RUST_POLICY.packages {
+        command.arg(format!("{}@{selected}", policy.package));
+    }
+    command.args(["--manifest-path", "Cargo.toml", "--config", RELEASE_CONFIG]);
     command
 }
 
@@ -403,6 +611,121 @@ mod tests {
                     .any(|(key, value)| key == *name && value.is_none())
             );
         }
+    }
+
+    #[test]
+    fn exact_version_adjustment_is_limited_to_release_boundaries() {
+        let selected = Version::parse("0.5.0").unwrap();
+        assert!(
+            require_exact_version_adjustment(
+                &Version::parse("0.5.0-rc.2").unwrap(),
+                &Version::parse("0.5.0-rc.3").unwrap(),
+                &selected,
+            )
+            .is_ok()
+        );
+        assert!(
+            require_exact_version_adjustment(
+                &Version::parse("0.5.0-rc.2").unwrap(),
+                &Version::parse("0.5.0-rc.2").unwrap(),
+                &selected,
+            )
+            .is_ok()
+        );
+        assert!(
+            require_exact_version_adjustment(
+                &Version::parse("0.5.0").unwrap(),
+                &Version::parse("0.6.0").unwrap(),
+                &Version::parse("0.6.0-rc.1").unwrap(),
+            )
+            .is_ok()
+        );
+        for (original, derived, selected) in [
+            ("0.5.0", "0.5.1", "0.5.1"),
+            ("0.5.0-rc.2", "0.5.0-rc.3", "0.5.0-rc.4"),
+            ("0.5.0-rc.2", "0.6.0-rc.1", "0.5.0"),
+            ("0.5.0-rc.3", "0.5.0-rc.2", "0.5.0"),
+            ("0.5.0", "0.5.1", "0.6.0-rc.1"),
+        ] {
+            assert!(
+                require_exact_version_adjustment(
+                    &Version::parse(original).unwrap(),
+                    &Version::parse(derived).unwrap(),
+                    &Version::parse(selected).unwrap(),
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn exact_version_command_names_every_package_once() {
+        let selected = Version::parse("0.5.0").unwrap();
+        let command = release_plz_set_version(Path::new("."), &selected);
+        let args = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "set-version",
+                "yaml-sigil-core@0.5.0",
+                "yaml-sigil-transcription@0.5.0",
+                "yaml-sigil-signing@0.5.0",
+                "yaml-sigil-verification@0.5.0",
+                "--manifest-path",
+                "Cargo.toml",
+                "--config",
+                RELEASE_CONFIG,
+            ]
+        );
+    }
+
+    #[test]
+    fn inherited_manifest_restoration_accepts_only_the_literal_version_rewrite() {
+        let inherited =
+            "[package]\nname = \"example\"\nversion.workspace = true\npublish = [\"crates-io\"]\n";
+        let selected = Version::parse("1.2.3").unwrap();
+        let literal = expected_literal_manifest(inherited, &selected).unwrap();
+        assert_eq!(
+            literal,
+            "[package]\nname = \"example\"\nversion = \"1.2.3\"\npublish = [\"crates-io\"]\n"
+        );
+        assert!(
+            expected_literal_manifest(
+                "[package]\nname = \"example\"\nversion = \"1.2.2\"\n",
+                &selected,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn release_operations_remove_only_their_generated_root_lock() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        let lock = root.join("Cargo.lock");
+
+        let value = without_persisted_root_lock(root, "fixture", || {
+            fs::write(&lock, "generated\n")?;
+            Ok(7)
+        })
+        .unwrap();
+        assert_eq!(value, 7);
+        assert!(!lock.exists());
+
+        let error = without_persisted_root_lock(root, "failing fixture", || -> Result<()> {
+            fs::write(&lock, "generated\n")?;
+            bail!("operation failed")
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("operation failed"));
+        assert!(!lock.exists());
+
+        fs::write(&lock, "pre-existing\n").unwrap();
+        assert!(without_persisted_root_lock(root, "fixture", || Ok(())).is_err());
+        assert_eq!(fs::read_to_string(lock).unwrap(), "pre-existing\n");
     }
 
     #[test]
