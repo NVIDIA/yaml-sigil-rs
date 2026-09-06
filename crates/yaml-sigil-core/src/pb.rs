@@ -10,6 +10,111 @@
 //! YamlSigil `v1alpha1` defines no maximum complete artifact size. These
 //! entry points add no deployment-specific limit. The protobuf format's own
 //! size ceiling and the decoder's implementation safeguards still apply.
+//!
+//! # Construction and borrowed inspection
+//!
+//! Construct owned messages without importing Buffa. Encoding is fallible and
+//! can append to a reusable allocation. Borrowed decoding keeps byte and
+//! string fields in the input buffer.
+//!
+//! ```
+//! use yaml_sigil_core::{
+//!     AlgorithmId,
+//!     pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
+//! };
+//!
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let signature =
+//!     YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
+//! let artifact =
+//!     SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
+//!
+//! let mut wire = Vec::with_capacity(artifact.encoded_len()?);
+//! artifact.encode_into(&mut wire)?;
+//!
+//! let decoded = SignedYamlArtifactRef::decode(&wire)?;
+//! assert_eq!(decoded.payload(), b"message\n");
+//! assert_eq!(
+//!     decoded.signature().unwrap().algorithm(),
+//!     Some(AlgorithmId::Ed25519),
+//! );
+//!
+//! wire.clear();
+//! artifact.encode_into(&mut wire)?;
+//! # Ok(())
+//! # }
+//! # example().unwrap();
+//! ```
+//!
+//! # External input boundaries
+//!
+//! Applications accepting potentially untrusted complete artifacts should
+//! select a deployment-appropriate input bound before calling any YamlSigil
+//! parser. `4 MiB` is an example and the intended default for future opt-in
+//! bounded APIs, not a YamlSigil or gRPC protocol requirement. A deployment
+//! can choose a lower value, a higher value, or no additional whole-artifact
+//! byte limit.
+//!
+//! ```
+//! use yaml_sigil_core::{
+//!     AlgorithmId,
+//!     pb::{
+//!         DecodeError, SignedYamlArtifact, SignedYamlArtifactRef,
+//!         YamlSigilSignature,
+//!     },
+//! };
+//!
+//! #[derive(Debug)]
+//! enum InputError {
+//!     ArtifactTooLarge,
+//!     InvalidProtobuf,
+//! }
+//!
+//! impl From<DecodeError> for InputError {
+//!     fn from(error: DecodeError) -> Self {
+//!         let _ = error;
+//!         Self::InvalidProtobuf
+//!     }
+//! }
+//!
+//! fn check_artifact_size(
+//!     artifact: &[u8],
+//!     maximum: Option<usize>,
+//! ) -> Result<(), InputError> {
+//!     if maximum.is_some_and(|limit| artifact.len() > limit) {
+//!         return Err(InputError::ArtifactTooLarge);
+//!     }
+//!
+//!     Ok(())
+//! }
+//!
+//! fn inspect(
+//!     input: &[u8],
+//!     deployment_limit: Option<usize>,
+//! ) -> Result<usize, InputError> {
+//!     check_artifact_size(input, deployment_limit)?;
+//!     let artifact = SignedYamlArtifactRef::decode(input)?;
+//!     Ok(artifact.payload().len())
+//! }
+//!
+//! let signature =
+//!     YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
+//! let wire = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature))
+//!     .encode_to_vec()
+//!     .unwrap();
+//!
+//! let deployment_limit = Some(4 * 1024 * 1024);
+//! assert_eq!(inspect(&wire, deployment_limit).unwrap(), 8);
+//!
+//! let no_additional_limit = None;
+//! assert_eq!(inspect(&wire, no_additional_limit).unwrap(), 8);
+//! ```
+//!
+//! A local whole-artifact rejection does not make an artifact malformed or
+//! non-conforming. The `v1alpha1` 16,384-octet YAML signature-carrier
+//! constraint is independent of complete artifact size. Protobuf format
+//! limits, address-space limits, allocator limits, and deployment controls
+//! still apply when an application selects no additional limit.
 
 use std::fmt;
 

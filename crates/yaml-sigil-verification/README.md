@@ -43,6 +43,22 @@ other form after structural or verification failure.
 Only payload bytes returned by `VerifierState::Verified` are authenticated. A
 signature document inside those bytes remains payload content.
 
+## Resource boundaries
+
+Verification, pre-verification, and the boolean pre-verification summary add
+no deployment-specific maximum complete artifact size for YAML or protobuf.
+Applications accepting potentially untrusted artifacts should apply their
+chosen whole-input bound before calling these methods. Apply the bound before
+constructing a reusable pre-verification response because later verification
+stages no longer receive the original encoded size.
+
+YamlSigil `v1alpha1` defines no maximum complete artifact size. A local
+resource-policy rejection remains separate from invocation errors, malformed
+artifacts, failed cryptographic verification, and conformance results. A
+deployment can choose a lower limit, a higher limit, or no additional limit.
+Protobuf format limits, parser safeguards, address-space limits, allocator
+limits, and deployment controls still apply.
+
 ## YAML Signature-Document Behavior
 
 The verifier advertises `AdvertisedConformanceProfile::Permissive`. Its YAML
@@ -69,7 +85,8 @@ these implementation-specific hard bounds:
 
 The parser rejects anchors, aliases, custom tags, and duplicate keys. These
 values describe this Rust implementation; they are not portable `yaml-sigil`
-limits except for the 16,384-octet markerless carrier limit.
+limits except for the 16,384-octet markerless carrier limit. That carrier
+constraint is independent of complete artifact size.
 
 The verifier exposes parser observations when callers request them. It does not
 provide RPC transport.
