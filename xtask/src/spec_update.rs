@@ -52,8 +52,10 @@ pub fn update_spec(root: &Path, spec_ref: &str) -> Result<()> {
 
     import_spec_artifacts(root, &checkout)?;
 
-    eprintln!("updated local spec artifacts from yaml-sigil-spec {spec_ref} ({commit})");
-    eprintln!("review `git diff` and apply any required Rust, test, or doc changes");
+    eprintln!("refreshed local spec artifacts from yaml-sigil-spec {spec_ref} ({commit})");
+    eprintln!("review `git diff` and the full upstream delta from the prior imported commit");
+    eprintln!("update immutable spec links and `docs/conformance-validation.md` for {commit}");
+    eprintln!("apply any required Rust, test, notice, or other documentation changes");
     Ok(())
 }
 
