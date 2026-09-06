@@ -114,6 +114,13 @@ pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>,
 }
 
 /// Convert protobuf wire bytes into a signed YAML artifact stream.
+///
+/// # Resource usage
+///
+/// The library imposes no universal artifact, payload, or signature-carrier size limit.
+/// Protobuf decomposition copies recognized fields into owned buffers, and conversion constructs
+/// an owned YAML stream. Allocation and copying are linear in field and output size. Callers
+/// handling untrusted data must enforce deployment-appropriate size limits before invocation.
 #[instrument(level = "debug", skip(wire), fields(len = wire.len()))]
 pub fn proto_wire_to_signed_yaml_stream(wire: &[u8]) -> Result<Vec<u8>, TranscodeError> {
     let (payload, carrier) = proto_decompose(wire)?;
