@@ -41,8 +41,9 @@ Signature Algorithm (EdDSA)*, January 2017:
 
 - RFC information and copyright notice:
   <https://www.rfc-editor.org/info/rfc8032/>.
-- Sections 5.1 and 7.1:
-  <https://www.rfc-editor.org/rfc/rfc8032#section-5.1> and
+- Sections 5.1, 5.1.7, and 7.1:
+  <https://www.rfc-editor.org/rfc/rfc8032#section-5.1>,
+  <https://www.rfc-editor.org/rfc/rfc8032#section-5.1.7>, and
   <https://www.rfc-editor.org/rfc/rfc8032#section-7.1>.
 - BCP 78: <https://www.rfc-editor.org/info/bcp78>.
 - IETF Trust Legal Provisions, version 5.0:
@@ -54,18 +55,20 @@ the IETF, the IETF Trust, and the RFC Editor are not used to endorse or promote
 claimed or implied.
 
 This crate adapts RFC 8032 sections 5.1, 5.1.2, and 5.1.7 into Rust constants,
-point decoding, canonical-encoding checks, challenge computation, and
-cofactored verification. It reproduces one section 7.1 test-vector signature
-in a unit test. Section 3(c) of the IETF Trust Legal Provisions, version 5.0,
-addresses reproduction outside the IETF Standards Process. Section 5(a)
-states that no patent license is granted, and sections 7(b) through 7(d)
-provide the intellectual-property-rights caveat. The Rust representations and
-verifier-state mappings are identified `yaml-sigil-verification` adaptations.
+point decoding, canonical-encoding checks, challenge computation, cofactored
+verification, and fixed provider-qualification vectors. It reproduces one
+section 7.1 test-vector public key and signature. Section 3(c) of the IETF
+Trust Legal Provisions, version 5.0, addresses reproduction outside the IETF
+Standards Process. Section 5(a) states that no patent license is granted, and
+sections 7(b) through 7(d) provide the intellectual-property-rights caveat.
+The Rust representations and verifier-state mappings are identified
+`yaml-sigil-verification` adaptations.
 
 ## Standards for Efficient Cryptography
 
-The crate's P-256 public-key resolver follows point-encoding behavior from
-*Standards for Efficient Cryptography 1 (SEC 1)*, Version 2.0.
+The crate's P-256 public-key resolver and fixed provider-qualification public
+key follow point-encoding behavior from *Standards for Efficient Cryptography
+1 (SEC 1)*, Version 2.0.
 
 The front page of *Standards for Efficient Cryptography 1 (SEC 1)* carries
 this notice:
