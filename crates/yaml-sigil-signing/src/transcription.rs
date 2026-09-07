@@ -24,7 +24,7 @@
 //! # fn transcode(yaml: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 //! let limits = ArtifactResourceLimits::default();
 //! let protobuf =
-//!     signed_yaml_stream_to_proto_wire_with_resource_limits(yaml, &limits)??;
+//!     signed_yaml_stream_to_proto_wire_with_resource_limits(yaml, &limits)???;
 //! // Source and destination are each compared with the ceiling. Their byte
 //! // lengths are not added together.
 //! Ok(protobuf)
@@ -37,13 +37,13 @@ use tracing::instrument;
 use yaml_sigil_core::{
     ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult, SCHEMA_V1ALPHA1,
     SignatureDocument, compose_proto_outer, compose_proto_outer_with_resource_limits,
-    parse_signature_document, serialize_signature_document, validate_payload_stream,
-    view_signature_carrier,
+    parse_signature_document, pb::EncodeError, serialize_signature_document,
+    validate_payload_stream, view_signature_carrier,
 };
 use yaml_sigil_traits::{AlgorithmId, OuterConformance};
 use yaml_sigil_transcription::{
     ComposeOutcome, ComposeRequest, DecomposeOutcome, DecomposeRequest, TranscriptionForm, compose,
-    compose_with_resource_limits, decompose,
+    decompose,
 };
 
 /// Failure to transcode between signed YAML stream bytes and protobuf wire.
@@ -147,21 +147,25 @@ fn yaml_to_proto_components(yaml_artifact: &[u8]) -> Result<(Vec<u8>, Vec<u8>), 
 }
 
 /// Convert signed YAML to protobuf with independent source and destination checks.
+///
+/// The outer result reports resource rejection, the next result preserves a
+/// protobuf format error, and the innermost result preserves [`TranscodeError`].
 #[instrument(level = "debug", skip(yaml_artifact, limits), fields(len = yaml_artifact.len()))]
 pub fn signed_yaml_stream_to_proto_wire_with_resource_limits(
     yaml_artifact: &[u8],
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Result<Vec<u8>, TranscodeError>> {
+) -> ArtifactResourceResult<Result<Result<Vec<u8>, TranscodeError>, EncodeError>> {
     limits.check_input_size(ArtifactResourceForm::Yaml, yaml_artifact)?;
     let (payload, inner_carrier) = match yaml_to_proto_components(yaml_artifact) {
         Ok(components) => components,
+        Err(error) => return Ok(Ok(Err(error))),
+    };
+    let artifact = match compose_proto_outer_with_resource_limits(&payload, &inner_carrier, limits)?
+    {
+        Ok(artifact) => artifact,
         Err(error) => return Ok(Err(error)),
     };
-    Ok(Ok(compose_proto_outer_with_resource_limits(
-        &payload,
-        &inner_carrier,
-        limits,
-    )?))
+    Ok(Ok(Ok(artifact)))
 }
 
 /// Convert protobuf wire bytes into a signed YAML artifact stream.
@@ -225,16 +229,22 @@ pub fn proto_wire_to_signed_yaml_stream_with_resource_limits(
         Ok(components) => components,
         Err(error) => return Ok(Err(error)),
     };
-    let outcome = compose_with_resource_limits(
-        &ComposeRequest {
-            payload: &payload,
-            signature_carrier: body.as_bytes(),
-            form: TranscriptionForm::Yaml,
-        },
-        limits,
-    )?;
+    let encoded_size = payload
+        .len()
+        .checked_add(4)
+        .and_then(|size| size.checked_add(body.len()))
+        .ok_or_else(|| limits.size_computation_overflow(ArtifactResourceForm::Yaml))?;
+    limits.check_output_size(ArtifactResourceForm::Yaml, encoded_size)?;
+    let outcome = compose(&ComposeRequest {
+        payload: &payload,
+        signature_carrier: body.as_bytes(),
+        form: TranscriptionForm::Yaml,
+    });
     Ok(match outcome {
-        ComposeOutcome::Success(success) => Ok(success.artifact),
+        ComposeOutcome::Success(success) => {
+            debug_assert_eq!(success.artifact.len(), encoded_size);
+            Ok(success.artifact)
+        }
         ComposeOutcome::Invocation(_) | ComposeOutcome::Error(_) => {
             Err(TranscodeError::NotSignedYamlStream)
         }
@@ -352,6 +362,7 @@ mod tests {
 
         let yaml_to_proto =
             signed_yaml_stream_to_proto_wire_with_resource_limits(&yaml, &finite(yaml.len()))
+                .unwrap()
                 .unwrap()
                 .unwrap();
         assert_eq!(yaml_to_proto, proto);

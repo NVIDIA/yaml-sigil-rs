@@ -91,6 +91,12 @@ retained unknown fields and nested groups. It applies resource policy before
 the protobuf format ceiling and before allocation. A failed bounded
 `encode_into` leaves the reusable destination unchanged.
 
+Raw outer composition also preserves that order. Its outer result reports
+resource rejection, and an admitted protobuf format rejection remains an inner
+`pb::EncodeError`. Implementation crates that project a raw message from
+component lengths use `pb::check_encoded_message_size` after applying the
+selected resource policy.
+
 Existing helpers remain unbounded by this policy. Adopt a bounded entry point
 at the affected trust boundary, or enforce an equivalent earlier bound on the
 original raw input. The existing 16,384-octet YAML signature-carrier

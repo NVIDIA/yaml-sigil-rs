@@ -282,6 +282,12 @@ impl EncodeError {
             kind: EncodeErrorKind::MessageTooLarge,
         }
     }
+
+    const fn other() -> Self {
+        Self {
+            kind: EncodeErrorKind::Other,
+        }
+    }
 }
 
 impl fmt::Debug for EncodeError {
@@ -363,12 +369,25 @@ impl buffa::EncodeSink for CheckedSizeSink {
     }
 }
 
-fn check_protobuf_size(raw_size: u64) -> Result<usize, EncodeError> {
-    if raw_size > u64::from(buffa::MAX_MESSAGE_BYTES) {
+/// Check a complete encoded protobuf message size against the facade's format
+/// ceiling.
+///
+/// This check does not apply [`ArtifactResourceLimits`]. Resource-aware output
+/// paths compute an exact size, apply their selected resource policy, and then
+/// call this function so a format rejection remains an [`EncodeError`].
+pub fn check_encoded_message_size(encoded_size: usize) -> Result<usize, EncodeError> {
+    let encoded_size_u64 =
+        u64::try_from(encoded_size).map_err(|_| EncodeError::message_too_large())?;
+    if encoded_size_u64 > u64::from(buffa::MAX_MESSAGE_BYTES) {
         Err(EncodeError::message_too_large())
     } else {
-        usize::try_from(raw_size).map_err(|_| EncodeError::message_too_large())
+        Ok(encoded_size)
     }
+}
+
+fn check_protobuf_size(raw_size: u64) -> Result<usize, EncodeError> {
+    let encoded_size = usize::try_from(raw_size).map_err(|_| EncodeError::message_too_large())?;
+    check_encoded_message_size(encoded_size)
 }
 
 fn push_varint(destination: &mut impl buffa::EncodeSink, mut value: u64) {
@@ -437,6 +456,13 @@ fn resource_protobuf_size_preflight(
     resource_protobuf_size_preflight_for_platform(raw_size, platform_maximum, limits)
 }
 
+fn resource_raw_outer_size_preflight(
+    raw_size: u64,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
+    resource_protobuf_size_preflight(raw_size, limits)
+}
+
 fn resource_protobuf_size_preflight_for_platform(
     raw_size: u64,
     platform_maximum: u64,
@@ -490,7 +516,7 @@ fn encode_facade_to_vec_with_resource_limits(
     };
     let mut destination = Vec::with_capacity(encoded_len);
     if value.write_facade_wire(&mut destination).is_err() {
-        return Err(limits.size_computation_overflow(ArtifactResourceForm::Protobuf));
+        return Ok(Err(EncodeError::other()));
     }
     debug_assert_eq!(destination.len(), encoded_len);
     Ok(Ok(destination))
@@ -514,7 +540,7 @@ fn encode_facade_into_with_resource_limits(
         }
         Err(_) => {
             destination.truncate(original_len);
-            Err(limits.size_computation_overflow(ArtifactResourceForm::Protobuf))
+            Ok(Err(EncodeError::other()))
         }
     }
 }
@@ -1275,22 +1301,24 @@ pub(crate) fn compose_raw_outer_with_resource_limits(
     payload: &[u8],
     signature_carrier: &[u8],
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Vec<u8>> {
+) -> ArtifactResourceResult<Result<Vec<u8>, EncodeError>> {
     let raw = RawOuter {
         payload,
         signature_carrier,
     };
     let raw_size = raw_facade_encoded_len(&raw)
         .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
-    let encoded_len = usize::try_from(raw_size)
-        .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
-    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_len)?;
+    let encoded_len = match resource_raw_outer_size_preflight(raw_size, limits)? {
+        Ok(size) => size,
+        Err(error) => return Ok(Err(error)),
+    };
 
     let mut output = Vec::with_capacity(encoded_len);
-    raw.write_facade_wire(&mut output)
-        .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
+    if raw.write_facade_wire(&mut output).is_err() {
+        return Ok(Err(EncodeError::other()));
+    }
     debug_assert_eq!(output.len(), encoded_len);
-    Ok(output)
+    Ok(Ok(output))
 }
 
 pub(crate) fn decompose_raw_outer(
@@ -1446,18 +1474,16 @@ mod tests {
             &mut destination,
             &ArtifactResourceLimits::unbounded(),
         )
+        .unwrap()
         .unwrap_err();
-        assert_eq!(
-            error.kind(),
-            crate::ArtifactResourceErrorKind::SizeComputationOverflow
-        );
+        assert_eq!(error.kind(), EncodeErrorKind::Other);
         assert_eq!(destination, before);
     }
 
     #[test]
     fn synthetic_raw_sizes_preserve_resource_then_format_precedence() {
         let raw_size = u64::from(buffa::MAX_MESSAGE_BYTES) + 1;
-        let resource_error = resource_protobuf_size_preflight(raw_size, &finite(1)).unwrap_err();
+        let resource_error = resource_raw_outer_size_preflight(raw_size, &finite(1)).unwrap_err();
         assert_eq!(
             resource_error.kind(),
             crate::ArtifactResourceErrorKind::OutputArtifactTooLarge
@@ -1468,10 +1494,20 @@ mod tests {
         );
 
         let inner =
-            resource_protobuf_size_preflight(raw_size, &ArtifactResourceLimits::unbounded())
+            resource_raw_outer_size_preflight(raw_size, &ArtifactResourceLimits::unbounded())
                 .unwrap()
                 .unwrap_err();
         assert_eq!(inner.kind(), EncodeErrorKind::MessageTooLarge);
+    }
+
+    #[test]
+    fn public_format_size_check_is_exact_at_the_ceiling() {
+        let maximum = usize::try_from(buffa::MAX_MESSAGE_BYTES).unwrap();
+        assert_eq!(check_encoded_message_size(maximum), Ok(maximum));
+        assert_eq!(
+            check_encoded_message_size(maximum + 1).unwrap_err().kind(),
+            EncodeErrorKind::MessageTooLarge
+        );
     }
 
     #[test]

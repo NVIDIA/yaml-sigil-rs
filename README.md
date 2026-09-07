@@ -171,6 +171,12 @@ conclusive lower bound for its earliest check and still checks the final exact
 serialized size. A lower-bound rejection intentionally reports no exact output
 size.
 
+For an operation that produces protobuf through the raw outer composer, the
+outer result reports resource rejection, a middle result preserves the
+protobuf format error, and the existing operation return remains the inner
+value. This keeps the selected resource ceiling ahead of the protobuf format
+ceiling without changing portable trait outcomes.
+
 The existing entry points remain unbounded by this optional policy. Merely
 upgrading to a release that provides the bounded APIs does not remediate an
 existing caller. Adopt a resource-aware operation at the affected trust

@@ -5,8 +5,9 @@
 //! Signed-artifact transcoding lives in [`transcription`].
 //!
 //! Request-shape failures are [`SignInvocationError`]; sign-time failures are
-//! [`SignError`], plus output-path extensions (`YamlSerialize` only; protobuf
-//! encode is infallible here).
+//! [`SignError`], plus the YAML serialization extension. Resource-aware
+//! protobuf output preserves the core facade's [`yaml_sigil_core::pb::EncodeError`]
+//! in a separate inner result layer.
 //!
 //! Convenience wrappers [`sign_yaml`] and [`sign_proto`] call [`sign`] with a fixed [`OutputForm`].
 //!
@@ -29,11 +30,12 @@ pub use transcription::{
 };
 
 use tracing::instrument;
+pub use yaml_sigil_core::pb::{EncodeError, EncodeErrorKind};
 pub use yaml_sigil_core::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
     ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
 };
-use yaml_sigil_core::{SignatureDocument, validate_payload_stream};
+use yaml_sigil_core::{SignatureDocument, pb::check_encoded_message_size, validate_payload_stream};
 use yaml_sigil_traits::{
     AlgorithmId, ProtobufWireDecodeAdvertisement, YamlSignatureDocumentDuplicateKeyPolicy,
     YamlSignatureDocumentUnknownFieldPolicy,
@@ -221,11 +223,26 @@ fn checked_len_field_size(value_len: u64) -> Option<u64> {
 fn checked_proto_signing_size(
     req: &SignRequest<'_>,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<usize> {
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
+    let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Protobuf);
+    let payload_len = u64::try_from(req.payload.len()).map_err(|_| overflow())?;
+    let keyid_len = req
+        .keyid
+        .map(str::len)
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|_| overflow())?;
+    checked_proto_signing_size_from_lengths(payload_len, keyid_len, limits)
+}
+
+fn checked_proto_signing_size_from_lengths(
+    payload_len: u64,
+    keyid_len: Option<u64>,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
     let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Protobuf);
     let mut carrier_len = 2u64;
-    if let Some(keyid) = req.keyid {
-        let keyid_len = u64::try_from(keyid.len()).map_err(|_| overflow())?;
+    if let Some(keyid_len) = keyid_len {
         carrier_len = carrier_len
             .checked_add(checked_len_field_size(keyid_len).ok_or_else(overflow)?)
             .ok_or_else(overflow)?;
@@ -234,7 +251,6 @@ fn checked_proto_signing_size(
         .checked_add(checked_len_field_size(FIXED_SIGNATURE_BYTES).ok_or_else(overflow)?)
         .ok_or_else(overflow)?;
 
-    let payload_len = u64::try_from(req.payload.len()).map_err(|_| overflow())?;
     let raw_size = checked_len_field_size(payload_len)
         .and_then(|payload_size| {
             checked_len_field_size(carrier_len)
@@ -242,15 +258,16 @@ fn checked_proto_signing_size(
         })
         .ok_or_else(overflow)?;
     let encoded_size = usize::try_from(raw_size).map_err(|_| overflow())?;
-    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_size)
+    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_size)?;
+    Ok(check_encoded_message_size(encoded_size))
 }
 
 fn preflight_signing_output(
     req: &SignRequest<'_>,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<usize> {
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
     match req.output_form {
-        OutputForm::Yaml => checked_yaml_signing_lower_bound(req, limits),
+        OutputForm::Yaml => Ok(Ok(checked_yaml_signing_lower_bound(req, limits)?)),
         OutputForm::Protobuf => checked_proto_signing_size(req, limits),
     }
 }
@@ -273,19 +290,24 @@ pub fn sign(req: &SignRequest<'_>) -> SignOutcome {
 /// length. Protobuf output is sized exactly before content validation or
 /// cryptography. YAML output first applies a conclusive lower bound and then
 /// checks the exact serialized result before complete-artifact allocation.
+/// The outer result reports resource rejection. The inner result preserves a
+/// protobuf format error after resource admission; YAML output always reaches
+/// the existing [`SignOutcome`] layer.
 #[instrument(level = "info", skip(req, limits), fields(alg = ?req.algorithm, form = ?req.output_form))]
 pub fn sign_with_resource_limits(
     req: &SignRequest<'_>,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<SignOutcome> {
+) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
     if let Err(error) = validate_invocation_shape(req) {
-        return Ok(SignOutcome::Invocation(error));
+        return Ok(Ok(SignOutcome::Invocation(error)));
     }
-    preflight_signing_output(req, limits)?;
+    if let Err(error) = preflight_signing_output(req, limits)? {
+        return Ok(Err(error));
+    }
     if let Err(error) = validate_keyid_content(req) {
-        return Ok(SignOutcome::Invocation(error));
+        return Ok(Ok(SignOutcome::Invocation(error)));
     }
-    sign_after_invocation_validation(req, Some(limits))
+    Ok(Ok(sign_after_invocation_validation(req, Some(limits))?))
 }
 
 fn sign_inner(req: &SignRequest<'_>) -> SignOutcome {
@@ -406,16 +428,23 @@ fn emit_yaml_artifact_with_resource_limits(
         Err(error) => return Ok(Err(error)),
     };
 
-    let outcome = yaml_sigil_transcription::compose_with_resource_limits(
-        &yaml_sigil_transcription::ComposeRequest {
-            payload,
-            signature_carrier: body.as_bytes(),
-            form: yaml_sigil_transcription::TranscriptionForm::Yaml,
-        },
-        limits,
-    )?;
+    let encoded_size = payload
+        .len()
+        .checked_add(4)
+        .and_then(|size| size.checked_add(body.len()))
+        .ok_or_else(|| limits.size_computation_overflow(ArtifactResourceForm::Yaml))?;
+    limits.check_output_size(ArtifactResourceForm::Yaml, encoded_size)?;
+
+    let outcome = yaml_sigil_transcription::compose(&yaml_sigil_transcription::ComposeRequest {
+        payload,
+        signature_carrier: body.as_bytes(),
+        form: yaml_sigil_transcription::TranscriptionForm::Yaml,
+    });
     match outcome {
-        yaml_sigil_transcription::ComposeOutcome::Success(s) => Ok(Ok(s.artifact)),
+        yaml_sigil_transcription::ComposeOutcome::Success(s) => {
+            debug_assert_eq!(s.artifact.len(), encoded_size);
+            Ok(Ok(s.artifact))
+        }
         yaml_sigil_transcription::ComposeOutcome::Invocation(_)
         | yaml_sigil_transcription::ComposeOutcome::Error(_) => {
             Ok(Err(SignError::YamlSerialize("compose failed".into())))
@@ -471,7 +500,14 @@ pub fn sign_yaml_with_resource_limits(
         output_form: OutputForm::Yaml,
         algorithm_parameters: &[],
     };
-    let outcome = sign_with_resource_limits(&request, limits)?;
+    if let Err(error) = validate_invocation_shape(&request) {
+        return Ok(Err(map_invocation_to_sign_error(error)));
+    }
+    checked_yaml_signing_lower_bound(&request, limits)?;
+    if let Err(error) = validate_keyid_content(&request) {
+        return Ok(Err(map_invocation_to_sign_error(error)));
+    }
+    let outcome = sign_after_invocation_validation(&request, Some(limits))?;
     Ok(match outcome {
         SignOutcome::Success(success) => Ok(success.artifact),
         SignOutcome::Invocation(error) => Err(map_invocation_to_sign_error(error)),
@@ -501,10 +537,13 @@ pub fn sign_proto(params: &SignProtoParams<'_>) -> Result<Vec<u8>, SignError> {
 }
 
 /// Sign with protobuf output after applying an explicit output policy.
+///
+/// The outer result reports resource rejection, the next result preserves a
+/// protobuf format error, and the innermost result preserves [`SignError`].
 pub fn sign_proto_with_resource_limits(
     params: &SignProtoParams<'_>,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Result<Vec<u8>, SignError>> {
+) -> ArtifactResourceResult<Result<Result<Vec<u8>, SignError>, EncodeError>> {
     let request = SignRequest {
         payload: params.payload,
         algorithm: params.algorithm,
@@ -514,12 +553,15 @@ pub fn sign_proto_with_resource_limits(
         output_form: OutputForm::Protobuf,
         algorithm_parameters: &[],
     };
-    let outcome = sign_with_resource_limits(&request, limits)?;
-    Ok(match outcome {
+    let outcome = match sign_with_resource_limits(&request, limits)? {
+        Ok(outcome) => outcome,
+        Err(error) => return Ok(Err(error)),
+    };
+    Ok(Ok(match outcome {
         SignOutcome::Success(success) => Ok(success.artifact),
         SignOutcome::Invocation(error) => Err(map_invocation_to_sign_error(error)),
         SignOutcome::Signer(error) => Err(error),
-    })
+    }))
 }
 
 fn map_invocation_to_sign_error(e: SignInvocationError) -> SignError {
@@ -672,7 +714,9 @@ mod tests {
             algorithm_parameters: &[1],
         };
         assert!(matches!(
-            sign_with_resource_limits(&request, &finite(1)).unwrap(),
+            sign_with_resource_limits(&request, &finite(1))
+                .unwrap()
+                .unwrap(),
             SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters)
         ));
     }
@@ -708,13 +752,16 @@ mod tests {
                     OutputForm::Yaml => None,
                     OutputForm::Protobuf => Some(
                         checked_proto_signing_size(&request, &ArtifactResourceLimits::unbounded(),)
+                            .unwrap()
                             .unwrap(),
                     ),
                 }
             );
 
             assert!(matches!(
-                sign_with_resource_limits(&request, &ArtifactResourceLimits::unbounded()).unwrap(),
+                sign_with_resource_limits(&request, &ArtifactResourceLimits::unbounded())
+                    .unwrap()
+                    .unwrap(),
                 SignOutcome::Invocation(SignInvocationError::InvalidKeyid)
             ));
         }
@@ -737,8 +784,11 @@ mod tests {
                 };
                 let projected =
                     checked_proto_signing_size(&request, &ArtifactResourceLimits::unbounded())
+                        .unwrap()
                         .unwrap();
-                let outcome = sign_with_resource_limits(&request, &finite(projected)).unwrap();
+                let outcome = sign_with_resource_limits(&request, &finite(projected))
+                    .unwrap()
+                    .unwrap();
                 let artifact = match outcome {
                     SignOutcome::Success(success) => success.artifact,
                     other => panic!("{other:?}"),
@@ -760,14 +810,41 @@ mod tests {
                 algorithm_parameters: &[],
             };
             let projected =
-                checked_proto_signing_size(&request, &ArtifactResourceLimits::unbounded()).unwrap();
-            let outcome = sign_with_resource_limits(&request, &finite(projected)).unwrap();
+                checked_proto_signing_size(&request, &ArtifactResourceLimits::unbounded())
+                    .unwrap()
+                    .unwrap();
+            let outcome = sign_with_resource_limits(&request, &finite(projected))
+                .unwrap()
+                .unwrap();
             let artifact = match outcome {
                 SignOutcome::Success(success) => success.artifact,
                 other => panic!("{other:?}"),
             };
             assert_eq!(artifact.len(), projected);
         }
+    }
+
+    #[test]
+    fn protobuf_signing_preserves_resource_then_format_precedence() {
+        let payload_len = u64::try_from(i32::MAX).unwrap();
+        let resource_error =
+            checked_proto_signing_size_from_lengths(payload_len, None, &finite(1)).unwrap_err();
+        assert_eq!(
+            resource_error.kind(),
+            ArtifactResourceErrorKind::OutputArtifactTooLarge
+        );
+
+        let format_error = checked_proto_signing_size_from_lengths(
+            payload_len,
+            None,
+            &ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(
+            format_error.kind(),
+            yaml_sigil_core::pb::EncodeErrorKind::MessageTooLarge
+        );
     }
 
     #[test]
@@ -783,6 +860,7 @@ mod tests {
         let artifact = sign_proto(&params).unwrap();
         assert!(
             sign_proto_with_resource_limits(&params, &finite(artifact.len()))
+                .unwrap()
                 .unwrap()
                 .is_ok()
         );
@@ -829,7 +907,9 @@ mod tests {
             Some(artifact.len())
         );
         assert!(matches!(
-            sign_with_resource_limits(&request, &finite(artifact.len())).unwrap(),
+            sign_with_resource_limits(&request, &finite(artifact.len()))
+                .unwrap()
+                .unwrap(),
             SignOutcome::Success(_)
         ));
 

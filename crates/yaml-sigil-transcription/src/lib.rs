@@ -6,7 +6,9 @@
 //! # Resource boundaries
 //!
 //! [`compose_with_resource_limits`] checks exact prospective output size before
-//! component scans or complete-output allocation. [`decompose_with_resource_limits`]
+//! component scans or complete-output allocation. Its outer result reports
+//! resource rejection, and its inner result reports a protobuf format error
+//! when the selected form is protobuf. [`decompose_with_resource_limits`]
 //! checks the original input before form, conformance, or artifact processing.
 //! Existing entry points retain their unbounded behavior. The 16,384-octet
 //! YAML signature-carrier constraint remains a separate rule at metadata
@@ -15,9 +17,10 @@
 use tracing::instrument;
 use yaml_sigil_core::{
     DecompositionOutcome, ProtoOuterDecomposeOutcome, compose_proto_outer, decompose_artifact,
-    decompose_proto_outer, validate_payload_stream,
+    decompose_proto_outer, pb::check_encoded_message_size, validate_payload_stream,
 };
 
+pub use yaml_sigil_core::pb::{EncodeError, EncodeErrorKind};
 pub use yaml_sigil_core::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
     ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
@@ -143,10 +146,19 @@ fn checked_proto_outer_size(
     payload_len: usize,
     carrier_len: usize,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<usize> {
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
     let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Protobuf);
     let payload_len = u64::try_from(payload_len).map_err(|_| overflow())?;
     let carrier_len = u64::try_from(carrier_len).map_err(|_| overflow())?;
+    checked_proto_outer_size_from_lengths(payload_len, carrier_len, limits)
+}
+
+fn checked_proto_outer_size_from_lengths(
+    payload_len: u64,
+    carrier_len: u64,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
+    let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Protobuf);
     let payload_field = 1u64
         .checked_add(varint_len(payload_len))
         .and_then(|size| size.checked_add(payload_len))
@@ -159,13 +171,14 @@ fn checked_proto_outer_size(
         .checked_add(carrier_field)
         .ok_or_else(overflow)?;
     let encoded_size = usize::try_from(raw_size).map_err(|_| overflow())?;
-    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_size)
+    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_size)?;
+    Ok(check_encoded_message_size(encoded_size))
 }
 
 fn check_compose_output_size(
     req: &ComposeRequest<'_>,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<usize> {
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
     match req.form {
         TranscriptionForm::Yaml => {
             let encoded_size = req
@@ -174,7 +187,8 @@ fn check_compose_output_size(
                 .checked_add(4)
                 .and_then(|size| size.checked_add(req.signature_carrier.len()))
                 .ok_or_else(|| limits.size_computation_overflow(ArtifactResourceForm::Yaml))?;
-            limits.check_output_size(ArtifactResourceForm::Yaml, encoded_size)
+            limits.check_output_size(ArtifactResourceForm::Yaml, encoded_size)?;
+            Ok(Ok(encoded_size))
         }
         TranscriptionForm::Protobuf => {
             checked_proto_outer_size(req.payload.len(), req.signature_carrier.len(), limits)
@@ -186,21 +200,27 @@ fn check_compose_output_size(
 ///
 /// Request-shape validation and exact checked sizing precede payload or
 /// signature-carrier inspection. Complete output allocation occurs only after
-/// resource admission and component validation.
+/// resource admission, protobuf format admission, and component validation.
+/// The outer result reports resource rejection. The inner result preserves a
+/// protobuf [`EncodeError`] after the selected resource policy admits the
+/// projected size.
 #[instrument(level = "info", skip(req, limits), fields(form = ?req.form))]
 pub fn compose_with_resource_limits(
     req: &ComposeRequest<'_>,
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<ComposeOutcome> {
+) -> ArtifactResourceResult<Result<ComposeOutcome, EncodeError>> {
     if let Err(error) = validate_compose_invocation(req) {
-        return Ok(ComposeOutcome::Invocation(error));
+        return Ok(Ok(ComposeOutcome::Invocation(error)));
     }
-    let expected_size = check_compose_output_size(req, limits)?;
+    let expected_size = match check_compose_output_size(req, limits)? {
+        Ok(size) => size,
+        Err(error) => return Ok(Err(error)),
+    };
     let outcome = compose_after_invocation_validation(req);
     if let ComposeOutcome::Success(success) = &outcome {
         debug_assert_eq!(success.artifact.len(), expected_size);
     }
-    Ok(outcome)
+    Ok(Ok(outcome))
 }
 
 /// Recover abstract Artifact bytes from an envelope.
@@ -430,12 +450,15 @@ mod tests {
             };
             let unbounded =
                 compose_with_resource_limits(&request, &ArtifactResourceLimits::unbounded())
+                    .unwrap()
                     .unwrap();
             let expected = match unbounded {
                 ComposeOutcome::Success(success) => success.artifact,
                 other => panic!("{other:?}"),
             };
-            let exact = compose_with_resource_limits(&request, &finite(expected.len())).unwrap();
+            let exact = compose_with_resource_limits(&request, &finite(expected.len()))
+                .unwrap()
+                .unwrap();
             assert!(matches!(exact, ComposeOutcome::Success(_)));
 
             let error =
@@ -450,6 +473,29 @@ mod tests {
                 Some(expected.len())
             );
         }
+    }
+
+    #[test]
+    fn protobuf_compose_preserves_resource_then_format_precedence() {
+        let payload_len = u64::try_from(i32::MAX).unwrap();
+        let resource_error =
+            checked_proto_outer_size_from_lengths(payload_len, 0, &finite(1)).unwrap_err();
+        assert_eq!(
+            resource_error.kind(),
+            ArtifactResourceErrorKind::OutputArtifactTooLarge
+        );
+
+        let format_error = checked_proto_outer_size_from_lengths(
+            payload_len,
+            0,
+            &ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(
+            format_error.kind(),
+            yaml_sigil_core::pb::EncodeErrorKind::MessageTooLarge
+        );
     }
 
     #[test]

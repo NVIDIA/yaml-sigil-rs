@@ -13,6 +13,8 @@ each signing request.
 - `sign_yaml` and `sign_proto` provide form-specific convenience wrappers.
 - `sign_with_resource_limits`, `sign_yaml_with_resource_limits`, and
   `sign_proto_with_resource_limits` enforce an explicit complete-output policy.
+- `EncodeError` and `EncodeErrorKind` re-export the common protobuf format
+  error used by resource-aware protobuf output.
 - `DefaultSigner` and `DefaultAsyncSigner` delegate to the free functions.
 - `Signer`, `AsyncSigner`, outcome types, and capability types are re-exported
   from
@@ -33,6 +35,9 @@ material, tokens, or raw signatures on trusted fact surfaces.
 The resource-aware signing functions validate the bounded request shape first.
 For protobuf output, they calculate the exact prospective wire length from
 component lengths before scanning caller buffers or performing cryptography.
+The outer result reports resource rejection, a middle result preserves the
+protobuf format error, and the existing signing return remains the inner
+value. YAML-only signing does not add the protobuf format layer.
 For YAML output, they first test a conclusive lower bound that includes any
 projected final line feed and the minimum carrier encoding. After signing and
 carrier serialization, they check the exact output size before allocating the
@@ -42,7 +47,9 @@ exact check.
 The resource-aware transcoding functions check the original source before
 parsing and check the complete destination independently before allocation.
 The source and destination lengths are not added together. Errors identify the
-form whose boundary failed.
+form whose boundary failed. YAML-to-protobuf transcoding preserves protobuf
+format errors between the outer resource result and the existing transcoding
+result.
 
 `ArtifactResourceLimits::default()` selects exactly 4,194,304 bytes, and you
 can lower, raise, or disable that ceiling. Existing signing and transcoding

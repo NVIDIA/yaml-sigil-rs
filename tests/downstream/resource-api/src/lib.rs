@@ -27,6 +27,14 @@ pub fn check_shared_reexports<'a>(
     )
 }
 
+/// Prove that both protobuf-producing high-level crates expose the same core
+/// format error type.
+pub fn share_protobuf_encode_error(
+    error: yaml_sigil_signing::EncodeError,
+) -> yaml_sigil_transcription::EncodeError {
+    error
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,6 +83,10 @@ mod tests {
             .check_input_size(yaml_sigil_core::ArtifactResourceForm::Yaml, input)
             .unwrap_err();
         assert_eq!(classify(&rejected), "input");
+        assert_eq!(
+            yaml_sigil_core::pb::check_encoded_message_size(0).unwrap(),
+            0
+        );
 
         let composed = yaml_sigil_transcription::compose_with_resource_limits(
             &yaml_sigil_transcription::ComposeRequest {
@@ -84,6 +96,7 @@ mod tests {
             },
             &limits,
         )
+        .unwrap()
         .unwrap();
         assert!(matches!(
             composed,

@@ -30,11 +30,13 @@ pub fn compose_proto_outer(payload: &[u8], signature_carrier: &[u8]) -> Vec<u8> 
 /// Serialize an outer artifact after applying an explicit complete-output policy.
 ///
 /// Checked wire-size arithmetic and policy admission occur before allocation.
+/// The outer result reports resource rejection. After admission, the inner
+/// result preserves the protobuf facade's format error.
 pub fn compose_proto_outer_with_resource_limits(
     payload: &[u8],
     signature_carrier: &[u8],
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Vec<u8>> {
+) -> ArtifactResourceResult<Result<Vec<u8>, crate::pb::EncodeError>> {
     crate::pb::compose_raw_outer_with_resource_limits(payload, signature_carrier, limits)
 }
 
@@ -152,7 +154,9 @@ mod tests {
         let exact = ArtifactResourceLimits::unbounded()
             .with_max_artifact_bytes(std::num::NonZeroUsize::new(expected.len()).unwrap());
         assert_eq!(
-            compose_proto_outer_with_resource_limits(b"payload", b"carrier", &exact).unwrap(),
+            compose_proto_outer_with_resource_limits(b"payload", b"carrier", &exact)
+                .unwrap()
+                .unwrap(),
             expected
         );
 

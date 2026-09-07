@@ -21,6 +21,8 @@ payload bytes as opaque and preserves every accepted byte unchanged.
 - `compose` and `decompose` perform the byte operations.
 - `compose_with_resource_limits` and `decompose_with_resource_limits` apply an
   explicit complete-artifact policy.
+- `EncodeError` and `EncodeErrorKind` re-export the common protobuf format
+  error used by resource-aware protobuf composition.
 - `DefaultTranscriber` and `DefaultAsyncTranscriber` delegate to the free
   functions.
 - `Transcriber`, `AsyncTranscriber`, request types, response types, and
@@ -34,7 +36,10 @@ boundary should wire the trait API into their own deployment.
 
 `compose_with_resource_limits` validates the request shape, computes the exact
 YAML or protobuf output size with checked arithmetic, and applies the policy
-before component scans and complete-output allocation.
+before component scans and complete-output allocation. The outer result reports
+resource rejection, and the inner result preserves a protobuf format error
+when the selected form is protobuf. The existing `ComposeOutcome` remains the
+admitted value.
 `decompose_with_resource_limits` checks the original complete input before
 form, outer-conformance, or artifact processing. Resource errors remain
 separate from transcription outcomes.
