@@ -15,8 +15,7 @@ unless they need these lower-level helpers directly.
 ## What It Provides
 
 - YAML artifact decomposition and payload validation.
-- YAML signature-document parsing and serialization with
-  [`noyalib`](https://crates.io/crates/noyalib).
+- Backend-neutral YAML signature-document parsing and canonical serialization.
 - Stable owned and borrowed protobuf `SignedYamlArtifact` helpers backed by
   private [`buffa`](https://crates.io/crates/buffa) generated code.
 - Algorithm mapping for the `yaml-sigil` wire and YAML names.
@@ -31,6 +30,33 @@ Code generation obtains a pinned, verified Buf executable from the
 [`buf-tools`](https://crates.io/crates/buf-tools) build dependency and feeds its
 descriptor set to [`buffa-build`](https://crates.io/crates/buffa-build).
 Neither a system `buf` nor a system `protoc` installation is required.
+
+## YAML and Serde boundary
+
+`SignatureDocument` and its Serde implementations form the stable public
+data-model boundary. Concrete YAML dependencies remain implementation details.
+This crate currently uses [`noyalib`](https://crates.io/crates/noyalib), but a
+consumer does not need the same `noyalib` release. Consumers can use another
+Serde-compatible format or library when it represents the documented field
+contract. This architectural boundary does not imply that independent YAML
+backends accept or emit the same YAML.
+
+Use `parse_signature_document` as the authoritative entry point for untrusted
+YAML signature carriers. Direct Serde deserialization constructs the data model
+without applying YamlSigil's YAML byte limit, parser resource budgets, document
+count, or duplicate-key, merge-key, anchor, and tag policies.
+
+Serde compatibility covers semantic values. It does not promise identical YAML
+acceptance, resource policy, comments, scalar style, field order, or bytes
+across backends. Use `serialize_signature_document` for canonical YAML output.
+Retain the original carrier bytes when forwarding must preserve presentation or
+byte identity. Treat the text inside `CoreError::SignatureYaml` as an unstable
+human diagnostic, not a machine-readable interface.
+
+The exact-pinned downstream fixture characterizes interoperability between
+`noyalib` releases `0.0.35` and `0.0.36`. This same-library, cross-version test
+does not establish cross-backend YAML portability or a permanent support
+guarantee for either release.
 
 ## Protobuf facade
 

@@ -6,7 +6,7 @@ have implementation context. It is not a user-facing support matrix.
 
 ## Current Implementation
 
-`yaml-sigil-core` uses `noyalib` `0.0.36` for
+`yaml-sigil-core` uses `noyalib` `0.0.36` as its private backend for
 `YamlSigilSignature.v1alpha1` YAML signature documents. The root `Cargo.toml`
 declares the workspace dependency, and `crates/yaml-sigil-core` inherits it with
 `noyalib = { workspace = true }`.
@@ -79,6 +79,37 @@ not select a different YAML parser.
 policy hooks in one dependency. The current configuration maps directly to this
 workspace's conformance requirements for duplicate keys, unknown fields,
 anchors, tags, and merge-key handling.
+
+## Backend Boundary
+
+`SignatureDocument` and its Serde implementations form the stable public
+data-model boundary. A concrete serialization dependency is private even when
+Cargo metadata or implementation documentation names it. Consumers do not need
+the `noyalib` release selected by this workspace, and a future serialization
+library must remain behind the same boundary unless a separate API decision
+deliberately exposes it.
+
+`parse_signature_document` is authoritative for untrusted YAML signature
+carriers. Direct Serde deserialization bypasses its byte limit, parser resource
+budgets, document-count rule, and duplicate-key, merge-key, anchor, and tag
+policies. Serde compatibility therefore does not promise identical YAML
+acceptance or resource policy.
+
+`serialize_signature_document` remains the canonical YAML emitter. Serde
+interoperability preserves `SignatureDocument` values, not comments, scalar
+style, field order, presentation, or byte identity. Callers that need lossless
+forwarding must retain the original carrier bytes. The text inside
+`CoreError::SignatureYaml` is an unstable human diagnostic and not a backend
+error contract.
+
+The unpublished
+`tests/downstream/noyalib-0-0-35` fixture exact-pins `noyalib` `0.0.35` with
+only its `std` feature. Cargo resolves that release independently alongside the
+workspace's `0.0.36` backend. The fixture passes values in both directions and
+compares parsed `SignatureDocument` values rather than serialized YAML bytes.
+This is same-library, cross-version characterization. It does not demonstrate
+cross-backend YAML portability, promise permanent support for either release,
+or make `noyalib` public API.
 
 ## Historical Findings
 

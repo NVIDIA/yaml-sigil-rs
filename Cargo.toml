@@ -16,6 +16,7 @@ members = [
 exclude = [
     "tests/downstream/buffa-0-5",
     "tests/downstream/core-only",
+    "tests/downstream/noyalib-0-0-35",
 ]
 
 [workspace.package]
