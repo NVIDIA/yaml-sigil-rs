@@ -10,19 +10,21 @@ use crate::proto_outer::decode_signature_carrier;
 ///
 /// # Resource usage
 ///
-/// This decoder imposes no universal artifact, payload, or signature-carrier size limit.
-/// Protobuf decoding copies recognized fields into owned buffers, so allocation and copying are
-/// linear in field size. Callers handling untrusted data must enforce deployment-appropriate
-/// size limits before invocation.
+/// YamlSigil `v1alpha1` defines no maximum complete artifact size, and this
+/// decoder adds no deployment-specific limit. It copies recognized fields
+/// into owned buffers with work and allocation linear in field size.
+/// Applications accepting potentially untrusted input should apply their
+/// chosen whole-artifact bound before this call.
 pub fn decode_signed_yaml_artifact(
     bytes: &[u8],
 ) -> Result<crate::pb::SignedYamlArtifact, CoreError> {
-    use buffa::Message;
-    crate::pb::SignedYamlArtifact::decode_from_slice(bytes).map_err(CoreError::from)
+    crate::pb::SignedYamlArtifact::decode(bytes).map_err(CoreError::from)
 }
 
-pub fn encode_signed_yaml_artifact(msg: &crate::pb::SignedYamlArtifact) -> Vec<u8> {
-    use buffa::Message;
+/// Encode an owned protobuf artifact through the stable facade.
+pub fn encode_signed_yaml_artifact(
+    msg: &crate::pb::SignedYamlArtifact,
+) -> Result<Vec<u8>, crate::pb::EncodeError> {
     msg.encode_to_vec()
 }
 
@@ -40,26 +42,20 @@ pub struct ProtoArtifactView {
 ///
 /// # Resource usage
 ///
-/// This helper clones recognized fields into owned buffers. Allocation and copying are linear in
-/// field size. Callers handling untrusted messages must enforce deployment-appropriate size
-/// limits before invocation.
+/// This helper clones recognized fields into owned buffers with work and
+/// allocation linear in field size. Apply any local limit before constructing
+/// `artifact` from potentially untrusted input.
 pub fn view_signed_yaml_artifact(
     artifact: &crate::pb::SignedYamlArtifact,
 ) -> Result<ProtoArtifactView, CoreError> {
-    if !artifact.signature.is_set() {
-        return Err(CoreError::ProtobufDecode(
-            "missing signature submessage".into(),
-        ));
-    }
     let sig = artifact
-        .signature
-        .as_option()
+        .signature()
         .ok_or_else(|| CoreError::ProtobufDecode("missing signature submessage".into()))?;
     Ok(ProtoArtifactView {
-        payload: artifact.payload.clone(),
-        alg_wire: sig.alg.to_i32(),
-        signature: sig.signature.clone(),
-        keyid: sig.keyid.clone(),
+        payload: artifact.payload().to_vec(),
+        alg_wire: sig.algorithm_wire_value(),
+        signature: sig.signature().to_vec(),
+        keyid: sig.keyid().map(str::to_owned),
     })
 }
 
@@ -70,12 +66,11 @@ pub fn view_signed_yaml_artifact(
 /// Protobuf decoding has the resource behavior documented on [`decode_signature_carrier`].
 pub fn view_signature_carrier(carrier: &[u8]) -> Result<ProtoArtifactView, CoreError> {
     let sig = decode_signature_carrier(carrier)?;
-    let alg_wire = sig.alg.to_i32();
     Ok(ProtoArtifactView {
         payload: Vec::new(),
-        alg_wire,
-        signature: sig.signature,
-        keyid: sig.keyid,
+        alg_wire: sig.algorithm_wire_value(),
+        signature: sig.signature().to_vec(),
+        keyid: sig.keyid().map(str::to_owned),
     })
 }
 
@@ -84,8 +79,8 @@ mod tests {
     use super::{
         decode_signed_yaml_artifact, encode_signed_yaml_artifact, view_signed_yaml_artifact,
     };
-    use crate::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
-    use buffa::MessageField;
+    use crate::AlgorithmId;
+    use crate::pb::{SignedYamlArtifact, YamlSigilSignature};
 
     #[test]
     fn decode_rejects_garbage() {
@@ -99,20 +94,12 @@ mod tests {
         assert!(matches!(err, crate::error::CoreError::ProtobufDecode(_)));
     }
 
-    /// Protobuf `buffa` decode/view round-trip.
+    /// Protobuf facade decode/view round-trip.
     #[test]
     fn encode_signed_yaml_artifact_then_decode_matches() {
-        let inner = YamlSigilSignature {
-            alg: Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL.into(),
-            signature: vec![1, 2, 3],
-            ..Default::default()
-        };
-        let outer = SignedYamlArtifact {
-            payload: b"ok\n".to_vec(),
-            signature: MessageField::from(inner),
-            ..Default::default()
-        };
-        let bytes = encode_signed_yaml_artifact(&outer);
+        let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
+        let outer = SignedYamlArtifact::new(b"ok\n".to_vec(), Some(inner));
+        let bytes = encode_signed_yaml_artifact(&outer).unwrap();
         let decoded = decode_signed_yaml_artifact(&bytes).unwrap();
         let v = view_signed_yaml_artifact(&decoded).unwrap();
         assert_eq!(v.payload, b"ok\n");

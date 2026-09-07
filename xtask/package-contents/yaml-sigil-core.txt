@@ -18,6 +18,7 @@ src/decomposition.rs
 src/error.rs
 src/lib.rs
 src/payload.rs
+src/pb.rs
 src/proto_outer.rs
 src/signature_doc.rs
 src/tier_a_schema.rs
@@ -25,5 +26,6 @@ src/wire.rs
 tests/implementation_stack_smoke.rs
 tests/json_schema_signature_doc.rs
 tests/proto_outer_conformance.rs
+tests/protobuf_wire_compatibility.rs
 tests/yaml_signature_document_conformance.rs
 tests/yaml_signature_document_tier_a_schema.rs

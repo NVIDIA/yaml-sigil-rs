@@ -21,9 +21,9 @@ pub enum CoreError {
     EmptySignature,
 }
 
-impl From<buffa::DecodeError> for CoreError {
-    fn from(e: buffa::DecodeError) -> Self {
-        CoreError::ProtobufDecode(e.to_string())
+impl From<crate::pb::DecodeError> for CoreError {
+    fn from(error: crate::pb::DecodeError) -> Self {
+        CoreError::ProtobufDecode(error.to_string())
     }
 }
 

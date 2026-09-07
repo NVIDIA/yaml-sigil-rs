@@ -27,3 +27,17 @@ payload bytes as opaque and preserves every accepted byte unchanged.
 
 This crate does not provide RPC transport. Consumers that need a service
 boundary should wire the trait API into their own deployment.
+
+## Resource boundaries
+
+Compose and decompose add no deployment-specific maximum complete artifact
+size for YAML or protobuf. They allocate output in proportion to supplied or
+recovered components. Apply any local component policy before compose and
+bound potentially untrusted complete artifacts before decompose. Checking a
+compose result afterward does not bound work or allocation already performed.
+
+YamlSigil `v1alpha1` defines no maximum complete artifact size. Whole-artifact
+limits are operational hardening and do not affect conformance results. A
+deployment can choose a lower value, a higher value, or no additional limit.
+The existing 16,384-octet YAML signature-carrier constraint remains separate
+and applies where signature metadata is parsed.
