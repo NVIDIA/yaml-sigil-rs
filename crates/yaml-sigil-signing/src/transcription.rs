@@ -9,24 +9,41 @@
 //!
 //! # Resource boundaries
 //!
-//! Both transcoding directions accept a complete artifact and construct a
-//! complete output artifact. They add no deployment-specific whole-input or
-//! whole-output byte limit. Bound potentially untrusted input before either
-//! call, and apply any output policy to the returned bytes. Input and output
-//! limits are independent operational choices and do not determine YamlSigil
-//! `v1alpha1` conformance.
+//! The `_with_resource_limits` variants check the complete source before
+//! parsing and check the destination independently before complete-output
+//! allocation. Existing functions retain their unbounded behavior. Resource
+//! policy is operational hardening and does not determine YamlSigil `v1alpha1`
+//! conformance.
+//!
+//! ```no_run
+//! use yaml_sigil_signing::{
+//!     ArtifactResourceLimits,
+//!     signed_yaml_stream_to_proto_wire_with_resource_limits,
+//! };
+//!
+//! # fn transcode(yaml: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//! let limits = ArtifactResourceLimits::default();
+//! let protobuf =
+//!     signed_yaml_stream_to_proto_wire_with_resource_limits(yaml, &limits)??;
+//! // Source and destination are each compared with the ceiling. Their byte
+//! // lengths are not added together.
+//! Ok(protobuf)
+//! # }
+//! ```
 
 use base64::Engine;
 use thiserror::Error;
 use tracing::instrument;
 use yaml_sigil_core::{
-    SCHEMA_V1ALPHA1, SignatureDocument, compose_proto_outer, parse_signature_document,
-    serialize_signature_document, validate_payload_stream, view_signature_carrier,
+    ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult, SCHEMA_V1ALPHA1,
+    SignatureDocument, compose_proto_outer, compose_proto_outer_with_resource_limits,
+    parse_signature_document, serialize_signature_document, validate_payload_stream,
+    view_signature_carrier,
 };
 use yaml_sigil_traits::{AlgorithmId, OuterConformance};
 use yaml_sigil_transcription::{
     ComposeOutcome, ComposeRequest, DecomposeOutcome, DecomposeRequest, TranscriptionForm, compose,
-    decompose,
+    compose_with_resource_limits, decompose,
 };
 
 /// Failure to transcode between signed YAML stream bytes and protobuf wire.
@@ -105,6 +122,11 @@ fn proto_decompose(wire: &[u8]) -> Result<(Vec<u8>, Vec<u8>), TranscodeError> {
 /// This function has the resource behavior documented on this module.
 #[instrument(level = "debug", skip(yaml_artifact), fields(len = yaml_artifact.len()))]
 pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>, TranscodeError> {
+    let (payload, inner_carrier) = yaml_to_proto_components(yaml_artifact)?;
+    Ok(compose_proto_outer(&payload, &inner_carrier))
+}
+
+fn yaml_to_proto_components(yaml_artifact: &[u8]) -> Result<(Vec<u8>, Vec<u8>), TranscodeError> {
     let (payload, carrier) = yaml_decompose(yaml_artifact)?;
     validate_payload_stream(&payload).map_err(|_| TranscodeError::PayloadInvariant)?;
 
@@ -121,20 +143,54 @@ pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>,
     let inner_carrier =
         crate::proto_carrier::encode_inner_signature_carrier(alg_id, sig_octets, doc.keyid);
 
-    Ok(compose_proto_outer(&payload, &inner_carrier))
+    Ok((payload, inner_carrier))
+}
+
+/// Convert signed YAML to protobuf with independent source and destination checks.
+#[instrument(level = "debug", skip(yaml_artifact, limits), fields(len = yaml_artifact.len()))]
+pub fn signed_yaml_stream_to_proto_wire_with_resource_limits(
+    yaml_artifact: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<Vec<u8>, TranscodeError>> {
+    limits.check_input_size(ArtifactResourceForm::Yaml, yaml_artifact)?;
+    let (payload, inner_carrier) = match yaml_to_proto_components(yaml_artifact) {
+        Ok(components) => components,
+        Err(error) => return Ok(Err(error)),
+    };
+    Ok(Ok(compose_proto_outer_with_resource_limits(
+        &payload,
+        &inner_carrier,
+        limits,
+    )?))
 }
 
 /// Convert protobuf wire bytes into a signed YAML artifact stream.
 ///
 /// # Resource usage
 ///
-/// This function adds no deployment-specific complete-artifact limit.
+/// This function adds no implementation-local complete-artifact limit.
 /// Protobuf decomposition copies recognized fields into owned buffers, and
 /// conversion constructs an owned YAML stream. Work and allocation are linear
-/// in field and output size. Applications accepting potentially untrusted
-/// input should apply their chosen input bound before this call.
+/// in field and output size. Use
+/// [`proto_wire_to_signed_yaml_stream_with_resource_limits`] to check both
+/// complete artifacts.
 #[instrument(level = "debug", skip(wire), fields(len = wire.len()))]
 pub fn proto_wire_to_signed_yaml_stream(wire: &[u8]) -> Result<Vec<u8>, TranscodeError> {
+    let (payload, body) = proto_to_yaml_components(wire)?;
+
+    match compose(&ComposeRequest {
+        payload: &payload,
+        signature_carrier: body.as_bytes(),
+        form: TranscriptionForm::Yaml,
+    }) {
+        ComposeOutcome::Success(s) => Ok(s.artifact),
+        ComposeOutcome::Invocation(_) | ComposeOutcome::Error(_) => {
+            Err(TranscodeError::NotSignedYamlStream)
+        }
+    }
+}
+
+fn proto_to_yaml_components(wire: &[u8]) -> Result<(Vec<u8>, String), TranscodeError> {
     let (payload, carrier) = proto_decompose(wire)?;
     validate_payload_stream(&payload).map_err(|_| TranscodeError::PayloadInvariant)?;
 
@@ -155,16 +211,34 @@ pub fn proto_wire_to_signed_yaml_stream(wire: &[u8]) -> Result<Vec<u8>, Transcod
         body.push('\n');
     }
 
-    match compose(&ComposeRequest {
-        payload: &payload,
-        signature_carrier: body.as_bytes(),
-        form: TranscriptionForm::Yaml,
-    }) {
-        ComposeOutcome::Success(s) => Ok(s.artifact),
+    Ok((payload, body))
+}
+
+/// Convert protobuf to signed YAML with independent source and destination checks.
+#[instrument(level = "debug", skip(wire, limits), fields(len = wire.len()))]
+pub fn proto_wire_to_signed_yaml_stream_with_resource_limits(
+    wire: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<Vec<u8>, TranscodeError>> {
+    limits.check_input_size(ArtifactResourceForm::Protobuf, wire)?;
+    let (payload, body) = match proto_to_yaml_components(wire) {
+        Ok(components) => components,
+        Err(error) => return Ok(Err(error)),
+    };
+    let outcome = compose_with_resource_limits(
+        &ComposeRequest {
+            payload: &payload,
+            signature_carrier: body.as_bytes(),
+            form: TranscriptionForm::Yaml,
+        },
+        limits,
+    )?;
+    Ok(match outcome {
+        ComposeOutcome::Success(success) => Ok(success.artifact),
         ComposeOutcome::Invocation(_) | ComposeOutcome::Error(_) => {
             Err(TranscodeError::NotSignedYamlStream)
         }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -173,12 +247,20 @@ mod tests {
     use ed25519_dalek::SigningKey as Ed25519SigningKey;
 
     use super::{
-        TranscodeError, proto_wire_to_signed_yaml_stream, signed_yaml_stream_to_proto_wire,
+        TranscodeError, proto_wire_to_signed_yaml_stream,
+        proto_wire_to_signed_yaml_stream_with_resource_limits, signed_yaml_stream_to_proto_wire,
+        signed_yaml_stream_to_proto_wire_with_resource_limits,
     };
     use crate::{SignYamlParams, SigningKey, sign_yaml};
     use yaml_sigil_core::{
-        AlgorithmId, compose_proto_outer, decode_signed_yaml_artifact, view_signed_yaml_artifact,
+        AlgorithmId, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
+        compose_proto_outer, decode_signed_yaml_artifact, view_signed_yaml_artifact,
     };
+
+    fn finite(maximum: usize) -> ArtifactResourceLimits {
+        ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(maximum).unwrap())
+    }
 
     fn add_signature_whitespace(artifact: &[u8]) -> Vec<u8> {
         let text = std::str::from_utf8(artifact).expect("signer emits UTF-8 YAML");
@@ -240,6 +322,79 @@ mod tests {
             signed_yaml_stream_to_proto_wire(&mutated),
             Err(TranscodeError::InvalidSignatureBase64)
         ));
+    }
+
+    #[test]
+    fn transcoding_checks_source_and_destination_independently() {
+        let signing_key = Ed25519SigningKey::from_bytes(&[56_u8; 32]);
+        let yaml = sign_yaml(&SignYamlParams {
+            payload: b"review: boundaries\n",
+            algorithm: AlgorithmId::Ed25519,
+            key: SigningKey::Ed25519(&signing_key),
+            keyid: Some("key"),
+            append_missing_final_newline: false,
+        })
+        .unwrap();
+        let proto = signed_yaml_stream_to_proto_wire(&yaml).unwrap();
+        assert!(proto.len() < yaml.len());
+
+        let input_error =
+            signed_yaml_stream_to_proto_wire_with_resource_limits(&yaml, &finite(yaml.len() - 1))
+                .unwrap_err();
+        assert_eq!(
+            input_error.kind(),
+            ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(
+            input_error.artifact_form(),
+            Some(ArtifactResourceForm::Yaml)
+        );
+
+        let yaml_to_proto =
+            signed_yaml_stream_to_proto_wire_with_resource_limits(&yaml, &finite(yaml.len()))
+                .unwrap()
+                .unwrap();
+        assert_eq!(yaml_to_proto, proto);
+
+        let yaml_again = proto_wire_to_signed_yaml_stream(&proto).unwrap();
+        assert!(yaml_again.len() > proto.len());
+        let output_error = proto_wire_to_signed_yaml_stream_with_resource_limits(
+            &proto,
+            &finite(yaml_again.len() - 1),
+        )
+        .unwrap_err();
+        assert_eq!(
+            output_error.kind(),
+            ArtifactResourceErrorKind::OutputArtifactTooLarge
+        );
+        assert_eq!(
+            output_error.artifact_form(),
+            Some(ArtifactResourceForm::Yaml)
+        );
+        assert_eq!(
+            output_error.observed_or_projected_artifact_bytes(),
+            Some(yaml_again.len())
+        );
+
+        let round_trip = proto_wire_to_signed_yaml_stream_with_resource_limits(
+            &proto,
+            &finite(yaml_again.len()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(round_trip, yaml_again);
+    }
+
+    #[test]
+    fn protobuf_transcode_input_rejection_precedes_malformed_wire() {
+        let error =
+            proto_wire_to_signed_yaml_stream_with_resource_limits(&[0xff, 0xff], &finite(1))
+                .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(error.artifact_form(), Some(ArtifactResourceForm::Protobuf));
     }
 
     #[test]

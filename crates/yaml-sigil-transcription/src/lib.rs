@@ -5,12 +5,12 @@
 //!
 //! # Resource boundaries
 //!
-//! Compose and decompose add no deployment-specific maximum complete artifact
-//! size for either form. They allocate output in proportion to the supplied or
-//! recovered components. Applications accepting potentially untrusted input
-//! should apply their chosen whole-artifact bound before decomposition. The
-//! 16,384-octet YAML signature-carrier constraint remains a separate rule at
-//! metadata parsing boundaries.
+//! [`compose_with_resource_limits`] checks exact prospective output size before
+//! component scans or complete-output allocation. [`decompose_with_resource_limits`]
+//! checks the original input before form, conformance, or artifact processing.
+//! Existing entry points retain their unbounded behavior. The 16,384-octet
+//! YAML signature-carrier constraint remains a separate rule at metadata
+//! parsing boundaries.
 
 use tracing::instrument;
 use yaml_sigil_core::{
@@ -18,6 +18,10 @@ use yaml_sigil_core::{
     decompose_proto_outer, validate_payload_stream,
 };
 
+pub use yaml_sigil_core::{
+    ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
+    ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
+};
 pub use yaml_sigil_traits::OuterConformance;
 
 // The `Transcriber` / `AsyncTranscriber` trait pair and the Compose / Decompose
@@ -87,13 +91,17 @@ fn contains_constrained_marker(carrier: &[u8]) -> bool {
 /// Assemble envelope-form bytes from an abstract Artifact.
 ///
 /// This method does not enforce a complete-output byte limit for YAML or
-/// protobuf. Apply any deployment-specific component policy before this call
-/// and any output policy to the returned artifact.
+/// protobuf. Use [`compose_with_resource_limits`] to apply the shared output
+/// policy before component inspection and allocation.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]
 pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
     if let Err(e) = validate_compose_invocation(req) {
         return ComposeOutcome::Invocation(e);
     }
+    compose_after_invocation_validation(req)
+}
+
+fn compose_after_invocation_validation(req: &ComposeRequest<'_>) -> ComposeOutcome {
     let artifact = match req.form {
         TranscriptionForm::Yaml => {
             if validate_payload_stream(req.payload).is_err() {
@@ -115,15 +123,96 @@ pub fn compose(req: &ComposeRequest<'_>) -> ComposeOutcome {
     })
 }
 
+fn resource_form(form: TranscriptionForm) -> ArtifactResourceForm {
+    match form {
+        TranscriptionForm::Yaml => ArtifactResourceForm::Yaml,
+        TranscriptionForm::Protobuf => ArtifactResourceForm::Protobuf,
+    }
+}
+
+fn varint_len(mut value: u64) -> u64 {
+    let mut length = 1;
+    while value >= 0x80 {
+        value >>= 7;
+        length += 1;
+    }
+    length
+}
+
+fn checked_proto_outer_size(
+    payload_len: usize,
+    carrier_len: usize,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<usize> {
+    let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Protobuf);
+    let payload_len = u64::try_from(payload_len).map_err(|_| overflow())?;
+    let carrier_len = u64::try_from(carrier_len).map_err(|_| overflow())?;
+    let payload_field = 1u64
+        .checked_add(varint_len(payload_len))
+        .and_then(|size| size.checked_add(payload_len))
+        .ok_or_else(overflow)?;
+    let carrier_field = 1u64
+        .checked_add(varint_len(carrier_len))
+        .and_then(|size| size.checked_add(carrier_len))
+        .ok_or_else(overflow)?;
+    let raw_size = payload_field
+        .checked_add(carrier_field)
+        .ok_or_else(overflow)?;
+    let encoded_size = usize::try_from(raw_size).map_err(|_| overflow())?;
+    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_size)
+}
+
+fn check_compose_output_size(
+    req: &ComposeRequest<'_>,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<usize> {
+    match req.form {
+        TranscriptionForm::Yaml => {
+            let encoded_size = req
+                .payload
+                .len()
+                .checked_add(4)
+                .and_then(|size| size.checked_add(req.signature_carrier.len()))
+                .ok_or_else(|| limits.size_computation_overflow(ArtifactResourceForm::Yaml))?;
+            limits.check_output_size(ArtifactResourceForm::Yaml, encoded_size)
+        }
+        TranscriptionForm::Protobuf => {
+            checked_proto_outer_size(req.payload.len(), req.signature_carrier.len(), limits)
+        }
+    }
+}
+
+/// Assemble envelope bytes after applying an explicit complete-output policy.
+///
+/// Request-shape validation and exact checked sizing precede payload or
+/// signature-carrier inspection. Complete output allocation occurs only after
+/// resource admission and component validation.
+#[instrument(level = "info", skip(req, limits), fields(form = ?req.form))]
+pub fn compose_with_resource_limits(
+    req: &ComposeRequest<'_>,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<ComposeOutcome> {
+    if let Err(error) = validate_compose_invocation(req) {
+        return Ok(ComposeOutcome::Invocation(error));
+    }
+    let expected_size = check_compose_output_size(req, limits)?;
+    let outcome = compose_after_invocation_validation(req);
+    if let ComposeOutcome::Success(success) = &outcome {
+        debug_assert_eq!(success.artifact.len(), expected_size);
+    }
+    Ok(outcome)
+}
+
 /// Recover abstract Artifact bytes from an envelope.
 ///
 /// # Resource usage
 ///
-/// Both forms accept a complete artifact without adding a
-/// deployment-specific whole-artifact limit. YAML decomposition scans the
-/// complete input. Protobuf decomposition has the resource behavior documented
-/// on [`yaml_sigil_core::decompose_proto_outer`]. Both return owned component
-/// buffers. Apply any local input bound before this call.
+/// Both forms accept a complete artifact without adding an implementation-local
+/// limit. YAML decomposition scans the complete input. Protobuf decomposition
+/// has the resource behavior documented on
+/// [`yaml_sigil_core::decompose_proto_outer`]. Both return owned component
+/// buffers. Use [`decompose_with_resource_limits`] to check the original input
+/// first.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]
 pub fn decompose(req: &DecomposeRequest<'_>) -> DecomposeResponse {
     let outer = match validate_decompose_invocation(req) {
@@ -136,11 +225,24 @@ pub fn decompose(req: &DecomposeRequest<'_>) -> DecomposeResponse {
     }
 }
 
+/// Recover abstract artifact bytes after applying an explicit input policy.
+///
+/// The complete raw input length is checked before form, outer-conformance, or
+/// artifact processing.
+#[instrument(level = "info", skip(req, limits), fields(form = ?req.form))]
+pub fn decompose_with_resource_limits(
+    req: &DecomposeRequest<'_>,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<DecomposeResponse> {
+    limits.check_input_size(resource_form(req.form), req.artifact)?;
+    Ok(decompose(req))
+}
+
 /// In-process default transcriber that delegates to the crate's free functions.
 ///
-/// Both forms have the resource behavior documented on [`compose`] and
-/// [`decompose`]. This unit type remains unconfigured so a future configured
-/// transcriber can be added alongside it.
+/// Both forms have the unbounded resource behavior documented on [`compose`]
+/// and [`decompose`]. Use the resource-aware free functions when you need the
+/// shared policy.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultTranscriber;
 
@@ -311,6 +413,73 @@ mod tests {
         assert!(c.emits_canonical_yaml_envelope);
         assert_eq!(c.supported_forms.len(), 2);
         assert_eq!(c.supported_outer_conformances.len(), 2);
+    }
+
+    fn finite(maximum: usize) -> ArtifactResourceLimits {
+        ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(maximum).unwrap())
+    }
+
+    #[test]
+    fn resource_aware_compose_checks_exact_yaml_and_protobuf_boundaries() {
+        for form in [TranscriptionForm::Yaml, TranscriptionForm::Protobuf] {
+            let request = ComposeRequest {
+                payload: b"payload\n",
+                signature_carrier: b"carrier",
+                form,
+            };
+            let unbounded =
+                compose_with_resource_limits(&request, &ArtifactResourceLimits::unbounded())
+                    .unwrap();
+            let expected = match unbounded {
+                ComposeOutcome::Success(success) => success.artifact,
+                other => panic!("{other:?}"),
+            };
+            let exact = compose_with_resource_limits(&request, &finite(expected.len())).unwrap();
+            assert!(matches!(exact, ComposeOutcome::Success(_)));
+
+            let error =
+                compose_with_resource_limits(&request, &finite(expected.len() - 1)).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                ArtifactResourceErrorKind::OutputArtifactTooLarge
+            );
+            assert_eq!(error.artifact_form(), Some(resource_form(form)));
+            assert_eq!(
+                error.observed_or_projected_artifact_bytes(),
+                Some(expected.len())
+            );
+        }
+    }
+
+    #[test]
+    fn output_resource_rejection_precedes_component_validation() {
+        let invalid_payload = [0xff; 8];
+        let request = ComposeRequest {
+            payload: &invalid_payload,
+            signature_carrier: b"bad\n---\ncarrier",
+            form: TranscriptionForm::Yaml,
+        };
+        let error = compose_with_resource_limits(&request, &finite(1)).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            ArtifactResourceErrorKind::OutputArtifactTooLarge
+        );
+    }
+
+    #[test]
+    fn input_resource_rejection_precedes_outer_conformance_validation() {
+        let request = DecomposeRequest {
+            artifact: &[0xff, 0xff],
+            form: TranscriptionForm::Yaml,
+            outer_conformance: Some(OuterConformance::Strict),
+        };
+        let error = decompose_with_resource_limits(&request, &finite(1)).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(error.artifact_form(), Some(ArtifactResourceForm::Yaml));
     }
 
     #[test]
