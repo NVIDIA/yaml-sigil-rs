@@ -13,6 +13,76 @@
 //! issue a synthetic signing request. The explicitly unqualified builder
 //! retains public-key and signature-structure checks but skips output
 //! self-verification.
+//!
+//! # Implement a signing adapter
+//!
+//! Implement [`signature::Signer<[u8; 64]>`](signature::Signer) for a type you
+//! own that holds or borrows your provider's initialized key handle. Add a
+//! direct dependency on `signature` 2.2 to implement this contract. The adapter
+//! must be [`Sync`], and its `try_sign` method returns exactly 64 signature
+//! octets or a [`signature::Error`]. Operation errors become
+//! [`SignError::KeyOperationFailure`].
+//!
+//! This example wraps a borrowed `p256` 0.13 key. Replace the wrapper's field
+//! and signing call with your provider's handle and message-signing operation.
+//! The builder receives an adapter reference and public-key bytes without
+//! requiring private-key export. The `p256` signing call applies SHA-256, so
+//! the adapter passes `message` to it unchanged.
+//!
+//! ```
+//! use yaml_sigil_core::AlgorithmId;
+//! use yaml_sigil_signing::{
+//!     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
+//!     ProviderSigningKeyError, ProviderSigningKeys, SignOutcome, sign_with_provider,
+//! };
+//!
+//! struct P256Signer<'a>(&'a p256::ecdsa::SigningKey);
+//!
+//! impl signature::Signer<[u8; 64]> for P256Signer<'_> {
+//!     fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], signature::Error> {
+//!         let signature: p256::ecdsa::Signature =
+//!             signature::Signer::try_sign(self.0, message)?;
+//!         Ok(signature.to_bytes().into())
+//!     }
+//! }
+//!
+//! fn sign_document(
+//!     native_key: &p256::ecdsa::SigningKey,
+//!     payload: &[u8],
+//! ) -> Result<SignOutcome, ProviderSigningKeyError> {
+//!     let adapter = P256Signer(native_key);
+//!     let public_key = native_key.verifying_key().to_encoded_point(false);
+//!     let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(
+//!         &adapter,
+//!         public_key.as_bytes(),
+//!     )
+//!     .build()?;
+//!     let request = ProviderSignRequest {
+//!         payload,
+//!         algorithm: AlgorithmId::EcdsaP256Sha256,
+//!         key: ProviderSigningKeys::EcdsaP256Sha256(&key),
+//!         keyid: None,
+//!         append_missing_final_newline: false,
+//!         output_form: OutputForm::Protobuf,
+//!         algorithm_parameters: &[],
+//!     };
+//!     Ok(sign_with_provider(&request))
+//! }
+//! # // A fixed key is used only to execute this documentation test.
+//! # let native_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
+//! # assert!(matches!(sign_document(&native_key, b"example: signed\n").unwrap(),
+//! #     SignOutcome::Success(_)));
+//! ```
+//!
+//! For Ed25519, implement the same operation trait, return canonical `R || S`,
+//! and use [`ProviderSigningKeyBuilder::ed25519`] with the corresponding
+//! 32-octet public key and [`ProviderSigningKeys::Ed25519`].
+//!
+//! The builder and request types are public and re-exported at the crate
+//! root. Pass the opaque bound key to [`crate::sign_with_provider`], which owns
+//! payload preparation and artifact construction. Implementing the separate
+//! high-level [`crate::Signer`] trait means providing that complete operation;
+//! a cryptographic adapter only needs the `signature` operation trait above.
 
 use std::fmt;
 

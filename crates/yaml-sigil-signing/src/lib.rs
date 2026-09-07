@@ -27,6 +27,8 @@
 //! qualified key path, which validates the bound public key and self-verifies
 //! every real output. [`sign_with_unqualified_provider`] names the deliberate
 //! bypass. The provider receives message bytes, not a prehash.
+//! See [`provider`] for the public extension contract and a complete adapter
+//! example.
 
 mod proto_carrier;
 pub mod provider;
