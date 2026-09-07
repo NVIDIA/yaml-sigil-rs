@@ -8,6 +8,7 @@
 
 use crate::conformance::OuterConformance;
 use crate::error::CoreError;
+use crate::{ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult};
 
 /// Outcome of outer protobuf envelope decomposition.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,16 +27,27 @@ pub fn compose_proto_outer(payload: &[u8], signature_carrier: &[u8]) -> Vec<u8> 
     crate::pb::compose_raw_outer(payload, signature_carrier)
 }
 
+/// Serialize an outer artifact after applying an explicit complete-output policy.
+///
+/// Checked wire-size arithmetic and policy admission occur before allocation.
+pub fn compose_proto_outer_with_resource_limits(
+    payload: &[u8],
+    signature_carrier: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Vec<u8>> {
+    crate::pb::compose_raw_outer_with_resource_limits(payload, signature_carrier, limits)
+}
+
 /// Decompose outer wire bytes under the selected outer-envelope conformance mode.
 ///
 /// # Resource usage
 ///
 /// YamlSigil `v1alpha1` defines no maximum complete artifact size, and this
-/// function adds no deployment-specific limit. It copies recognized fields
-/// into owned buffers with work and allocation linear in their total size.
-/// Applications accepting potentially untrusted input should apply their
-/// chosen whole-artifact bound before this call. A local resource rejection is
-/// independent of artifact conformance.
+/// function adds no implementation-local limit. It copies recognized fields
+/// into owned buffers with work and allocation linear in their total size. Use
+/// [`decompose_proto_outer_with_resource_limits`] to apply the shared input
+/// policy first. A local resource rejection is independent of artifact
+/// conformance.
 #[tracing::instrument(level = "debug", skip(wire), fields(len = wire.len(), ?mode))]
 pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterDecomposeOutcome {
     match crate::pb::decompose_raw_outer(wire, mode) {
@@ -48,6 +60,18 @@ pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterD
             signature_carrier,
         },
     }
+}
+
+/// Decompose outer wire bytes after applying an explicit complete-input policy.
+///
+/// The raw input length is checked before tag or conformance processing.
+pub fn decompose_proto_outer_with_resource_limits(
+    wire: &[u8],
+    mode: OuterConformance,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<ProtoOuterDecomposeOutcome> {
+    let wire = limits.check_input_size(ArtifactResourceForm::Protobuf, wire)?;
+    Ok(decompose_proto_outer(wire, mode))
 }
 
 /// Decode inner `YamlSigilSignature` from opaque carrier bytes (verification metadata stage).
@@ -102,6 +126,43 @@ mod tests {
         assert_eq!(
             decompose_proto_outer(&only_payload, OuterConformance::Strict),
             ProtoOuterDecomposeOutcome::Malformed
+        );
+    }
+
+    #[test]
+    fn resource_limit_precedes_malformed_wire_and_mode_processing() {
+        let limits = ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(1).unwrap());
+        let error = decompose_proto_outer_with_resource_limits(
+            &[0xff, 0xff],
+            OuterConformance::Strict,
+            &limits,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            crate::ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(error.artifact_form(), Some(ArtifactResourceForm::Protobuf));
+    }
+
+    #[test]
+    fn resource_aware_raw_composition_checks_the_exact_output_boundary() {
+        let expected = compose_proto_outer(b"payload", b"carrier");
+        let exact = ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(expected.len()).unwrap());
+        assert_eq!(
+            compose_proto_outer_with_resource_limits(b"payload", b"carrier", &exact).unwrap(),
+            expected
+        );
+
+        let too_small = ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(expected.len() - 1).unwrap());
+        let error = compose_proto_outer_with_resource_limits(b"payload", b"carrier", &too_small)
+            .unwrap_err();
+        assert_eq!(
+            error.observed_or_projected_artifact_bytes(),
+            Some(expected.len())
         );
     }
 }

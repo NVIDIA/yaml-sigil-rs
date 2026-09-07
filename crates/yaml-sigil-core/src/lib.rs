@@ -45,12 +45,15 @@ pub use conformance::{
     YamlSignatureDocumentDuplicateKeyPolicy, YamlSignatureDocumentUnknownFieldPolicy,
     yaml_unknown_field_policies,
 };
-pub use decomposition::{DecompositionOutcome, SignatureRanges, decompose_artifact};
+pub use decomposition::{
+    DecompositionOutcome, SignatureRanges, decompose_artifact,
+    decompose_artifact_with_resource_limits,
+};
 pub use error::CoreError;
 pub use payload::{PayloadInvariantError, validate_payload_stream};
 pub use proto_outer::{
-    ProtoOuterDecomposeOutcome, compose_proto_outer, decode_signature_carrier,
-    decompose_proto_outer,
+    ProtoOuterDecomposeOutcome, compose_proto_outer, compose_proto_outer_with_resource_limits,
+    decode_signature_carrier, decompose_proto_outer, decompose_proto_outer_with_resource_limits,
 };
 pub use resource::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
@@ -63,6 +66,8 @@ pub use signature_doc::{
 #[cfg(feature = "json-schema-validate")]
 pub use tier_a_schema::signature_document_validates_tier_a_schema;
 pub use wire::{
-    ProtoArtifactView, decode_signed_yaml_artifact, encode_signed_yaml_artifact,
-    view_signature_carrier, view_signed_yaml_artifact,
+    ProtoArtifactView, decode_signed_yaml_artifact,
+    decode_signed_yaml_artifact_with_resource_limits, encode_signed_yaml_artifact,
+    encode_signed_yaml_artifact_with_resource_limits, view_signature_carrier,
+    view_signed_yaml_artifact,
 };

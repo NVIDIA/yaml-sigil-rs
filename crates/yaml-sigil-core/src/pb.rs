@@ -8,8 +8,9 @@
 //! dependency version does not become part of this crate's public contract.
 //!
 //! YamlSigil `v1alpha1` defines no maximum complete artifact size. These
-//! entry points add no deployment-specific limit. The protobuf format's own
-//! size ceiling and the decoder's implementation safeguards still apply.
+//! types provide explicit resource-aware decode and encode variants. Existing
+//! methods retain their unbounded behavior. The protobuf format's own size
+//! ceiling and the decoder's implementation safeguards still apply.
 //!
 //! # Construction and borrowed inspection
 //!
@@ -48,85 +49,95 @@
 //!
 //! # External input boundaries
 //!
-//! Applications accepting potentially untrusted complete artifacts should
-//! select a deployment-appropriate input bound before calling any YamlSigil
-//! parser. `4 MiB` is an example and the intended default for future opt-in
-//! bounded APIs, not a YamlSigil or gRPC protocol requirement. A deployment
-//! can choose a lower value, a higher value, or no additional whole-artifact
-//! byte limit.
+//! Use [`SignedYamlArtifact::decode_with_resource_limits`] or
+//! [`SignedYamlArtifactRef::decode_with_resource_limits`] to check the original
+//! wire length before Buffa parses or copies fields. The borrowed form keeps
+//! payload and signature bytes in the admitted input allocation.
 //!
 //! ```
 //! use yaml_sigil_core::{
-//!     AlgorithmId,
+//!     AlgorithmId, ArtifactResourceLimits,
 //!     pb::{
-//!         DecodeError, SignedYamlArtifact, SignedYamlArtifactRef,
-//!         YamlSigilSignature,
+//!         SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature,
 //!     },
 //! };
-//!
-//! #[derive(Debug)]
-//! enum InputError {
-//!     ArtifactTooLarge,
-//!     InvalidProtobuf,
-//! }
-//!
-//! impl From<DecodeError> for InputError {
-//!     fn from(error: DecodeError) -> Self {
-//!         let _ = error;
-//!         Self::InvalidProtobuf
-//!     }
-//! }
-//!
-//! fn check_artifact_size(
-//!     artifact: &[u8],
-//!     maximum: Option<usize>,
-//! ) -> Result<(), InputError> {
-//!     if maximum.is_some_and(|limit| artifact.len() > limit) {
-//!         return Err(InputError::ArtifactTooLarge);
-//!     }
-//!
-//!     Ok(())
-//! }
-//!
-//! fn inspect(
-//!     input: &[u8],
-//!     deployment_limit: Option<usize>,
-//! ) -> Result<usize, InputError> {
-//!     check_artifact_size(input, deployment_limit)?;
-//!     let artifact = SignedYamlArtifactRef::decode(input)?;
-//!     Ok(artifact.payload().len())
-//! }
 //!
 //! let signature =
 //!     YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
 //! let wire = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature))
-//!     .encode_to_vec()
+//!     .encode_to_vec_with_resource_limits(&ArtifactResourceLimits::default())
+//!     .unwrap()
 //!     .unwrap();
 //!
-//! let deployment_limit = Some(4 * 1024 * 1024);
-//! assert_eq!(inspect(&wire, deployment_limit).unwrap(), 8);
-//!
-//! let no_additional_limit = None;
-//! assert_eq!(inspect(&wire, no_additional_limit).unwrap(), 8);
+//! let owned = SignedYamlArtifact::decode_with_resource_limits(
+//!     &wire,
+//!     &ArtifactResourceLimits::default(),
+//! )
+//! .unwrap()
+//! .unwrap();
+//! let borrowed = SignedYamlArtifactRef::decode_with_resource_limits(
+//!     &wire,
+//!     &ArtifactResourceLimits::default(),
+//! )
+//! .unwrap()
+//! .unwrap();
+//! assert_eq!(owned.payload(), borrowed.payload());
+//! assert_eq!(borrowed.payload().as_ptr(), wire[2..].as_ptr());
 //! ```
 //!
-//! A local whole-artifact rejection does not make an artifact malformed or
-//! non-conforming. The `v1alpha1` 16,384-octet YAML signature-carrier
-//! constraint is independent of complete artifact size. Protobuf format
-//! limits, address-space limits, allocator limits, and deployment controls
-//! still apply when an application selects no additional limit.
+//! Resource-aware encoding computes and checks the exact message size before
+//! reserving or appending. Every returned error leaves a reusable destination
+//! unchanged.
+//!
+//! ```
+//! use core::num::NonZeroUsize;
+//! use yaml_sigil_core::{
+//!     AlgorithmId, ArtifactResourceLimits,
+//!     pb::{SignedYamlArtifact, YamlSigilSignature},
+//! };
+//!
+//! let signature =
+//!     YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
+//! let artifact =
+//!     SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
+//! let encoded_size = artifact.encoded_len().unwrap();
+//! let mut output = Vec::with_capacity(2 + encoded_size);
+//! output.extend_from_slice(&[0xaa, 0xbb]);
+//! let allocation = output.as_ptr();
+//! artifact
+//!     .encode_into_with_resource_limits(
+//!         &mut output,
+//!         &ArtifactResourceLimits::default(),
+//!     )
+//!     .unwrap()
+//!     .unwrap();
+//! assert_eq!(output.as_ptr(), allocation);
+//!
+//! let before = output.clone();
+//! let too_small = ArtifactResourceLimits::unbounded()
+//!     .with_max_artifact_bytes(NonZeroUsize::new(encoded_size - 1).unwrap());
+//! assert!(
+//!     artifact
+//!         .encode_into_with_resource_limits(&mut output, &too_small)
+//!         .is_err()
+//! );
+//! assert_eq!(output, before);
+//! ```
+//!
+//! A local rejection does not make an artifact malformed or non-conforming.
+//! The `v1alpha1` 16,384-octet YAML signature-carrier constraint is separate.
 
 use std::fmt;
 
-use buffa::{MessageView as _, ViewEncode as _};
+use buffa::MessageView as _;
 
-use crate::AlgorithmId;
 use crate::generated_proto::yaml_sigil::v1alpha1::{
     SignedYamlArtifact as GeneratedSignedYamlArtifact,
     SignedYamlArtifactView as GeneratedSignedYamlArtifactView,
     YamlSigilSignature as GeneratedYamlSigilSignature,
     YamlSigilSignatureView as GeneratedYamlSigilSignatureView,
 };
+use crate::{AlgorithmId, ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult};
 
 /// Stable categories for protobuf decoding failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,14 +282,6 @@ impl EncodeError {
             kind: EncodeErrorKind::MessageTooLarge,
         }
     }
-
-    fn from_buffa(error: buffa::EncodeError) -> Self {
-        let kind = match error {
-            buffa::EncodeError::MessageTooLarge => EncodeErrorKind::MessageTooLarge,
-            _ => EncodeErrorKind::Other,
-        };
-        Self { kind }
-    }
 }
 
 impl fmt::Debug for EncodeError {
@@ -309,70 +312,151 @@ fn algorithm_wire_value(algorithm: AlgorithmId) -> i32 {
     }
 }
 
-fn varint_len(mut value: u64) -> usize {
-    let mut length = 1;
-    while value >= 0x80 {
-        value >>= 7;
-        length += 1;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SizeComputationOverflow;
+
+#[derive(Debug, Default)]
+struct CheckedSizeSink {
+    size: u64,
+    overflowed: bool,
+}
+
+impl CheckedSizeSink {
+    fn add_u64(&mut self, amount: u64) {
+        match self.size.checked_add(amount) {
+            Some(size) => self.size = size,
+            None => self.overflowed = true,
+        }
     }
-    length
-}
 
-fn int32_len(value: i32) -> usize {
-    if value < 0 {
-        10
-    } else {
-        varint_len(value as u64)
+    fn add_usize(&mut self, amount: usize) {
+        match u64::try_from(amount) {
+            Ok(amount) => self.add_u64(amount),
+            Err(_) => self.overflowed = true,
+        }
+    }
+
+    fn finish(self) -> Result<u64, SizeComputationOverflow> {
+        if self.overflowed {
+            Err(SizeComputationOverflow)
+        } else {
+            Ok(self.size)
+        }
     }
 }
 
-fn checked_add(left: usize, right: usize) -> Result<usize, EncodeError> {
-    left.checked_add(right)
-        .ok_or_else(EncodeError::message_too_large)
+impl buffa::EncodeSink for CheckedSizeSink {
+    fn put_u8(&mut self, _: u8) {
+        self.add_u64(1);
+    }
+
+    fn put_slice(&mut self, source: &[u8]) {
+        self.add_usize(source.len());
+    }
+
+    fn put_u32_le(&mut self, _: u32) {
+        self.add_u64(4);
+    }
+
+    fn put_u64_le(&mut self, _: u64) {
+        self.add_u64(8);
+    }
 }
 
-fn checked_len_field_size(value_len: usize) -> Result<usize, EncodeError> {
-    checked_add(checked_add(1, varint_len(value_len as u64))?, value_len)
-}
-
-fn check_protobuf_size(size: usize) -> Result<usize, EncodeError> {
-    if size > buffa::MAX_MESSAGE_BYTES as usize {
+fn check_protobuf_size(raw_size: u64) -> Result<usize, EncodeError> {
+    if raw_size > u64::from(buffa::MAX_MESSAGE_BYTES) {
         Err(EncodeError::message_too_large())
     } else {
-        Ok(size)
+        usize::try_from(raw_size).map_err(|_| EncodeError::message_too_large())
     }
 }
 
-fn push_varint(destination: &mut Vec<u8>, mut value: u64) {
+fn push_varint(destination: &mut impl buffa::EncodeSink, mut value: u64) {
     while value >= 0x80 {
-        destination.push((value as u8) | 0x80);
+        destination.put_u8((value as u8) | 0x80);
         value >>= 7;
     }
-    destination.push(value as u8);
+    destination.put_u8(value as u8);
 }
 
-fn push_tag(destination: &mut Vec<u8>, field_number: u32, wire_type: u8) {
+fn push_tag(destination: &mut impl buffa::EncodeSink, field_number: u32, wire_type: u8) {
     push_varint(
         destination,
         (u64::from(field_number) << 3) | u64::from(wire_type),
     );
 }
 
-fn push_len_field(destination: &mut Vec<u8>, field_number: u32, value: &[u8]) {
+fn push_len_field(
+    destination: &mut impl buffa::EncodeSink,
+    field_number: u32,
+    value: &[u8],
+) -> Result<(), SizeComputationOverflow> {
+    let value_len = u64::try_from(value.len()).map_err(|_| SizeComputationOverflow)?;
     push_tag(destination, field_number, 2);
-    push_varint(destination, value.len() as u64);
-    destination.extend_from_slice(value);
+    push_varint(destination, value_len);
+    destination.put_slice(value);
+    Ok(())
 }
 
 trait FacadeEncode {
-    fn facade_encoded_len(&self) -> Result<usize, EncodeError>;
-    fn write_facade_wire(&self, destination: &mut Vec<u8>);
+    fn write_facade_wire(
+        &self,
+        destination: &mut impl buffa::EncodeSink,
+    ) -> Result<(), SizeComputationOverflow>;
+}
+
+fn raw_facade_encoded_len(value: &impl FacadeEncode) -> Result<u64, SizeComputationOverflow> {
+    let mut counter = CheckedSizeSink::default();
+    value.write_facade_wire(&mut counter)?;
+    counter.finish()
+}
+
+fn facade_encoded_len(value: &impl FacadeEncode) -> Result<usize, EncodeError> {
+    let raw_size = raw_facade_encoded_len(value).map_err(|_| EncodeError::message_too_large())?;
+    check_protobuf_size(raw_size)
+}
+
+fn resource_facade_encoded_len(
+    value: &impl FacadeEncode,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
+    let raw_size = match raw_facade_encoded_len(value) {
+        Ok(size) => size,
+        Err(_) => {
+            return Err(limits.size_computation_overflow(ArtifactResourceForm::Protobuf));
+        }
+    };
+    resource_protobuf_size_preflight(raw_size, limits)
+}
+
+fn resource_protobuf_size_preflight(
+    raw_size: u64,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
+    let platform_maximum = u64::try_from(usize::MAX).unwrap_or(u64::MAX);
+    resource_protobuf_size_preflight_for_platform(raw_size, platform_maximum, limits)
+}
+
+fn resource_protobuf_size_preflight_for_platform(
+    raw_size: u64,
+    platform_maximum: u64,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<usize, EncodeError>> {
+    if raw_size > platform_maximum {
+        return Err(limits.size_computation_overflow(ArtifactResourceForm::Protobuf));
+    }
+    let encoded_len = usize::try_from(raw_size)
+        .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
+    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_len)?;
+    Ok(check_protobuf_size(raw_size))
 }
 
 fn encode_facade_to_vec(value: &impl FacadeEncode) -> Result<Vec<u8>, EncodeError> {
-    let encoded_len = value.facade_encoded_len()?;
+    let encoded_len = facade_encoded_len(value)?;
     let mut destination = Vec::with_capacity(encoded_len);
-    value.write_facade_wire(&mut destination);
+    value
+        .write_facade_wire(&mut destination)
+        .map_err(|_| EncodeError::message_too_large())?;
     debug_assert_eq!(destination.len(), encoded_len);
     Ok(destination)
 }
@@ -381,22 +465,56 @@ fn encode_facade_into(
     value: &impl FacadeEncode,
     destination: &mut Vec<u8>,
 ) -> Result<(), EncodeError> {
-    let encoded_len = value.facade_encoded_len()?;
+    let encoded_len = facade_encoded_len(value)?;
+    let original_len = destination.len();
     destination.reserve(encoded_len);
-    value.write_facade_wire(destination);
-    Ok(())
+    match value.write_facade_wire(destination) {
+        Ok(()) => {
+            debug_assert_eq!(destination.len() - original_len, encoded_len);
+            Ok(())
+        }
+        Err(_) => {
+            destination.truncate(original_len);
+            Err(EncodeError::message_too_large())
+        }
+    }
 }
 
-fn encode_view_into(
+fn encode_facade_to_vec_with_resource_limits(
+    value: &impl FacadeEncode,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<Vec<u8>, EncodeError>> {
+    let encoded_len = match resource_facade_encoded_len(value, limits)? {
+        Ok(size) => size,
+        Err(error) => return Ok(Err(error)),
+    };
+    let mut destination = Vec::with_capacity(encoded_len);
+    if value.write_facade_wire(&mut destination).is_err() {
+        return Err(limits.size_computation_overflow(ArtifactResourceForm::Protobuf));
+    }
+    debug_assert_eq!(destination.len(), encoded_len);
+    Ok(Ok(destination))
+}
+
+fn encode_facade_into_with_resource_limits(
+    value: &impl FacadeEncode,
     destination: &mut Vec<u8>,
-    encode: impl FnOnce(&mut Vec<u8>) -> Result<(), buffa::EncodeError>,
-) -> Result<(), EncodeError> {
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<(), EncodeError>> {
+    let encoded_len = match resource_facade_encoded_len(value, limits)? {
+        Ok(size) => size,
+        Err(error) => return Ok(Err(error)),
+    };
     let original_len = destination.len();
-    match encode(destination) {
-        Ok(()) => Ok(()),
-        Err(error) => {
+    destination.reserve(encoded_len);
+    match value.write_facade_wire(destination) {
+        Ok(()) => {
+            debug_assert_eq!(destination.len() - original_len, encoded_len);
+            Ok(Ok(()))
+        }
+        Err(_) => {
             destination.truncate(original_len);
-            Err(EncodeError::from_buffa(error))
+            Err(limits.size_computation_overflow(ArtifactResourceForm::Protobuf))
         }
     }
 }
@@ -526,7 +644,7 @@ impl YamlSigilSignature {
 
     /// Return the encoded protobuf size.
     pub fn encoded_len(&self) -> Result<usize, EncodeError> {
-        self.facade_encoded_len()
+        facade_encoded_len(self)
     }
 
     /// Encode into a new byte vector.
@@ -552,33 +670,22 @@ impl YamlSigilSignature {
 }
 
 impl FacadeEncode for YamlSigilSignature {
-    fn facade_encoded_len(&self) -> Result<usize, EncodeError> {
-        let mut size = 0usize;
-        if self.algorithm_wire_value != 0 {
-            size = checked_add(size, checked_add(1, int32_len(self.algorithm_wire_value))?)?;
-        }
-        if let Some(keyid) = &self.keyid {
-            size = checked_add(size, checked_len_field_size(keyid.len())?)?;
-        }
-        if !self.signature.is_empty() {
-            size = checked_add(size, checked_len_field_size(self.signature.len())?)?;
-        }
-        size = checked_add(size, self.unknown_fields.encoded_len())?;
-        check_protobuf_size(size)
-    }
-
-    fn write_facade_wire(&self, destination: &mut Vec<u8>) {
+    fn write_facade_wire(
+        &self,
+        destination: &mut impl buffa::EncodeSink,
+    ) -> Result<(), SizeComputationOverflow> {
         if self.algorithm_wire_value != 0 {
             push_tag(destination, 1, 0);
             push_varint(destination, self.algorithm_wire_value as i64 as u64);
         }
         if let Some(keyid) = &self.keyid {
-            push_len_field(destination, 2, keyid.as_bytes());
+            push_len_field(destination, 2, keyid.as_bytes())?;
         }
         if !self.signature.is_empty() {
-            push_len_field(destination, 3, &self.signature);
+            push_len_field(destination, 3, &self.signature)?;
         }
         self.unknown_fields.write_to(destination);
+        Ok(())
     }
 }
 
@@ -630,6 +737,15 @@ impl SignedYamlArtifact {
     /// Decode an owned artifact.
     pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
         decode_generated_artifact(input, &buffa::DecodeOptions::new())
+    }
+
+    /// Decode an owned artifact after applying an explicit input policy.
+    pub fn decode_with_resource_limits(
+        input: &[u8],
+        limits: &ArtifactResourceLimits,
+    ) -> ArtifactResourceResult<Result<Self, DecodeError>> {
+        let input = limits.check_input_size(ArtifactResourceForm::Protobuf, input)?;
+        Ok(Self::decode(input))
     }
 
     /// Alias for [`Self::decode`].
@@ -694,7 +810,7 @@ impl SignedYamlArtifact {
 
     /// Return the encoded protobuf size.
     pub fn encoded_len(&self) -> Result<usize, EncodeError> {
-        self.facade_encoded_len()
+        facade_encoded_len(self)
     }
 
     /// Encode into a new byte vector.
@@ -702,11 +818,31 @@ impl SignedYamlArtifact {
         encode_facade_to_vec(self)
     }
 
+    /// Encode into a new byte vector after applying an explicit output policy.
+    pub fn encode_to_vec_with_resource_limits(
+        &self,
+        limits: &ArtifactResourceLimits,
+    ) -> ArtifactResourceResult<Result<Vec<u8>, EncodeError>> {
+        encode_facade_to_vec_with_resource_limits(self, limits)
+    }
+
     /// Append the encoded message to a reusable destination.
     ///
     /// If this method returns an error, `destination` is unchanged.
     pub fn encode_into(&self, destination: &mut Vec<u8>) -> Result<(), EncodeError> {
         encode_facade_into(self, destination)
+    }
+
+    /// Append after applying an explicit output policy.
+    ///
+    /// The artifact size excludes pre-existing destination bytes and capacity.
+    /// Every returned error leaves `destination` unchanged.
+    pub fn encode_into_with_resource_limits(
+        &self,
+        destination: &mut Vec<u8>,
+        limits: &ArtifactResourceLimits,
+    ) -> ArtifactResourceResult<Result<(), EncodeError>> {
+        encode_facade_into_with_resource_limits(self, destination, limits)
     }
 
     fn from_generated(generated: GeneratedSignedYamlArtifact) -> Self {
@@ -722,31 +858,21 @@ impl SignedYamlArtifact {
 }
 
 impl FacadeEncode for SignedYamlArtifact {
-    fn facade_encoded_len(&self) -> Result<usize, EncodeError> {
-        let mut size = 0usize;
+    fn write_facade_wire(
+        &self,
+        destination: &mut impl buffa::EncodeSink,
+    ) -> Result<(), SizeComputationOverflow> {
         if !self.payload.is_empty() {
-            size = checked_add(size, checked_len_field_size(self.payload.len())?)?;
+            push_len_field(destination, 1, &self.payload)?;
         }
         if let Some(signature) = &self.signature {
-            size = checked_add(size, checked_len_field_size(signature.encoded_len()?)?)?;
-        }
-        size = checked_add(size, self.unknown_fields.encoded_len())?;
-        check_protobuf_size(size)
-    }
-
-    fn write_facade_wire(&self, destination: &mut Vec<u8>) {
-        if !self.payload.is_empty() {
-            push_len_field(destination, 1, &self.payload);
-        }
-        if let Some(signature) = &self.signature {
+            let signature_len = raw_facade_encoded_len(signature)?;
             push_tag(destination, 2, 2);
-            let signature_len = signature
-                .facade_encoded_len()
-                .expect("artifact size validation already checked its signature");
-            push_varint(destination, signature_len as u64);
-            signature.write_facade_wire(destination);
+            push_varint(destination, signature_len);
+            signature.write_facade_wire(destination)?;
         }
         self.unknown_fields.write_to(destination);
+        Ok(())
     }
 }
 
@@ -781,6 +907,15 @@ impl<'a> SignedYamlArtifactRef<'a> {
     /// Decode a borrowed artifact view without copying byte fields.
     pub fn decode(input: &'a [u8]) -> Result<Self, DecodeError> {
         decode_generated_artifact_ref(input, &buffa::DecodeOptions::new())
+    }
+
+    /// Decode a borrowed view after applying an explicit input policy.
+    pub fn decode_with_resource_limits(
+        input: &'a [u8],
+        limits: &ArtifactResourceLimits,
+    ) -> ArtifactResourceResult<Result<Self, DecodeError>> {
+        let input = limits.check_input_size(ArtifactResourceForm::Protobuf, input)?;
+        Ok(Self::decode(input))
     }
 
     /// Alias for [`Self::decode`].
@@ -826,26 +961,58 @@ impl<'a> SignedYamlArtifactRef<'a> {
 
     /// Return the encoded protobuf size after normal protobuf merge semantics.
     pub fn encoded_len(&self) -> Result<usize, EncodeError> {
-        self.inner
-            .try_encoded_len()
-            .map(|size| size as usize)
-            .map_err(EncodeError::from_buffa)
+        facade_encoded_len(self)
     }
 
     /// Re-encode the borrowed view into a new byte vector.
     pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError> {
-        self.inner
-            .try_encode_to_vec()
-            .map_err(EncodeError::from_buffa)
+        encode_facade_to_vec(self)
+    }
+
+    /// Re-encode into a new byte vector after applying an explicit output policy.
+    pub fn encode_to_vec_with_resource_limits(
+        &self,
+        limits: &ArtifactResourceLimits,
+    ) -> ArtifactResourceResult<Result<Vec<u8>, EncodeError>> {
+        encode_facade_to_vec_with_resource_limits(self, limits)
     }
 
     /// Append the re-encoded view to a reusable destination.
     ///
     /// If this method returns an error, `destination` is unchanged.
     pub fn encode_into(&self, destination: &mut Vec<u8>) -> Result<(), EncodeError> {
-        encode_view_into(destination, |destination| {
-            self.inner.try_encode(destination)
-        })
+        encode_facade_into(self, destination)
+    }
+
+    /// Append after applying an explicit output policy.
+    ///
+    /// The artifact size excludes pre-existing destination bytes and capacity.
+    /// Every returned error leaves `destination` unchanged.
+    pub fn encode_into_with_resource_limits(
+        &self,
+        destination: &mut Vec<u8>,
+        limits: &ArtifactResourceLimits,
+    ) -> ArtifactResourceResult<Result<(), EncodeError>> {
+        encode_facade_into_with_resource_limits(self, destination, limits)
+    }
+}
+
+impl FacadeEncode for SignedYamlArtifactRef<'_> {
+    fn write_facade_wire(
+        &self,
+        destination: &mut impl buffa::EncodeSink,
+    ) -> Result<(), SizeComputationOverflow> {
+        if !self.inner.payload.is_empty() {
+            push_len_field(destination, 1, self.inner.payload)?;
+        }
+        if let Some(signature) = self.signature() {
+            let signature_len = raw_facade_encoded_len(&signature)?;
+            push_tag(destination, 2, 2);
+            push_varint(destination, signature_len);
+            signature.write_facade_wire(destination)?;
+        }
+        self.inner.__buffa_unknown_fields.write_to(destination);
+        Ok(())
     }
 }
 
@@ -929,26 +1096,41 @@ impl<'a> YamlSigilSignatureRef<'a> {
 
     /// Return the encoded protobuf size after normal protobuf merge semantics.
     pub fn encoded_len(&self) -> Result<usize, EncodeError> {
-        self.generated()
-            .try_encoded_len()
-            .map(|size| size as usize)
-            .map_err(EncodeError::from_buffa)
+        facade_encoded_len(self)
     }
 
     /// Re-encode the borrowed view into a new byte vector.
     pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError> {
-        self.generated()
-            .try_encode_to_vec()
-            .map_err(EncodeError::from_buffa)
+        encode_facade_to_vec(self)
     }
 
     /// Append the re-encoded view to a reusable destination.
     ///
     /// If this method returns an error, `destination` is unchanged.
     pub fn encode_into(&self, destination: &mut Vec<u8>) -> Result<(), EncodeError> {
-        encode_view_into(destination, |destination| {
-            self.generated().try_encode(destination)
-        })
+        encode_facade_into(self, destination)
+    }
+}
+
+impl FacadeEncode for YamlSigilSignatureRef<'_> {
+    fn write_facade_wire(
+        &self,
+        destination: &mut impl buffa::EncodeSink,
+    ) -> Result<(), SizeComputationOverflow> {
+        let generated = self.generated();
+        let algorithm_wire_value = generated.alg.to_i32();
+        if algorithm_wire_value != 0 {
+            push_tag(destination, 1, 0);
+            push_varint(destination, algorithm_wire_value as i64 as u64);
+        }
+        if let Some(keyid) = generated.keyid {
+            push_len_field(destination, 2, keyid.as_bytes())?;
+        }
+        if !generated.signature.is_empty() {
+            push_len_field(destination, 3, generated.signature)?;
+        }
+        generated.__buffa_unknown_fields.write_to(destination);
+        Ok(())
     }
 }
 
@@ -1054,11 +1236,61 @@ fn skip_field(wire_type: u32, bytes: &[u8], index: usize) -> Option<usize> {
     }
 }
 
+struct RawOuter<'a> {
+    payload: &'a [u8],
+    signature_carrier: &'a [u8],
+}
+
+impl FacadeEncode for RawOuter<'_> {
+    fn write_facade_wire(
+        &self,
+        destination: &mut impl buffa::EncodeSink,
+    ) -> Result<(), SizeComputationOverflow> {
+        // Raw transcription always emits both fields, including explicit
+        // zero-length values. The stable message facade uses protobuf's normal
+        // default-value omission rules instead.
+        push_len_field(destination, 1, self.payload)?;
+        push_len_field(destination, 2, self.signature_carrier)?;
+        Ok(())
+    }
+}
+
 pub(crate) fn compose_raw_outer(payload: &[u8], signature_carrier: &[u8]) -> Vec<u8> {
-    let mut output = Vec::new();
-    push_len_field(&mut output, 1, payload);
-    push_len_field(&mut output, 2, signature_carrier);
+    let raw = RawOuter {
+        payload,
+        signature_carrier,
+    };
+    let raw_size = raw_facade_encoded_len(&raw)
+        .expect("two addressable slices have a representable protobuf wire length");
+    let encoded_len = usize::try_from(raw_size)
+        .expect("two addressable slices have a platform-representable wire length");
+    let mut output = Vec::with_capacity(encoded_len);
+    raw.write_facade_wire(&mut output)
+        .expect("raw outer size was checked before emission");
+    debug_assert_eq!(output.len(), encoded_len);
     output
+}
+
+pub(crate) fn compose_raw_outer_with_resource_limits(
+    payload: &[u8],
+    signature_carrier: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Vec<u8>> {
+    let raw = RawOuter {
+        payload,
+        signature_carrier,
+    };
+    let raw_size = raw_facade_encoded_len(&raw)
+        .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
+    let encoded_len = usize::try_from(raw_size)
+        .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
+    limits.check_output_size(ArtifactResourceForm::Protobuf, encoded_len)?;
+
+    let mut output = Vec::with_capacity(encoded_len);
+    raw.write_facade_wire(&mut output)
+        .map_err(|_| limits.size_computation_overflow(ArtifactResourceForm::Protobuf))?;
+    debug_assert_eq!(output.len(), encoded_len);
+    Ok(output)
 }
 
 pub(crate) fn decompose_raw_outer(
@@ -1135,8 +1367,14 @@ pub(crate) fn decompose_raw_outer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::num::NonZeroUsize;
 
     fn assert_send_sync<T: Send + Sync>() {}
+
+    fn finite(maximum: usize) -> ArtifactResourceLimits {
+        ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(NonZeroUsize::new(maximum).unwrap())
+    }
 
     #[test]
     fn public_message_types_are_send_and_sync() {
@@ -1152,15 +1390,16 @@ mod tests {
 
     #[test]
     fn facade_encode_failure_is_transactional() {
+        use std::cell::Cell;
+
         struct Rejected;
 
         impl FacadeEncode for Rejected {
-            fn facade_encoded_len(&self) -> Result<usize, EncodeError> {
-                Err(EncodeError::message_too_large())
-            }
-
-            fn write_facade_wire(&self, _: &mut Vec<u8>) {
-                panic!("failed size calculation must prevent a write");
+            fn write_facade_wire(
+                &self,
+                _: &mut impl buffa::EncodeSink,
+            ) -> Result<(), SizeComputationOverflow> {
+                Err(SizeComputationOverflow)
             }
         }
 
@@ -1169,13 +1408,94 @@ mod tests {
         assert!(encode_facade_into(&Rejected, &mut destination).is_err());
         assert_eq!(destination, before);
 
-        let error = encode_view_into(&mut destination, |destination| {
-            destination.extend_from_slice(&[4, 5, 6]);
-            Err(buffa::EncodeError::MessageTooLarge)
-        })
+        struct FailsDuringEmission {
+            calls: Cell<usize>,
+        }
+
+        impl FacadeEncode for FailsDuringEmission {
+            fn write_facade_wire(
+                &self,
+                destination: &mut impl buffa::EncodeSink,
+            ) -> Result<(), SizeComputationOverflow> {
+                destination.put_slice(&[4, 5, 6]);
+                let call = self.calls.get();
+                self.calls.set(call + 1);
+                if call == 0 {
+                    Ok(())
+                } else {
+                    Err(SizeComputationOverflow)
+                }
+            }
+        }
+
+        let error = encode_facade_into(
+            &FailsDuringEmission {
+                calls: Cell::new(0),
+            },
+            &mut destination,
+        )
         .unwrap_err();
         assert_eq!(error.kind(), EncodeErrorKind::MessageTooLarge);
         assert_eq!(destination, before);
+
+        let mut destination = before.clone();
+        let error = encode_facade_into_with_resource_limits(
+            &FailsDuringEmission {
+                calls: Cell::new(0),
+            },
+            &mut destination,
+            &ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            crate::ArtifactResourceErrorKind::SizeComputationOverflow
+        );
+        assert_eq!(destination, before);
+    }
+
+    #[test]
+    fn synthetic_raw_sizes_preserve_resource_then_format_precedence() {
+        let raw_size = u64::from(buffa::MAX_MESSAGE_BYTES) + 1;
+        let resource_error = resource_protobuf_size_preflight(raw_size, &finite(1)).unwrap_err();
+        assert_eq!(
+            resource_error.kind(),
+            crate::ArtifactResourceErrorKind::OutputArtifactTooLarge
+        );
+        assert_eq!(
+            resource_error.observed_or_projected_artifact_bytes(),
+            usize::try_from(raw_size).ok()
+        );
+
+        let inner =
+            resource_protobuf_size_preflight(raw_size, &ArtifactResourceLimits::unbounded())
+                .unwrap()
+                .unwrap_err();
+        assert_eq!(inner.kind(), EncodeErrorKind::MessageTooLarge);
+    }
+
+    #[test]
+    fn counting_sink_detects_u64_accumulation_overflow() {
+        let mut counter = CheckedSizeSink {
+            size: u64::MAX,
+            overflowed: false,
+        };
+        buffa::EncodeSink::put_u8(&mut counter, 0);
+        assert_eq!(counter.finish(), Err(SizeComputationOverflow));
+    }
+
+    #[test]
+    fn resource_preflight_detects_synthetic_platform_size_overflow() {
+        let error = resource_protobuf_size_preflight_for_platform(
+            17,
+            16,
+            &ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            crate::ArtifactResourceErrorKind::SizeComputationOverflow
+        );
     }
 
     #[test]
