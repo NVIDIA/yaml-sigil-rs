@@ -44,7 +44,7 @@ curve25519-dalek = "4.1"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 p256 = { version = "0.13.2", features = ["ecdsa"] }
 sha2 = "0.10"
-signature = "2.2"
+signature = { workspace = true }
 tracing = "0.1"
 yaml-sigil-core = { workspace = true, default-features = false }
 yaml-sigil-traits = { workspace = true, default-features = false }
@@ -54,6 +54,8 @@ yaml-sigil-transcription = { workspace = true, default-features = false }
 json-schema-validate = ["yaml-sigil-core/json-schema-validate"]
 
 [dev-dependencies]
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips"] }
 rand_core = { workspace = true }
+ring = "=0.17.14"
 tokio = { workspace = true, features = ["macros", "rt"] }
 yaml-sigil-signing = { workspace = true }

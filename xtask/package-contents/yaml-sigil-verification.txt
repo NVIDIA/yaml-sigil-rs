@@ -11,5 +11,7 @@ THIRD_PARTY_NOTICES.md
 src/crypto.rs
 src/lib.rs
 src/proto_verify.rs
+src/provider.rs
 src/yaml_verify.rs
+tests/provider_paths.rs
 tests/verify_paths.rs
