@@ -77,6 +77,8 @@
 //! [`verify_with_provider`] uses keys bound through qualified algorithm slots;
 //! the explicitly named unqualified functions provide the deliberate bypass.
 //! Provider results are authoritative and are not retried through RustCrypto.
+//! See [`provider`] for the public extension contracts and a complete adapter
+//! example.
 
 mod crypto;
 mod proto_verify;

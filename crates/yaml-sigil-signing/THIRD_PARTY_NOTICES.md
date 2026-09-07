@@ -39,8 +39,8 @@ date. Section 7(a) of those provisions supplies this warranty disclaimer:
 > OF THE INFORMATION THEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED
 > WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 
-Source: Simon Josefsson and Ilari Liusvaara, RFC 8032, *Edwards-Curve Digital
-Signature Algorithm (EdDSA)*, January 2017:
+Source: Simon Josefsson and Ilari Liusvaara, RFC 8032,
+*Edwards-Curve Digital Signature Algorithm (EdDSA)*, January 2017:
 
 - RFC information and copyright notice:
   <https://www.rfc-editor.org/info/rfc8032/>.
@@ -72,12 +72,12 @@ this notice:
 > "Standards for Efficient Cryptography 1 (SEC 1)", in all material mentioning
 > or referencing it.
 
-Source: Standards for Efficient Cryptography Group, *Standards for Efficient
-Cryptography 1 (SEC 1): Elliptic Curve Cryptography*, version 2.0, May 21,
-2009, <https://www.secg.org/sec1-v2.pdf>.
+Source: Standards for Efficient Cryptography Group,
+*Standards for Efficient Cryptography 1 (SEC 1): Elliptic Curve Cryptography*,
+version 2.0, May 21, 2009, <https://www.secg.org/sec1-v2.pdf>.
 
-Section 1.5, "Intellectual Property," of *Standards for Efficient Cryptography
-1 (SEC 1)* states:
+Section 1.5, "Intellectual Property," of
+*Standards for Efficient Cryptography 1 (SEC 1)* states:
 
 > The reader's attention is called to the possibility that compliance with
 > this document may require use of an invention covered by patent rights. By
