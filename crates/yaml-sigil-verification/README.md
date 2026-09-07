@@ -20,6 +20,12 @@ verifier states.
   `can_pre_verify_with_resource_limits` check the original encoded input.
 - `verify_from_pre_verify` and its form-specific helpers reuse successful
   pre-verification results.
+- `VerificationProviderBuilder` either qualifies one exact synchronous
+  provider instance or constructs an explicitly unqualified provider.
+- `verify_with_provider` and its metadata and pre-verification
+  variants retain YamlSigil artifact handling around qualified provider keys.
+- The corresponding `verify_with_unqualified_provider` functions make the
+  qualification bypass explicit.
 - `DefaultVerifier` and `DefaultAsyncVerifier` delegate to the free functions.
 - `Verifier`, `AsyncVerifier`, result types, and capability types are
   re-exported from
@@ -46,6 +52,57 @@ other form after structural or verification failure.
 
 Only payload bytes returned by `VerifierState::Verified` are authenticated. A
 signature document inside those bytes remains payload content.
+
+## Local provider verification
+
+Add a direct dependency on
+[`signature`](https://crates.io/crates/signature) 2.2. Implement
+`signature::Verifier<[u8; 64]>` and `ProviderVerifier` for your bound provider
+handle, then implement `ProviderVerifierFactory` for the type that creates
+those handles. All three traits are public extension contracts. Keep each
+handle bound to its own key even when the factory binds another key.
+
+Follow the
+[compiling adapter example](https://docs.rs/yaml-sigil-verification/latest/yaml_sigil_verification/provider/index.html#implement-a-verification-adapter)
+through trait implementation, qualification, key binding, and
+`verify_with_provider`. The provider traits and key types are re-exported at
+the crate root and available in its public `provider` module. Bound keys are
+opaque inputs to these artifact operations. Implementing the separate
+`yaml_sigil_traits::verification::Verifier` contract means supplying the
+complete operation, including artifact processing.
+
+Implement `ProviderVerifierFactory` to bind canonical public-key bytes to an
+opaque local provider handle. Ed25519 keys use 32 canonical compressed octets.
+P-256 keys use the 65-octet uncompressed encoding from
+*Standards for Efficient Cryptography 1 (SEC 1)*. YamlSigil validates the key
+before asking the factory to bind it and rejects malformed 64-octet
+signatures before provider verification.
+
+`VerificationProviderBuilder::qualify` runs a bounded, public-only fixed suite
+once for the exact adapter instance it consumes. It records independent
+Ed25519 and P-256 status. A rejected slot cannot create a qualified key, but it
+does not disable another slot. Replacing or reconfiguring the adapter requires
+qualification again. Finite qualification shows that the instance passes the
+included suite; it is not proof for every possible input or future
+configuration.
+
+Qualified results are authoritative. YamlSigil does not retry a provider
+mismatch through RustCrypto. Implementations that can distinguish an
+operational failure from a signature mismatch override
+`ProviderVerifier::verify_provider`; YamlSigil keeps those outcomes separate.
+`build_unqualified` and the explicitly named unqualified operations skip the
+fixed suite while retaining YamlSigil's key and signature-structure checks.
+
+The provider receives the exact extracted payload and a raw 64-octet
+signature. P-256 adapters verify SHA-256 over those message bytes and accept
+big-endian `r || s`, not DER. The development matrix exercises RustCrypto,
+`ring`, and `aws-lc-rs` adapters. Provider support or qualification does not
+establish or imply FIPS validation.
+
+To bound provider verification, admit the original artifact with
+`ArtifactResourceLimits::check_input_size` before calling a provider operation.
+A bounded pre-verification response can also be passed to
+`verify_from_pre_verify_with_provider`.
 
 ## Resource boundaries
 
@@ -106,7 +163,9 @@ provide RPC transport.
 
 NVIDIA-authored crate material is licensed under Apache-2.0. RFC 8032-derived
 point-encoding and verification rules and a section 7.1 test-vector value in
-`src/crypto.rs` retain their source attribution and terms. The P-256 resolver
-follows point-encoding behavior from *Standards for Efficient Cryptography 1
-(SEC 1)*. The applicable notices and source terms are retained in
+`src/crypto.rs` retain their source attribution and terms. The qualification
+vectors in `src/provider.rs` also retain their source attribution and terms.
+The P-256 resolver and qualification public key follow point-encoding behavior
+from *Standards for Efficient Cryptography 1 (SEC 1)*. The applicable notices
+and source terms are retained in
 [`THIRD_PARTY_NOTICES.md`](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-verification/THIRD_PARTY_NOTICES.md).
