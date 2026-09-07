@@ -658,6 +658,29 @@ documented.
   fact surfaces.
 - `SigningKey` debug output in `yaml-sigil-signing` is redacted by design.
 
+## Local cryptographic providers
+
+Keep synchronous provider interoperability on the `signature` 2.2 message
+operation traits. Do not add a prehash provider entry point. Ed25519 provider
+signatures use canonical 64-octet `R || S`; P-256 provider signatures use
+64-octet big-endian `r || s`, never DER. P-256 providers apply SHA-256 exactly
+once to the message bytes supplied by YamlSigil.
+
+Signing adapters bind their opaque handle to canonical public-key bytes. The
+normal builder validates that key and self-verifies every real output without
+issuing a synthetic signing request. Keep the bypass named `unqualified`, and
+retain public-key and signature-structure checks there.
+
+Verification qualification remains bounded, public-only, non-serializable,
+and owned by the exact adapter instance it tested. Track algorithm slots
+independently, do not retry a qualified provider result through RustCrypto,
+and keep provider failure distinct from signature mismatch. Replacing or
+reconfiguring a provider requires qualification again.
+
+Keep provider-specific crates out of the published API and ordinary
+dependencies. Provider interoperability and qualification do not establish a
+FIPS validation claim; that depends on the complete deployment boundary.
+
 ## Permanent Out Of Scope
 
 Do not add gRPC servers, clients, gateways, transport adapters, generated

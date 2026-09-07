@@ -67,8 +67,8 @@ The Rust representations and verifier-state mappings are identified
 ## Standards for Efficient Cryptography
 
 The crate's P-256 public-key resolver and fixed provider-qualification public
-key follow point-encoding behavior from *Standards for Efficient Cryptography
-1 (SEC 1)*, Version 2.0.
+key follow point-encoding behavior from
+*Standards for Efficient Cryptography 1 (SEC 1)*, Version 2.0.
 
 The front page of *Standards for Efficient Cryptography 1 (SEC 1)* carries
 this notice:

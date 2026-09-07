@@ -14,6 +14,125 @@
 //! non-serializable. Replacing or reconfiguring the adapter requires
 //! qualification again. A qualified provider result is authoritative; the
 //! operation path does not retry it through RustCrypto.
+//!
+//! # Implement a verification adapter
+//!
+//! Add a direct dependency on `signature` 2.2 and implement these public
+//! extension traits for types you own.
+//!
+//! - [`ProviderVerifierFactory`] creates a handle bound to the supplied
+//!   canonical public key. Each returned handle keeps its key binding when
+//!   the factory binds other keys and may borrow the factory's configuration.
+//! - [`signature::Verifier<[u8; 64]>`](signature::Verifier) performs the
+//!   message verification using that handle. The handle must be `Send + Sync`.
+//! - [`ProviderVerifier`] classifies the result. Its default method maps every
+//!   `signature::Error` to [`ProviderVerificationOutcome::SignatureMismatch`].
+//!   If key access or provider operations can fail separately, override
+//!   [`ProviderVerifier::verify_provider`] to return
+//!   [`ProviderVerificationOutcome::ProviderFailure`] for those failures.
+//!
+//! A signature mismatch becomes [`crate::VerifierState::SignedButFailedVerification`].
+//! An operational failure becomes [`crate::InvocationError::KeyResolutionFailure`].
+//!
+//! This example uses `p256` 0.13 as the native provider and supports only the
+//! P-256 slot. Its verification call applies SHA-256 once to `message` and
+//! accepts fixed-width `r || s`. The empty `ProviderVerifier` implementation
+//! uses the default classification because this in-memory verifier reports
+//! only signature mismatch after YamlSigil's structural checks.
+//! Its options disable the unsupported Ed25519 algorithm; qualification status
+//! does not change [`crate::VerifierOptions`] automatically.
+//!
+//! ```
+//! use yaml_sigil_core::AlgorithmId;
+//! use yaml_sigil_verification::{
+//!     ArtifactForm, ProviderPublicKeys, ProviderVerifier, ProviderVerifierFactory,
+//!     QualifiedVerificationProvider, VerificationProviderBuilder, VerifierOptions,
+//!     VerifierState, verify_with_provider,
+//! };
+//!
+//! struct P256Factory;
+//! struct P256Verifier(p256::ecdsa::VerifyingKey);
+//!
+//! impl signature::Verifier<[u8; 64]> for P256Verifier {
+//!     fn verify(
+//!         &self,
+//!         message: &[u8],
+//!         signature: &[u8; 64],
+//!     ) -> Result<(), signature::Error> {
+//!         let signature = p256::ecdsa::Signature::from_slice(signature)?;
+//!         signature::Verifier::verify(&self.0, message, &signature)
+//!     }
+//! }
+//!
+//! impl ProviderVerifier for P256Verifier {}
+//!
+//! impl ProviderVerifierFactory for P256Factory {
+//!     fn bind<'factory>(
+//!         &'factory self,
+//!         algorithm: AlgorithmId,
+//!         canonical_public_key: &[u8],
+//!     ) -> Result<Box<dyn ProviderVerifier + 'factory>, signature::Error> {
+//!         match algorithm {
+//!             AlgorithmId::EcdsaP256Sha256 => {
+//!                 let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(canonical_public_key)
+//!                     .map_err(|_| signature::Error::new())?;
+//!                 Ok(Box::new(P256Verifier(key)))
+//!             }
+//!             AlgorithmId::Ed25519 => Err(signature::Error::new()),
+//!         }
+//!     }
+//! }
+//!
+//! fn verify_document(
+//!     provider: &QualifiedVerificationProvider<P256Factory>,
+//!     artifact: &[u8],
+//!     canonical_public_key: &[u8],
+//! ) -> Result<VerifierState, Box<dyn std::error::Error>> {
+//!     let key = provider.bind_ecdsa_p256_sha256(canonical_public_key)?;
+//!     let keys = ProviderPublicKeys {
+//!         ed25519: None,
+//!         p256: Some(&key),
+//!     };
+//!     Ok(verify_with_provider(
+//!         artifact,
+//!         ArtifactForm::Proto,
+//!         &keys,
+//!         VerifierOptions {
+//!             verify_ed25519: false,
+//!             ..VerifierOptions::default()
+//!         },
+//!     )?)
+//! }
+//!
+//! // Qualify once, then reuse this instance for application keys and artifacts.
+//! let provider = VerificationProviderBuilder::new(P256Factory).qualify();
+//! assert!(provider.status(AlgorithmId::EcdsaP256Sha256).is_qualified());
+//! assert!(!provider.status(AlgorithmId::Ed25519).is_qualified());
+//! # // A fixed key and artifact are used only to execute this documentation test.
+//! # let native_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
+//! # let public_key = native_key.verifying_key().to_encoded_point(false);
+//! # let artifact = yaml_sigil_signing::sign_proto(&yaml_sigil_signing::SignProtoParams {
+//! #     payload: b"example: signed\n",
+//! #     algorithm: AlgorithmId::EcdsaP256Sha256,
+//! #     key: yaml_sigil_signing::SigningKey::EcdsaP256Sha256(&native_key),
+//! #     keyid: None,
+//! #     append_missing_final_newline: false,
+//! # }).unwrap();
+//! # assert!(matches!(verify_document(&provider, &artifact, public_key.as_bytes()).unwrap(),
+//! #     VerifierState::Verified { .. }));
+//! ```
+//!
+//! To support Ed25519, bind its 32-octet canonical public key and provide the
+//! verification semantics required by that slot, including the permitted
+//! cofactored equation. Check each slot's [`QualifiedVerificationProvider::status`]
+//! before using it. Qualification rejects an incompatible slot independently.
+//!
+//! The [`ProviderVerifier`] and [`ProviderVerifierFactory`] traits and provider
+//! key types are re-exported at the crate root. Pass bound keys to
+//! [`crate::verify_with_provider`] or its metadata and pre-verification variants.
+//! Those functions retain artifact parsing, structural checks, and result
+//! classification. Implementing the separate high-level [`crate::Verifier`]
+//! trait means providing that complete operation.
 
 use std::fmt;
 

@@ -23,8 +23,9 @@ material, and their redistribution requirements are documented in
 
 The `yaml-sigil-verification` source package also includes its scoped notice
 for RFC 8032-derived constants, canonical-encoding rules, and a test-vector
-value. The other published implementation crates do not package material
-covered by that notice.
+value. The `yaml-sigil-signing` source package includes a scoped notice for
+its RFC 8032-derived provider validation rules. Both crates retain source
+terms for their *Standards for Efficient Cryptography 1 (SEC 1)* material.
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before proposing a change.
 
@@ -121,6 +122,35 @@ and deciding which public keys are trusted.
    `yaml-sigil-verification`.
 4. Verification takes the artifact apart, checks that it follows the document
    rules, and reports whether its signature is valid for the document.
+
+### Local cryptographic providers
+
+The signing and verification crates retain their RustCrypto convenience APIs
+and also accept synchronous local-provider adapters through the
+[`signature`](https://crates.io/crates/signature) 2.2 operation traits. This
+lets an adapter keep its private key or opaque key handle inside `ring`,
+`aws-lc-rs`, an HSM integration, or another local provider while YamlSigil
+continues to own payload preparation, artifact framing, public-key checks, and
+verifier-state classification.
+
+Provider signing binds the opaque signer to canonical public-key bytes. The
+normal builder validates that public key and self-verifies every real output
+against the final payload. It does not issue a synthetic signing request.
+Provider verification qualifies an exact adapter instance with a bounded,
+public-only suite and tracks Ed25519 and P-256 independently. Explicitly named
+unqualified builders and operations are available when a caller deliberately
+accepts the narrower assurance.
+
+YamlSigil enforces the algorithm's public-key admissibility and signature
+rules at this boundary. The provider remains responsible for private-key
+generation quality, entropy, storage, access policy, and operational controls
+that an opaque handle does not expose.
+
+The provider boundary accepts messages, not prehashes, and uses exactly 64
+signature octets. P-256 adapters apply SHA-256 once to the supplied message
+bytes. Provider interoperability and qualification do not establish or imply
+FIPS validation. That claim depends on the provider build, configuration,
+platform, operational boundary, and deployment.
 
 ### Workspace-only support crates
 
