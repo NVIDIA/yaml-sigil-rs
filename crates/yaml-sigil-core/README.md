@@ -19,6 +19,7 @@ unless they need these lower-level helpers directly.
   [`noyalib`](https://crates.io/crates/noyalib).
 - Stable owned and borrowed protobuf `SignedYamlArtifact` helpers backed by
   private [`buffa`](https://crates.io/crates/buffa) generated code.
+- Opt-in complete-artifact resource limits for YAML and protobuf boundaries.
 - Algorithm mapping for the `yaml-sigil` wire and YAML names.
 - Optional JSON Schema validation with the `json-schema-validate` feature.
 
@@ -76,18 +77,26 @@ are fallible. Use `AlgorithmId` for recognized values and
 
 ## Resource boundaries
 
-YamlSigil `v1alpha1` defines no maximum complete artifact size. The facade
-does not add a deployment-specific byte limit. Applications accepting
-potentially untrusted input should apply their selected whole-artifact bound
-before YAML or protobuf processing. A deployment can choose a lower value, a
-higher value, or no additional limit.
+YamlSigil `v1alpha1` defines no maximum complete artifact size.
+`ArtifactResourceLimits` provides an implementation-local, explicitly selected
+policy. Its default ceiling is exactly 4,194,304 bytes. Use `NonZeroUsize` with
+`with_max_artifact_bytes` to select another finite value, or use `unbounded` to
+disable every optional resource dimension known to this crate version.
 
-`4 MiB` is an example and the intended default for future opt-in bounded APIs.
-It is not a YamlSigil or gRPC protocol requirement, and this crate does not
-enforce it today. The existing 16,384-octet YAML signature-carrier constraint
-is separate from complete artifact size. Protobuf format limits, parser
-safeguards, address-space limits, allocator limits, and deployment controls
-still apply when no additional whole-artifact limit is selected.
+The complete-artifact core helpers and the owned and borrowed
+`SignedYamlArtifact` facades provide `_with_resource_limits` variants. Bounded
+decode checks the original wire slice before Buffa processing. Bounded encode
+uses one checked wire traversal for exact sizing and emission, including
+retained unknown fields and nested groups. It applies resource policy before
+the protobuf format ceiling and before allocation. A failed bounded
+`encode_into` leaves the reusable destination unchanged.
+
+Existing helpers remain unbounded by this policy. Adopt a bounded entry point
+at the affected trust boundary, or enforce an equivalent earlier bound on the
+original raw input. The existing 16,384-octet YAML signature-carrier
+constraint is separate from complete artifact size. Protobuf format limits,
+parser safeguards, address-space limits, allocator limits, and deployment
+controls still apply.
 
 Whole-artifact limits do not affect conformance results. Rejecting an artifact
 under a local resource policy does not make it malformed or non-conforming.

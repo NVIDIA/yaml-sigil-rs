@@ -312,18 +312,24 @@ standardizes only the 16,384-octet markerless carrier limit.
 ## Whole-artifact resource policy
 
 YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
-size. A deployment may apply a smaller or larger whole-artifact bound, or no
-additional library-level bound. `4 MiB` is an example and the intended default
-for future opt-in bounded APIs, not a current YamlSigil or gRPC protocol
-requirement.
+size. `yaml-sigil-rs` provides opt-in `ArtifactResourceLimits` operations as
+implementation-local operational hardening. The explicitly selected default
+is exactly 4,194,304 bytes. A caller may apply a smaller or larger bound, or no
+additional library-level bound. Existing unbounded operations do not select
+this policy implicitly.
 
 Whole-artifact limits do not affect conformance results. Rejecting an artifact
 under a local resource policy does not make it malformed or non-conforming.
 The 16,384-octet markerless YAML signature-carrier constraint remains separate
 from complete artifact size. Protobuf format limits, parser safeguards,
 address-space limits, allocator limits, and deployment controls still apply
-when no additional whole-artifact bound is selected. A future `v1alpha2`
-specification may consider normative resource policy separately.
+when no additional whole-artifact bound is selected.
+
+The resource API adds no fixture, fixture remapping, expected-outcome change,
+or deliberate conformance divergence. Availability alone does not remediate an
+existing unbounded caller. The caller must adopt a resource-aware operation at
+the affected trust boundary or demonstrate an equivalent earlier bound on the
+original raw input.
 
 ## Known Behaviors
 

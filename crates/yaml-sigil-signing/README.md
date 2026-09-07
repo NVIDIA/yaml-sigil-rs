@@ -11,6 +11,8 @@ each signing request.
 
 - `sign` is the unified in-process signing entry point.
 - `sign_yaml` and `sign_proto` provide form-specific convenience wrappers.
+- `sign_with_resource_limits`, `sign_yaml_with_resource_limits`, and
+  `sign_proto_with_resource_limits` enforce an explicit complete-output policy.
 - `DefaultSigner` and `DefaultAsyncSigner` delegate to the free functions.
 - `Signer`, `AsyncSigner`, outcome types, and capability types are re-exported
   from
@@ -28,18 +30,24 @@ material, tokens, or raw signatures on trusted fact surfaces.
 
 ## Resource boundaries
 
-Signing adds no deployment-specific maximum complete artifact size for YAML
-or protobuf output. It allocates in proportion to the payload and encoded
-signature data. Apply any local payload policy before signing and any output
-policy to the returned artifact. Checking only the returned bytes does not
-bound work or allocation already performed.
+The resource-aware signing functions validate the bounded request shape first.
+For protobuf output, they calculate the exact prospective wire length from
+component lengths before scanning caller buffers or performing cryptography.
+For YAML output, they first test a conclusive lower bound that includes any
+projected final line feed and the minimum carrier encoding. After signing and
+carrier serialization, they check the exact output size before allocating the
+complete artifact. Passing the lower-bound check never replaces that final
+exact check.
 
-The transcoding functions also accept a complete source artifact and
-construct a complete destination artifact without a configurable
-whole-artifact limit. Applications accepting potentially untrusted input
-should bound it before either transcoding direction.
+The resource-aware transcoding functions check the original source before
+parsing and check the complete destination independently before allocation.
+The source and destination lengths are not added together. Errors identify the
+form whose boundary failed.
 
-YamlSigil `v1alpha1` defines no maximum complete artifact size. A local limit
-is operational hardening, not conformance, and a caller may choose a lower
-value, a higher value, or no additional limit. The 16,384-octet YAML
-signature-carrier constraint remains separate.
+`ArtifactResourceLimits::default()` selects exactly 4,194,304 bytes, and you
+can lower, raise, or disable that ceiling. Existing signing and transcoding
+functions remain unbounded by this policy. Adoption at the affected trust
+boundary, or an equivalent earlier raw-input bound, is required to protect an
+existing caller. The policy is operational hardening, not YamlSigil
+`v1alpha1` conformance. The 16,384-octet YAML signature-carrier constraint
+remains separate.

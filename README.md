@@ -132,54 +132,57 @@ boundary selection uses the last constrained marker.
 ### Resource boundaries
 
 YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
-size. Applications accepting potentially untrusted artifacts should select a
-deployment-appropriate input bound and apply it before calling core, signing,
-verification, transcription, or transcoding entry points. A deployment can
-choose a lower value, a higher value, or no additional whole-artifact limit.
-
-This example uses `4 MiB`. That value is also the intended default for future
-opt-in bounded APIs, but it is not a YamlSigil or gRPC protocol requirement.
-Current APIs do not enforce it.
+size. The implementation crates expose one shared `ArtifactResourceLimits`
+policy and explicit `_with_resource_limits` operations for complete artifact
+inputs and outputs. `ArtifactResourceLimits::default()` selects exactly
+4,194,304 bytes. You can choose a lower ceiling, a higher ceiling, or no
+additional byte limit.
 
 ```rust
-use yaml_sigil_core::pb::SignedYamlArtifactRef;
+use core::num::NonZeroUsize;
+use yaml_sigil_core::{
+    ArtifactResourceLimits,
+    pb::SignedYamlArtifactRef,
+};
 
-#[derive(Debug)]
-enum InputError {
-    ArtifactTooLarge,
-    InvalidProtobuf,
+fn inspect(
+    input: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let artifact =
+        SignedYamlArtifactRef::decode_with_resource_limits(input, limits)??;
+    Ok(artifact.payload().len())
 }
 
-fn check_artifact_size(
-    artifact: &[u8],
-    maximum: Option<usize>,
-) -> Result<(), InputError> {
-    if maximum.is_some_and(|limit| artifact.len() > limit) {
-        return Err(InputError::ArtifactTooLarge);
-    }
-
-    Ok(())
-}
-
-fn inspect(input: &[u8]) -> Result<(), InputError> {
-    let deployment_limit = Some(4 * 1024 * 1024);
-    check_artifact_size(input, deployment_limit)?;
-    let _artifact = SignedYamlArtifactRef::decode(input)
-        .map_err(|_| InputError::InvalidProtobuf)?;
-    Ok(())
-}
+let default_limit = ArtifactResourceLimits::default();
+let one_mib = ArtifactResourceLimits::unbounded()
+    .with_max_artifact_bytes(NonZeroUsize::new(1024 * 1024).unwrap());
+let thirty_two_mib = ArtifactResourceLimits::unbounded()
+    .with_max_artifact_bytes(
+        NonZeroUsize::new(32 * 1024 * 1024).unwrap(),
+    );
+let no_additional_limit = ArtifactResourceLimits::unbounded();
 ```
 
-Passing `None` to the application check selects no additional
-whole-artifact byte limit. Protobuf format limits, parser safeguards,
-address-space limits, allocator limits, and other deployment controls still
-apply. The existing 16,384-octet YAML signature-carrier constraint is
-independent of complete artifact size.
+Resource-aware input operations check the original slice before parsing,
+validation, copying, or cryptography. Resource-aware output operations perform
+checked sizing before complete-output allocation. YAML signing uses a
+conclusive lower bound for its earliest check and still checks the final exact
+serialized size. A lower-bound rejection intentionally reports no exact output
+size.
+
+The existing entry points remain unbounded by this optional policy. Merely
+upgrading to a release that provides the bounded APIs does not remediate an
+existing caller. Adopt a resource-aware operation at the affected trust
+boundary, or establish that an equivalent earlier bound covers the original
+raw input.
+
+Protobuf format limits, parser safeguards, address-space limits, allocator
+limits, and other deployment controls still apply. The existing 16,384-octet
+YAML signature-carrier constraint is independent of complete artifact size.
 
 A local whole-artifact rejection does not make an artifact malformed or
 non-conforming, and whole-artifact limits do not change conformance results.
-If an application checks produced bytes only after signing, composition, or
-transcoding, that check does not bound work or allocation already performed.
 
 ## Build
 

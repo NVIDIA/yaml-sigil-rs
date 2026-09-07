@@ -19,6 +19,8 @@ payload bytes as opaque and preserves every accepted byte unchanged.
 ## API Surface
 
 - `compose` and `decompose` perform the byte operations.
+- `compose_with_resource_limits` and `decompose_with_resource_limits` apply an
+  explicit complete-artifact policy.
 - `DefaultTranscriber` and `DefaultAsyncTranscriber` delegate to the free
   functions.
 - `Transcriber`, `AsyncTranscriber`, request types, response types, and
@@ -30,14 +32,20 @@ boundary should wire the trait API into their own deployment.
 
 ## Resource boundaries
 
-Compose and decompose add no deployment-specific maximum complete artifact
-size for YAML or protobuf. They allocate output in proportion to supplied or
-recovered components. Apply any local component policy before compose and
-bound potentially untrusted complete artifacts before decompose. Checking a
-compose result afterward does not bound work or allocation already performed.
+`compose_with_resource_limits` validates the request shape, computes the exact
+YAML or protobuf output size with checked arithmetic, and applies the policy
+before component scans and complete-output allocation.
+`decompose_with_resource_limits` checks the original complete input before
+form, outer-conformance, or artifact processing. Resource errors remain
+separate from transcription outcomes.
 
-YamlSigil `v1alpha1` defines no maximum complete artifact size. Whole-artifact
-limits are operational hardening and do not affect conformance results. A
-deployment can choose a lower value, a higher value, or no additional limit.
-The existing 16,384-octet YAML signature-carrier constraint remains separate
-and applies where signature metadata is parsed.
+`ArtifactResourceLimits::default()` selects exactly 4,194,304 bytes. You can
+lower, raise, or disable that ceiling. Existing `compose`, `decompose`, and
+default trait implementations remain unbounded by this policy. Callers must
+adopt the bounded operations at the affected trust boundary or enforce an
+equivalent earlier raw-input bound.
+
+YamlSigil `v1alpha1` defines no maximum complete artifact size. These limits
+are operational hardening and do not affect conformance results. The existing
+16,384-octet YAML signature-carrier constraint remains separate and applies
+where signature metadata is parsed.

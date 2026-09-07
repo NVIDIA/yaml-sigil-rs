@@ -53,9 +53,11 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
   enum-number forwarding, Buffa 0.5 wire vectors, and both downstream facade
   fixtures.
 - Treat whole-artifact limits as optional operational hardening for
-  `v1alpha1`. Do not turn the `4 MiB` example or a future opt-in default into a
-  current specification or conformance requirement. Keep the 16,384-octet
-  YAML signature-carrier rule separate.
+  `v1alpha1`. The implementation-local resource API defaults to exactly
+  4,194,304 bytes only when a caller explicitly selects it. Do not import or
+  alter specification artifacts for that API, and do not turn its default
+  into a specification or conformance requirement. Keep the 16,384-octet YAML
+  signature-carrier rule separate.
 - Review a future `v1alpha2` normative resource policy on its own terms. Its
   possibility does not establish a current normative limit.
 

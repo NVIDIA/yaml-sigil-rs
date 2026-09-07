@@ -12,8 +12,12 @@ verifier states.
 ## API Surface
 
 - `verify`, `verify_yaml`, and `verify_proto` run verification.
+- Their `_with_resource_limits` variants apply an explicit complete-input
+  policy before verification work.
 - `pre_verify`, `pre_verify_yaml`, and `pre_verify_proto` run structural checks
   without crypto.
+- Their `_with_resource_limits` variants and
+  `can_pre_verify_with_resource_limits` check the original encoded input.
 - `verify_from_pre_verify` and its form-specific helpers reuse successful
   pre-verification results.
 - `DefaultVerifier` and `DefaultAsyncVerifier` delegate to the free functions.
@@ -45,19 +49,25 @@ signature document inside those bytes remains payload content.
 
 ## Resource boundaries
 
-Verification, pre-verification, and the boolean pre-verification summary add
-no deployment-specific maximum complete artifact size for YAML or protobuf.
-Applications accepting potentially untrusted artifacts should apply their
-chosen whole-input bound before calling these methods. Apply the bound before
-constructing a reusable pre-verification response because later verification
-stages no longer receive the original encoded size.
+Resource-aware verification, pre-verification, and the boolean summary check
+the original complete input before form options, parsing, copying, or
+cryptography. Their outer `ArtifactResourceResult` reports resource admission;
+the inner result or verifier state preserves the existing contract.
+
+Bounded pre-verification enforces complete-input size once while the original
+encoded artifact is available. Continue with the existing
+`verify_from_pre_verify` functions. They receive in-memory components and do
+not reconstruct or recheck an encoded artifact.
 
 YamlSigil `v1alpha1` defines no maximum complete artifact size. A local
 resource-policy rejection remains separate from invocation errors, malformed
 artifacts, failed cryptographic verification, and conformance results. A
-deployment can choose a lower limit, a higher limit, or no additional limit.
-Protobuf format limits, parser safeguards, address-space limits, allocator
-limits, and deployment controls still apply.
+deployment can choose a lower limit, a higher limit, or no additional limit;
+the explicit default is exactly 4,194,304 bytes. Existing verification entry
+points and default trait implementations remain unbounded by this policy.
+Adopt a bounded operation at the affected trust boundary or enforce an
+equivalent earlier raw-input bound. Protobuf format limits, parser safeguards,
+address-space limits, allocator limits, and deployment controls still apply.
 
 ## YAML Signature-Document Behavior
 
