@@ -122,6 +122,16 @@ pub(crate) fn resolve_p256_verifying_key(bytes: &[u8]) -> Result<P256Vk, Invocat
     P256Vk::from_sec1_bytes(bytes).map_err(|_| InvocationError::KeyResolutionFailure)
 }
 
+pub(crate) fn provider_public_key_is_admissible(
+    algorithm: crate::AlgorithmId,
+    bytes: &[u8],
+) -> bool {
+    match algorithm {
+        crate::AlgorithmId::Ed25519 => resolve_ed25519_verifying_key(bytes).is_ok(),
+        crate::AlgorithmId::EcdsaP256Sha256 => resolve_p256_verifying_key(bytes).is_ok(),
+    }
+}
+
 /// Returns whether `sig_bytes` is the canonical Ed25519 signature form the
 /// YamlSigil algorithm slot requires.
 ///
@@ -139,6 +149,10 @@ pub(crate) fn ed25519_signature_is_canonical(sig_bytes: &[u8]) -> bool {
 pub(crate) enum EcdsaVerifyError {
     MalformedSignature,
     EquationFailure,
+}
+
+pub(crate) fn ecdsa_p256_signature_is_well_formed(sig_bytes: &[u8]) -> bool {
+    P256Signature::from_slice(sig_bytes).is_ok()
 }
 
 /// Verify ECDSA P-256 SHA-256 against a raw `R || S` 64-octet signature.
