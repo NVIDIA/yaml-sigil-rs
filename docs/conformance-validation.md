@@ -331,6 +331,29 @@ existing unbounded caller. The caller must adopt a resource-aware operation at
 the affected trust boundary or demonstrate an equivalent earlier bound on the
 original raw input.
 
+## Local cryptographic provider boundaries
+
+The synchronous provider-aware operations reuse the same payload extraction,
+signature-structure checks, public-key admissibility rules, artifact framing,
+and verifier-state mapping as the RustCrypto convenience operations. The
+provider receives final message bytes and a fixed 64-octet signature. The
+boundary does not expose a prehash form.
+
+Qualified signing validates the canonical public key bound to the provider
+handle and self-verifies every real output before returning an artifact.
+Qualified verification runs a bounded, public-only fixed suite for each
+algorithm slot on one exact in-process adapter instance. Qualification is an
+implementation-local interoperability check, not a YamlSigil conformance
+result or a FIPS validation claim. Unqualified builders and operations make a
+deliberate bypass explicit while retaining structural checks.
+
+The provider API adds no conformance fixture, fixture remapping,
+expected-outcome change, or deliberate divergence. Development tests exercise
+RustCrypto, `ring`, and `aws-lc-rs` adapters. The expected Ed25519 qualification
+failure for providers that reject a permitted cofactored-equation vector is
+recorded as a provider-slot result and does not change artifact
+classification or the advertised conformance profile.
+
 ## Known Behaviors
 
 - `Verifier` advertises `AdvertisedConformanceProfile::Permissive`. The private
@@ -371,7 +394,9 @@ original raw input.
   prime-order subgroup when that equation holds.
 - The independently packaged `yaml-sigil-verification` crate retains its
   applicable RFC 8032 and *Standards for Efficient Cryptography 1 (SEC 1)*
-  source terms in its crate-local `THIRD_PARTY_NOTICES.md`.
+  source terms in its crate-local `THIRD_PARTY_NOTICES.md`. The
+  `yaml-sigil-signing` crate also retains the applicable source terms for its
+  provider validation rules in its crate-local `THIRD_PARTY_NOTICES.md`.
 - P-256 byte-oriented key resolution accepts only the slot's 65-octet
   uncompressed `0x04 || X || Y` point encoding. Compressed point encodings and
   malformed or inadmissible points produce `KeyResolutionFailure`.
