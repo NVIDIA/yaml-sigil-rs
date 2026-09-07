@@ -69,15 +69,31 @@
 //! Ok(())
 //! # }
 //! ```
+//!
+//! # Local providers
+//!
+//! [`VerificationProviderBuilder`] qualifies one exact synchronous
+//! `signature` 2.2 adapter instance with a bounded, public-only suite.
+//! [`verify_with_provider`] uses keys bound through qualified algorithm slots;
+//! the explicitly named unqualified functions provide the deliberate bypass.
+//! Provider results are authoritative and are not retried through RustCrypto.
 
 mod crypto;
 mod proto_verify;
+pub mod provider;
 mod yaml_verify;
 
 use yaml_sigil_core::{
     AlgorithmId, ProtobufWireDecodeAdvertisement, YamlSignatureDocumentDuplicateKeyPolicy,
 };
 
+pub use provider::{
+    ProviderKeyBindingError, ProviderKeyBindingErrorKind, ProviderPublicKeys,
+    ProviderQualificationError, ProviderQualificationErrorKind, ProviderQualificationStatus,
+    ProviderVerificationOutcome, ProviderVerifier, ProviderVerifierFactory, ProviderVerifyingKey,
+    QualifiedVerificationProvider, UnqualifiedProviderPublicKeys, UnqualifiedProviderVerifyingKey,
+    UnqualifiedVerificationProvider, VerificationProviderBuilder,
+};
 pub use yaml_sigil_core::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
     ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
@@ -254,6 +270,173 @@ pub fn verify_with_metadata_and_resource_limits(
     ))
 }
 
+fn verify_with_provider_keys_and_metadata<Ed25519, P256>(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &GenericPublicKeys<'_, Ed25519, P256>,
+    options: VerifierOptions,
+    include_parser_observations: bool,
+) -> Result<VerifyResult, InvocationError>
+where
+    Ed25519: Ed25519VerificationKey + ?Sized,
+    P256: P256VerificationKey + ?Sized,
+{
+    if !verifier_capabilities().supported_forms.contains(&form) {
+        return Err(InvocationError::InvalidOrUnsupportedForm);
+    }
+    if !options.algorithm_parameters.is_empty() {
+        return Err(InvocationError::InvalidAlgorithmParameters);
+    }
+    let pre = pre_verify(input_bytes, form, false, include_parser_observations);
+    let parser_observations = if include_parser_observations {
+        pre.parser_observations.clone()
+    } else {
+        Vec::new()
+    };
+    let state = match pre.outcome {
+        PreVerifyOutcome::Ok => verify_from_pre_verify_with_keys(&pre, keys, &options)?,
+        PreVerifyOutcome::Unsigned => VerifierState::Unsigned,
+        PreVerifyOutcome::StructuralFailure | PreVerifyOutcome::MetadataParseFailure => {
+            VerifierState::MalformedAttemptedSigned
+        }
+    };
+    Ok(VerifyResult {
+        state,
+        parser_observations,
+    })
+}
+
+fn verify_from_pre_verify_with_keys<Ed25519, P256>(
+    pre: &PreVerifyResponse,
+    keys: &GenericPublicKeys<'_, Ed25519, P256>,
+    options: &VerifierOptions,
+) -> Result<VerifierState, InvocationError>
+where
+    Ed25519: Ed25519VerificationKey + ?Sized,
+    P256: P256VerificationKey + ?Sized,
+{
+    if pre.outcome != PreVerifyOutcome::Ok {
+        return Err(InvocationError::InvalidPreVerifyResult);
+    }
+    let payload = pre
+        .unverified_payload_bytes
+        .as_ref()
+        .ok_or(InvocationError::InvalidPreVerifyResult)?;
+    let signature = pre
+        .unverified_signature
+        .as_ref()
+        .ok_or(InvocationError::InvalidPreVerifyResult)?;
+    let wire_algorithm = match signature.algorithm {
+        AlgorithmId::Ed25519 => 1,
+        AlgorithmId::EcdsaP256Sha256 => 2,
+    };
+    verify_extracted_signature_with_keys(
+        payload,
+        wire_algorithm,
+        &signature.signature_octets,
+        keys,
+        options,
+    )
+}
+
+/// Verify with public keys bound through qualified provider slots.
+///
+/// The selected provider result is authoritative. A mismatch is not retried
+/// with the built-in RustCrypto verifier.
+#[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
+pub fn verify_with_provider(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &ProviderPublicKeys<'_>,
+    options: VerifierOptions,
+) -> Result<VerifierState, InvocationError> {
+    verify_with_provider_and_metadata(input_bytes, form, keys, options, false)
+        .map(|result| result.state)
+}
+
+/// Verify with qualified provider keys and optional parser observations.
+#[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
+pub fn verify_with_provider_and_metadata(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &ProviderPublicKeys<'_>,
+    options: VerifierOptions,
+    include_parser_observations: bool,
+) -> Result<VerifyResult, InvocationError> {
+    verify_with_provider_keys_and_metadata(
+        input_bytes,
+        form,
+        keys,
+        options,
+        include_parser_observations,
+    )
+}
+
+/// Complete verification from a prior pre-verification result using qualified
+/// provider keys.
+///
+/// Apply any complete-input policy before constructing `pre`; the original
+/// encoded artifact is not available at this stage.
+#[tracing::instrument(level = "info", skip_all, fields(form = ?pre.form))]
+pub fn verify_from_pre_verify_with_provider(
+    pre: &PreVerifyResponse,
+    keys: &ProviderPublicKeys<'_>,
+    options: VerifierOptions,
+) -> Result<VerifierState, InvocationError> {
+    if !options.algorithm_parameters.is_empty() {
+        return Err(InvocationError::InvalidAlgorithmParameters);
+    }
+    verify_from_pre_verify_with_keys(pre, keys, &options)
+}
+
+/// Verify through explicitly unqualified provider keys.
+///
+/// This path retains YamlSigil's structural and public-key checks but does not
+/// establish that the provider implements every accepted signature equation.
+#[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
+pub fn verify_with_unqualified_provider(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &UnqualifiedProviderPublicKeys<'_>,
+    options: VerifierOptions,
+) -> Result<VerifierState, InvocationError> {
+    verify_with_unqualified_provider_and_metadata(input_bytes, form, keys, options, false)
+        .map(|result| result.state)
+}
+
+/// Verify through explicitly unqualified provider keys with optional parser
+/// observations.
+#[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
+pub fn verify_with_unqualified_provider_and_metadata(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &UnqualifiedProviderPublicKeys<'_>,
+    options: VerifierOptions,
+    include_parser_observations: bool,
+) -> Result<VerifyResult, InvocationError> {
+    verify_with_provider_keys_and_metadata(
+        input_bytes,
+        form,
+        keys,
+        options,
+        include_parser_observations,
+    )
+}
+
+/// Complete verification from a prior pre-verification result through the
+/// explicitly unqualified provider path.
+#[tracing::instrument(level = "info", skip_all, fields(form = ?pre.form))]
+pub fn verify_from_pre_verify_with_unqualified_provider(
+    pre: &PreVerifyResponse,
+    keys: &UnqualifiedProviderPublicKeys<'_>,
+    options: VerifierOptions,
+) -> Result<VerifierState, InvocationError> {
+    if !options.algorithm_parameters.is_empty() {
+        return Err(InvocationError::InvalidAlgorithmParameters);
+    }
+    verify_from_pre_verify_with_keys(pre, keys, &options)
+}
+
 /// Verify a YAML artifact byte sequence.
 ///
 /// Use [`verify_yaml_with_resource_limits`] to apply the shared complete-input
@@ -315,6 +498,137 @@ pub(crate) fn verify_extracted_signature(
     keys: &PublicKeys<'_>,
     options: &VerifierOptions,
 ) -> Result<VerifierState, InvocationError> {
+    verify_extracted_signature_with_keys(payload, wire_alg, sig_octets, keys, options)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeyVerificationOutcome {
+    Verified,
+    MalformedSignature,
+    SignatureMismatch,
+    ProviderFailure,
+}
+
+trait Ed25519VerificationKey {
+    fn is_admissible(&self) -> bool;
+    fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome;
+}
+
+trait P256VerificationKey {
+    fn is_admissible(&self) -> bool;
+    fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome;
+}
+
+impl Ed25519VerificationKey for ed25519_dalek::VerifyingKey {
+    fn is_admissible(&self) -> bool {
+        crypto::ed25519_verifying_key_is_admissible(self)
+    }
+
+    fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome {
+        if crypto::verify_ed25519(self, payload, signature).is_ok() {
+            KeyVerificationOutcome::Verified
+        } else {
+            KeyVerificationOutcome::SignatureMismatch
+        }
+    }
+}
+
+impl P256VerificationKey for p256::ecdsa::VerifyingKey {
+    fn is_admissible(&self) -> bool {
+        true
+    }
+
+    fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome {
+        match crypto::verify_ecdsa_p256_sha256(self, payload, signature) {
+            Ok(()) => KeyVerificationOutcome::Verified,
+            Err(crypto::EcdsaVerifyError::MalformedSignature) => {
+                KeyVerificationOutcome::MalformedSignature
+            }
+            Err(crypto::EcdsaVerifyError::EquationFailure) => {
+                KeyVerificationOutcome::SignatureMismatch
+            }
+        }
+    }
+}
+
+macro_rules! impl_provider_verification_key {
+    ($key:ty) => {
+        impl Ed25519VerificationKey for $key {
+            fn is_admissible(&self) -> bool {
+                self.algorithm() == AlgorithmId::Ed25519
+                    && crypto::provider_public_key_is_admissible(
+                        AlgorithmId::Ed25519,
+                        self.canonical_public_key(),
+                    )
+            }
+
+            fn verify_signature(
+                &self,
+                payload: &[u8],
+                signature: &[u8; 64],
+            ) -> KeyVerificationOutcome {
+                provider_outcome(self.verify(payload, signature))
+            }
+        }
+
+        impl P256VerificationKey for $key {
+            fn is_admissible(&self) -> bool {
+                self.algorithm() == AlgorithmId::EcdsaP256Sha256
+                    && crypto::provider_public_key_is_admissible(
+                        AlgorithmId::EcdsaP256Sha256,
+                        self.canonical_public_key(),
+                    )
+            }
+
+            fn verify_signature(
+                &self,
+                payload: &[u8],
+                signature: &[u8; 64],
+            ) -> KeyVerificationOutcome {
+                provider_outcome(self.verify(payload, signature))
+            }
+        }
+    };
+}
+
+impl_provider_verification_key!(ProviderVerifyingKey<'_>);
+impl_provider_verification_key!(UnqualifiedProviderVerifyingKey<'_>);
+
+fn provider_outcome(outcome: ProviderVerificationOutcome) -> KeyVerificationOutcome {
+    match outcome {
+        ProviderVerificationOutcome::Verified => KeyVerificationOutcome::Verified,
+        ProviderVerificationOutcome::SignatureMismatch => KeyVerificationOutcome::SignatureMismatch,
+        ProviderVerificationOutcome::ProviderFailure => KeyVerificationOutcome::ProviderFailure,
+    }
+}
+
+fn verification_state_from_outcome(
+    outcome: KeyVerificationOutcome,
+    payload: &[u8],
+    algorithm: AlgorithmId,
+) -> Result<VerifierState, InvocationError> {
+    match outcome {
+        KeyVerificationOutcome::Verified => Ok(VerifierState::Verified {
+            payload: payload.to_vec(),
+            algorithm,
+        }),
+        KeyVerificationOutcome::MalformedSignature => Ok(VerifierState::MalformedAttemptedSigned),
+        KeyVerificationOutcome::SignatureMismatch => Ok(VerifierState::SignedButFailedVerification),
+        KeyVerificationOutcome::ProviderFailure => Err(InvocationError::KeyResolutionFailure),
+    }
+}
+
+fn verify_extracted_signature_with_keys<Ed25519, P256>(
+    payload: &[u8],
+    wire_alg: i32,
+    sig_octets: &[u8],
+    keys: &GenericPublicKeys<'_, Ed25519, P256>,
+    options: &VerifierOptions,
+) -> Result<VerifierState, InvocationError>
+where
+    Ed25519: Ed25519VerificationKey + ?Sized,
+    P256: P256VerificationKey + ?Sized,
+{
     // Form-agnostic. YAML-envelope payload rules (UTF-8, no BOM, line-terminator)
     // are the responsibility of `yaml_verify::pre_verify_yaml` per the spec's
     // "Applies to: YAML form only" row in the metadata-extraction table.
@@ -358,35 +672,29 @@ pub(crate) fn verify_extracted_signature(
             // `PublicKeys` accepts an already constructed verifying key, so
             // callers are not required to use the byte-oriented resolver.
             // Enforce the same key-admissibility rule at the point of use.
-            if !crypto::ed25519_verifying_key_is_admissible(vk) {
+            if !vk.is_admissible() {
                 return Err(InvocationError::KeyResolutionFailure);
             }
-            if crypto::verify_ed25519(vk, payload, sig_octets).is_ok() {
-                Ok(VerifierState::Verified {
-                    payload: payload.to_vec(),
-                    algorithm: alg,
-                })
-            } else {
-                Ok(VerifierState::SignedButFailedVerification)
-            }
+            let signature: &[u8; 64] = sig_octets
+                .try_into()
+                .expect("the fixed signature length was checked above");
+            verification_state_from_outcome(vk.verify_signature(payload, signature), payload, alg)
         }
         AlgorithmId::EcdsaP256Sha256 => {
             if !options.verify_ecdsa_p256_sha256 {
                 return Ok(VerifierState::SignedButAlgorithmUnsupported { algorithm: alg });
             }
             let vk = keys.p256.ok_or(InvocationError::KeyResolutionFailure)?;
-            match crypto::verify_ecdsa_p256_sha256(vk, payload, sig_octets) {
-                Ok(()) => Ok(VerifierState::Verified {
-                    payload: payload.to_vec(),
-                    algorithm: alg,
-                }),
-                Err(crypto::EcdsaVerifyError::MalformedSignature) => {
-                    Ok(VerifierState::MalformedAttemptedSigned)
-                }
-                Err(crypto::EcdsaVerifyError::EquationFailure) => {
-                    Ok(VerifierState::SignedButFailedVerification)
-                }
+            if !crypto::ecdsa_p256_signature_is_well_formed(sig_octets) {
+                return Ok(VerifierState::MalformedAttemptedSigned);
             }
+            if !vk.is_admissible() {
+                return Err(InvocationError::KeyResolutionFailure);
+            }
+            let signature: &[u8; 64] = sig_octets
+                .try_into()
+                .expect("the fixed signature length was checked above");
+            verification_state_from_outcome(vk.verify_signature(payload, signature), payload, alg)
         }
     }
 }
@@ -836,6 +1144,20 @@ mod trait_smoke_tests {
             verify_from_pre_verify(&pre, &keys, VerifierOptions::default()).unwrap(),
             VerifierState::Verified { .. }
         ));
+    }
+
+    #[test]
+    fn default_p256_missing_key_precedence_is_unchanged() {
+        assert_eq!(
+            verify_extracted_signature(
+                b"payload",
+                2,
+                &[0; 64],
+                &no_keys(),
+                &VerifierOptions::default(),
+            ),
+            Err(InvocationError::KeyResolutionFailure)
+        );
     }
 
     // The concrete RustCrypto bindings must remain expressible on a
