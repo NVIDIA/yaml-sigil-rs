@@ -7,6 +7,9 @@ Cargo.toml.orig
 LICENSE
 README.md
 SECURITY.md
+THIRD_PARTY_NOTICES.md
 src/lib.rs
 src/proto_carrier.rs
+src/provider.rs
+src/provider_crypto.rs
 src/transcription.rs
