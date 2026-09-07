@@ -390,7 +390,7 @@ jobs:
           PATH: ${{ steps.tools.outputs.path }}
           RELEASE_BRANCH: ${{ steps.pull.outputs.release_branch }}
         run: |
-          "${GITHUB_WORKSPACE}/.github/scripts/candidate-state-canary.sh"
+          "./.github/scripts/candidate-state-canary.sh"
           # Only a binder-validated canonical branch enters release-source
           # validation; ordinary candidates skip this release-specific command.
           if [[ -n "${RELEASE_BRANCH}" ]]; then
