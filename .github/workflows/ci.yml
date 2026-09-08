@@ -368,17 +368,43 @@ jobs:
         run: '"${RUNNER_TEMP}/candidate-tools/rumdl" check .'
         working-directory: ${{ runner.temp }}/candidate-source
 
-      - name: Check candidate dependency use without Cargo metadata
-        run: '"${RUNNER_TEMP}/candidate-tools/cargo-machete"'
+      # Resolve the ignored root lockfile before candidate code can execute so
+      # dependency-policy tools all inspect one exact submitted graph.
+      - name: Resolve candidate dependencies without executing code
+        env:
+          CARGO_BIN: ${{ steps.tools.outputs.cargo }}
+          PATH: ${{ steps.tools.outputs.path }}
+        run: '"${CARGO_BIN}" generate-lockfile --manifest-path Cargo.toml'
         working-directory: ${{ runner.temp }}/candidate-source
 
-      # The root lockfile is intentionally untracked. This pre-execution audit
-      # therefore covers the committed developer-tool lock without resolving or
-      # executing candidate workspace dependencies.
-      - name: Audit committed candidate tool dependencies
-        run: >-
-          "${RUNNER_TEMP}/candidate-tools/cargo-audit"
-          audit --file xtask/Cargo.lock
+      - name: Check candidate dependency use
+        env:
+          CARGO: ${{ steps.tools.outputs.cargo }}
+          PATH: ${{ steps.tools.outputs.path }}
+        run: '"${RUNNER_TEMP}/candidate-tools/cargo-machete" --with-metadata'
+        working-directory: ${{ runner.temp }}/candidate-source
+
+      - name: Check candidate dependency policy
+        env:
+          CARGO: ${{ steps.tools.outputs.cargo }}
+          PATH: ${{ steps.tools.outputs.path }}
+        run: |
+          "${RUNNER_TEMP}/candidate-tools/cargo-deny" \
+            check bans licenses sources -D warnings
+          "${RUNNER_TEMP}/candidate-tools/cargo-deny" \
+            --manifest-path xtask/Cargo.toml --locked \
+            check bans licenses sources -D warnings \
+            -A unnecessary-skip -A unmatched-skip
+        working-directory: ${{ runner.temp }}/candidate-source
+
+      - name: Audit candidate dependencies
+        env:
+          CARGO: ${{ steps.tools.outputs.cargo }}
+          PATH: ${{ steps.tools.outputs.path }}
+        run: |
+          "${RUNNER_TEMP}/candidate-tools/cargo-audit" audit --file Cargo.lock
+          "${RUNNER_TEMP}/candidate-tools/cargo-audit" \
+            audit --file xtask/Cargo.lock
         working-directory: ${{ runner.temp }}/candidate-source
 
       # Candidate execution is terminal. The full workspace audit below is

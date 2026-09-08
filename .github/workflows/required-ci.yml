@@ -49,6 +49,7 @@ jobs:
           python3 "${RUNNER_TEMP}/required-ci/reporter.py" inspect
           --event "${GITHUB_EVENT_PATH}"
           --repository "NVIDIA/yaml-sigil-rs"
+          --policy-sha "${GITHUB_SHA}"
           --workflow-id "333755871"
           --workflow-path ".github/workflows/ci.yml"
           --job-name "Candidate CI (Linux)"
@@ -78,6 +79,7 @@ jobs:
           python3 "${RUNNER_TEMP}/required-ci/reporter.py" report
           --event "${GITHUB_EVENT_PATH}"
           --repository "NVIDIA/yaml-sigil-rs"
+          --policy-sha "${GITHUB_SHA}"
           --workflow-id "333755871"
           --workflow-path ".github/workflows/ci.yml"
           --job-name "Candidate CI (Linux)"
