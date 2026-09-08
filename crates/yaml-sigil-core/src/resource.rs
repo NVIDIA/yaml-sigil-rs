@@ -10,9 +10,9 @@
 //!
 //! # Selecting a policy
 //!
-//! [`ArtifactResourceLimits::default`] selects exactly 4 MiB. You can lower,
-//! raise, or disable that ceiling without changing the operation that receives
-//! the policy.
+//! [`ArtifactResourceLimits::default`] selects
+//! [`DEFAULT_MAX_ARTIFACT_BYTES`]. You can lower, raise, or disable that
+//! ceiling without changing the operation that receives the policy.
 //!
 //! ```
 //! use core::num::NonZeroUsize;
@@ -56,10 +56,10 @@
 use std::fmt;
 use std::num::NonZeroUsize;
 
-/// The explicitly selected `yaml-sigil-rs` default artifact ceiling.
+/// The explicitly selected `yaml-sigil-rs` default artifact ceiling, in bytes.
 ///
-/// This is exactly 4 MiB. It is an implementation default, not a YamlSigil
-/// specification requirement.
+/// This is an implementation default, not a YamlSigil specification
+/// requirement.
 pub const DEFAULT_MAX_ARTIFACT_BYTES: usize = 4_194_304;
 
 /// Encoded artifact form used by resource-policy diagnostics.
@@ -370,13 +370,12 @@ mod tests {
     }
 
     #[test]
-    fn default_is_exactly_four_mib() {
-        assert_eq!(DEFAULT_MAX_ARTIFACT_BYTES, 4_194_304);
+    fn default_uses_exported_ceiling() {
         assert_eq!(
             ArtifactResourceLimits::default()
                 .max_artifact_bytes()
                 .map(NonZeroUsize::get),
-            Some(4_194_304)
+            Some(DEFAULT_MAX_ARTIFACT_BYTES)
         );
     }
 

@@ -79,9 +79,10 @@ are fallible. Use `AlgorithmId` for recognized values and
 
 YamlSigil `v1alpha1` defines no maximum complete artifact size.
 `ArtifactResourceLimits` provides an implementation-local, explicitly selected
-policy. Its default ceiling is exactly 4,194,304 bytes. Use `NonZeroUsize` with
-`with_max_artifact_bytes` to select another finite value, or use `unbounded` to
-disable every optional resource dimension known to this crate version.
+policy. `DEFAULT_MAX_ARTIFACT_BYTES` defines its default ceiling. Use
+`NonZeroUsize` with `with_max_artifact_bytes` to select another finite value,
+or use `unbounded` to disable every optional resource dimension known to this
+crate version.
 
 The complete-artifact core helpers and the owned and borrowed
 `SignedYamlArtifact` facades provide `_with_resource_limits` variants. Bounded

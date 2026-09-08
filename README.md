@@ -134,9 +134,9 @@ boundary selection uses the last constrained marker.
 YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
 size. The implementation crates expose one shared `ArtifactResourceLimits`
 policy and explicit `_with_resource_limits` operations for complete artifact
-inputs and outputs. `ArtifactResourceLimits::default()` selects exactly
-4,194,304 bytes. You can choose a lower ceiling, a higher ceiling, or no
-additional byte limit.
+inputs and outputs. `ArtifactResourceLimits::default()` selects
+`DEFAULT_MAX_ARTIFACT_BYTES`. You can choose a lower ceiling, a higher ceiling,
+or no additional byte limit.
 
 ```rust
 use core::num::NonZeroUsize;

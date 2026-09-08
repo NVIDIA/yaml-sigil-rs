@@ -51,10 +51,10 @@ form whose boundary failed. YAML-to-protobuf transcoding preserves protobuf
 format errors between the outer resource result and the existing transcoding
 result.
 
-`ArtifactResourceLimits::default()` selects exactly 4,194,304 bytes, and you
-can lower, raise, or disable that ceiling. Existing signing and transcoding
+`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`, and
+you can lower, raise, or disable that ceiling. Existing signing and transcoding
 functions remain unbounded by this policy. Adoption at the affected trust
 boundary, or an equivalent earlier raw-input bound, is required to protect an
-existing caller. The policy is operational hardening, not YamlSigil
-`v1alpha1` conformance. The 16,384-octet YAML signature-carrier constraint
-remains separate.
+existing caller. The policy is operational hardening, not YamlSigil `v1alpha1`
+conformance. The 16,384-octet YAML signature-carrier constraint remains
+separate.

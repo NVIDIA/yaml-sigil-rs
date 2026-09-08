@@ -313,10 +313,10 @@ standardizes only the 16,384-octet markerless carrier limit.
 
 YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
 size. `yaml-sigil-rs` provides opt-in `ArtifactResourceLimits` operations as
-implementation-local operational hardening. The explicitly selected default
-is exactly 4,194,304 bytes. A caller may apply a smaller or larger bound, or no
-additional library-level bound. Existing unbounded operations do not select
-this policy implicitly.
+implementation-local operational hardening. `DEFAULT_MAX_ARTIFACT_BYTES`
+defines the explicitly selected default. A caller may apply a smaller or
+larger bound, or no additional library-level bound. Existing unbounded
+operations do not select this policy implicitly.
 
 Whole-artifact limits do not affect conformance results. Rejecting an artifact
 under a local resource policy does not make it malformed or non-conforming.

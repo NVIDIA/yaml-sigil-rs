@@ -44,8 +44,8 @@ admitted value.
 form, outer-conformance, or artifact processing. Resource errors remain
 separate from transcription outcomes.
 
-`ArtifactResourceLimits::default()` selects exactly 4,194,304 bytes. You can
-lower, raise, or disable that ceiling. Existing `compose`, `decompose`, and
+`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`. You
+can lower, raise, or disable that ceiling. Existing `compose`, `decompose`, and
 default trait implementations remain unbounded by this policy. Callers must
 adopt the bounded operations at the affected trust boundary or enforce an
 equivalent earlier raw-input bound.

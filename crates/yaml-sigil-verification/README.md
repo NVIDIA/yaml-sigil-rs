@@ -63,11 +63,12 @@ YamlSigil `v1alpha1` defines no maximum complete artifact size. A local
 resource-policy rejection remains separate from invocation errors, malformed
 artifacts, failed cryptographic verification, and conformance results. A
 deployment can choose a lower limit, a higher limit, or no additional limit;
-the explicit default is exactly 4,194,304 bytes. Existing verification entry
-points and default trait implementations remain unbounded by this policy.
-Adopt a bounded operation at the affected trust boundary or enforce an
-equivalent earlier raw-input bound. Protobuf format limits, parser safeguards,
-address-space limits, allocator limits, and deployment controls still apply.
+`DEFAULT_MAX_ARTIFACT_BYTES` defines the explicit default. Existing
+verification entry points and default trait implementations remain unbounded
+by this policy. Adopt a bounded operation at the affected trust boundary or
+enforce an equivalent earlier raw-input bound. Protobuf format limits, parser
+safeguards, address-space limits, allocator limits, and deployment controls
+still apply.
 
 ## YAML Signature-Document Behavior
 
