@@ -34,6 +34,11 @@ request when the commits do not make it clear. Maintainers select the exact
 stable or prerelease version later and prepare the dedicated
 `release-plz-manual-<version>` pull request described in `RELEASING.md`.
 
+Do not edit the crate changelogs in an ordinary contribution. The canonical
+maintainer release procedure runs pinned `release-plz` to generate them from
+the integrated Conventional Commit history in the dedicated release pull
+request.
+
 All four published crates share `[workspace.package].version`. Never change a
 member version independently. A version change belongs only in the canonical
 single-commit release pull request and must pass both checks:
