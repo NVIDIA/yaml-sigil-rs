@@ -343,25 +343,138 @@ fn open_in_browser(path: &Path) -> Result<()> {
     let path = path
         .canonicalize()
         .with_context(|| path.display().to_string())?;
-    let status = if cfg!(target_os = "linux") {
-        let mut cmd = Command::new("xdg-open");
-        cmd.arg(&path);
-        run(cmd)?
-    } else if cfg!(target_os = "macos") {
-        let mut cmd = Command::new("open");
-        cmd.arg(&path);
-        run(cmd)?
-    } else if cfg!(target_os = "windows") {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "start", "", &path.display().to_string()]);
-        run(cmd)?
-    } else {
-        bail!(
-            "no default browser opener for this OS; open {}",
-            path.display()
-        );
-    };
+    open_canonical_path(&path)
+}
+
+#[cfg(target_os = "linux")]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    let mut command = Command::new("xdg-open");
+    command.arg(path);
+    let status = run(command)?;
     require_success(status, "open browser")
+}
+
+#[cfg(target_os = "macos")]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    let mut command = Command::new("open");
+    command.arg(path);
+    let status = run(command)?;
+    require_success(status, "open browser")
+}
+
+#[cfg(target_os = "windows")]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    use windows_sys::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+    };
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOW;
+
+    struct ComApartment;
+
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            // SAFETY: this guard exists only after a successful CoInitializeEx
+            // on the current thread and is dropped on that same thread.
+            unsafe { CoUninitialize() };
+        }
+    }
+
+    // SAFETY: the reserved pointer is required to be null. This initializes
+    // the current CLI thread exactly for the duration of the shell operation.
+    let com_result = unsafe {
+        CoInitializeEx(
+            std::ptr::null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        )
+    };
+    if com_result < 0 {
+        bail!(
+            "Windows could not initialize the browser shell apartment (HRESULT 0x{:08X})",
+            com_result as u32
+        );
+    }
+    let _com_apartment = ComApartment;
+
+    let operation = windows_wide_argument(OsStr::new("open"), "browser operation")?;
+    let path = windows_shell_path_argument(path.as_os_str())?;
+    // SAFETY: both input buffers are NUL-terminated for the duration of the
+    // call, and every other pointer is an explicitly permitted null optional
+    // parameter. ShellExecuteW receives the path as data, never shell text.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            path.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOW,
+        )
+    };
+    if result as usize as isize <= 32 {
+        bail!(
+            "Windows could not open the browser path (code {})",
+            result as usize
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_wide_argument(value: &OsStr, label: &str) -> Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let mut encoded = value.encode_wide().collect::<Vec<_>>();
+    if encoded.contains(&0) {
+        bail!("Windows {label} contains a NUL code unit");
+    }
+    encoded.push(0);
+    Ok(encoded)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_shell_path_argument(value: &OsStr) -> Result<Vec<u16>> {
+    const BACKSLASH: u16 = b'\\' as u16;
+    const COLON: u16 = b':' as u16;
+    const VERBATIM_PREFIX: &[u16] = &[BACKSLASH, BACKSLASH, b'?' as u16, BACKSLASH];
+    const VERBATIM_UNC_PREFIX: &[u16] = &[
+        BACKSLASH,
+        BACKSLASH,
+        b'?' as u16,
+        BACKSLASH,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        BACKSLASH,
+    ];
+
+    let encoded = windows_wide_argument(value, "browser path")?;
+    let encoded = &encoded[..encoded.len() - 1];
+    let mut shell_path = if let Some(rest) = encoded.strip_prefix(VERBATIM_UNC_PREFIX) {
+        let mut path = Vec::with_capacity(rest.len() + 3);
+        path.extend_from_slice(&[BACKSLASH, BACKSLASH]);
+        path.extend_from_slice(rest);
+        path
+    } else if let Some(rest) = encoded.strip_prefix(VERBATIM_PREFIX) {
+        // `canonicalize` returns DOS drive paths in this form. Other verbatim
+        // namespaces are not paths the Windows shell promises to interpret.
+        if rest.len() < 3 || rest[1] != COLON || rest[2] != BACKSLASH {
+            bail!("canonical Windows browser path is not a drive or UNC path");
+        }
+        rest.to_vec()
+    } else {
+        encoded.to_vec()
+    };
+    shell_path.push(0);
+    Ok(shell_path)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn open_canonical_path(path: &Path) -> Result<()> {
+    bail!(
+        "no default browser opener for this OS; open {}",
+        path.display()
+    )
 }
 
 fn which_in_path(program: &str, path: &OsStr, executable_suffix: &str) -> Option<PathBuf> {
@@ -435,6 +548,49 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains(CARGO_LLVM_COV_INSTALL));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_browser_path_is_data_even_with_shell_metacharacters() {
+        use std::os::windows::ffi::OsStringExt as _;
+
+        let path = Path::new(r"C:\workspace & ^ (group)% name\coverage\index.html");
+        let encoded = windows_shell_path_argument(path.as_os_str()).unwrap();
+        assert_eq!(encoded.last(), Some(&0));
+        assert_eq!(
+            std::ffi::OsString::from_wide(&encoded[..encoded.len() - 1]),
+            path.as_os_str()
+        );
+
+        for (canonical, shell_path) in [
+            (
+                r"\\?\C:\workspace & ^ (group)% name\coverage\index.html",
+                r"C:\workspace & ^ (group)% name\coverage\index.html",
+            ),
+            (
+                r"\\?\UNC\server\share & ^ (group)% name\coverage\index.html",
+                r"\\server\share & ^ (group)% name\coverage\index.html",
+            ),
+        ] {
+            let encoded = windows_shell_path_argument(OsStr::new(canonical)).unwrap();
+            assert_eq!(
+                std::ffi::OsString::from_wide(&encoded[..encoded.len() - 1]),
+                OsStr::new(shell_path)
+            );
+        }
+
+        let embedded_nul = std::ffi::OsString::from_wide(&[
+            b'C' as u16,
+            b':' as u16,
+            b'\\' as u16,
+            b'a' as u16,
+            0,
+            b'b' as u16,
+        ]);
+        assert!(windows_shell_path_argument(&embedded_nul).is_err());
+        assert!(windows_shell_path_argument(OsStr::new(r"\\?\Volume{test}\index.html")).is_err());
+        assert!(!include_str!("main.rs").contains("Command::new(\"cmd\")"));
     }
 
     #[test]
