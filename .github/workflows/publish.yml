@@ -332,8 +332,8 @@ jobs:
           --wait-for-registry
         working-directory: policy
 
-  finalize:
-    name: Finalize source-only GitHub Releases
+  finalization_approval:
+    name: Approve source-only GitHub Releases
     needs:
       - qualify
       - publish
@@ -343,7 +343,36 @@ jobs:
           needs.qualify.result == 'success' &&
           needs.qualify.outputs.finalize == 'true' &&
           needs.await_registry.result == 'success' &&
-          (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
+          (needs.publish.result == 'success' || needs.publish.result == 'skipped') &&
+          github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # This secretless deployment is the sole human gate between exact registry
+    # visibility and the protected finalizer. A rerun requires a new recovery
+    # dispatch rather than reusing an earlier approval.
+    environment: release-finalization
+    permissions: {}
+    steps:
+      - name: Require a fresh first-attempt approval
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: test "${RUN_ATTEMPT}" = "1"
+
+  finalize:
+    name: Finalize source-only GitHub Releases
+    needs:
+      - qualify
+      - publish
+      - await_registry
+      - finalization_approval
+    if: >-
+      ${{ always() &&
+          needs.qualify.result == 'success' &&
+          needs.qualify.outputs.finalize == 'true' &&
+          needs.await_registry.result == 'success' &&
+          needs.finalization_approval.result == 'success' &&
+          (needs.publish.result == 'success' || needs.publish.result == 'skipped') &&
+          github.run_attempt == 1 }}
     runs-on: linux-amd64-cpu8
     timeout-minutes: 30
     environment: protected-automation
@@ -352,6 +381,13 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: 1.98.0
     steps:
+      # A rerun of only this job cannot reuse an approval from attempt one.
+      # Recovery starts a new bounded workflow_dispatch run instead.
+      - name: Reject a reused finalization approval
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: test "${RUN_ATTEMPT}" = "1"
+
       - name: Check out protected current release policy
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

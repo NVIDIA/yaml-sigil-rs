@@ -254,17 +254,20 @@ Approve the exact qualified publication job when it reaches the `crates-io`
 environment. That approval authorizes only crates.io publication; it does not
 satisfy the later GitHub finalizer preflight.
 
-After workflow cutover and before the first validation or release operation,
-configure `protected-automation` with required reviewer `ddurst-nvidia`
-(`267424412`), administrator bypass disabled, self-review permitted, and the
-existing custom deployment branch policy restricted to `main`. Preserve this
-policy thereafter.
+Keep `protected-automation` restricted to `main`, with administrator bypass
+disabled and no required reviewer. It protects the App key used by automatic
+`Required CI` reporting and by the finalizer after the separate release gate.
+
+Configure the secretless `release-finalization` environment with required
+reviewer `ddurst-nvidia` (`267424412`), administrator bypass disabled,
+self-review permitted, and one custom deployment branch policy restricted to
+`main`.
 
 ### Approve GitHub finalization
 
-After publication and registry confirmation, the finalizer waits at the
-separate `protected-automation` environment. Do not approve that deployment
-yet. Immediately before approval, a repository administrator performs this
+After publication and registry confirmation, the secretless approval job waits
+at the `release-finalization` environment. Do not approve that deployment yet.
+Immediately before approval, a repository administrator performs this
 read-only operator preflight with the exact values shown by the pending run.
 The two ruleset IDs are repository policy: `21898912` protects tag creation,
 and `21898913` protects tag update and deletion.
@@ -279,9 +282,14 @@ run_attempt=PENDING_RUN_ATTEMPT
 expected_event=EXPECTED_PUSH_OR_WORKFLOW_DISPATCH
 tag_creation_ruleset_id=21898912
 tag_update_deletion_ruleset_id=21898913
-finalizer_environment=protected-automation
-finalizer_environment_id=20345456136
-finalizer_branch_policy_id=57933874
+approval_environment=release-finalization
+approval_environment_id=21512839390
+approval_branch_policy_id=59459283
+automation_environment=protected-automation
+automation_environment_id=20345456136
+automation_branch_policy_id=57933874
+
+test "${run_attempt}" = 1
 
 operator_login="$(gh api user --jq .login)"
 test "$(gh api \
@@ -314,16 +322,24 @@ check_live_bindings() {
       and .status == "completed" and .conclusion == "success")] \
     | length' <<< "${jobs_json}")" = 1
   test "$(jq '[.jobs[] \
-    | select(.name == "Finalize source-only GitHub Releases" \
+    | select(.name == "Approve source-only GitHub Releases" \
       and .status == "waiting" and .conclusion == null)] \
     | length' <<< "${jobs_json}")" = 1
+  test "$(jq '[.jobs[] \
+    | select(.name == "Finalize source-only GitHub Releases")] \
+    | length <= 1' <<< "${jobs_json}")" = true
+  test "$(jq '[.jobs[] \
+    | select(.name == "Finalize source-only GitHub Releases" \
+      and (.status == "in_progress" or .status == "completed" \
+        or .conclusion != null))] \
+    | length' <<< "${jobs_json}")" = 0
   pending_json="$(gh api \
     "repos/${repository}/actions/runs/${run_id}/pending_deployments")"
   test "$(jq length <<< "${pending_json}")" = 1
   test "$(jq -r '.[0].environment.id' <<< "${pending_json}")" = \
-    "${finalizer_environment_id}"
+    "${approval_environment_id}"
   test "$(jq -r '.[0].environment.name' <<< "${pending_json}")" = \
-    "${finalizer_environment}"
+    "${approval_environment}"
   test "$(jq -r '.[0].current_user_can_approve' \
     <<< "${pending_json}")" = true
   comparison_json="$(gh api \
@@ -343,43 +359,88 @@ check_live_bindings() {
 }
 
 check_live_bindings
-environment_json="$(gh api \
-  "repos/${repository}/environments/${finalizer_environment}")"
-test "$(jq -r .name <<< "${environment_json}")" = \
-  "${finalizer_environment}"
-test "$(jq -r .id <<< "${environment_json}")" = \
-  "${finalizer_environment_id}"
-test "$(jq -r .can_admins_bypass <<< "${environment_json}")" = false
+approval_environment_json="$(gh api \
+  "repos/${repository}/environments/${approval_environment}")"
+test "$(jq -r .name <<< "${approval_environment_json}")" = \
+  "${approval_environment}"
+test "$(jq -r .id <<< "${approval_environment_json}")" = \
+  "${approval_environment_id}"
+test "$(jq -r .can_admins_bypass <<< "${approval_environment_json}")" = false
 test "$(jq -r .deployment_branch_policy.protected_branches \
-  <<< "${environment_json}")" = false
+  <<< "${approval_environment_json}")" = false
 test "$(jq -r .deployment_branch_policy.custom_branch_policies \
-  <<< "${environment_json}")" = true
-test "$(jq '.protection_rules | length' <<< "${environment_json}")" = 1
+  <<< "${approval_environment_json}")" = true
+test "$(jq '.protection_rules | length' \
+  <<< "${approval_environment_json}")" = 2
 test "$(jq '[.protection_rules[] | select(.type == "required_reviewers")] \
-  | length' <<< "${environment_json}")" = 1
+  | length' <<< "${approval_environment_json}")" = 1
 test "$(jq -r '.protection_rules[] \
   | select(.type == "required_reviewers") \
-  | .prevent_self_review' <<< "${environment_json}")" = false
+  | .prevent_self_review' <<< "${approval_environment_json}")" = false
 test "$(jq '[.protection_rules[] \
   | select(.type == "required_reviewers") \
-  | .reviewers[]] | length' <<< "${environment_json}")" = 1
+  | .reviewers[]] | length' <<< "${approval_environment_json}")" = 1
 test "$(jq -r '.protection_rules[] \
   | select(.type == "required_reviewers") \
-  | .reviewers[0].type' <<< "${environment_json}")" = User
+  | .reviewers[0].type' <<< "${approval_environment_json}")" = User
 test "$(jq -r '.protection_rules[] \
   | select(.type == "required_reviewers") \
-  | .reviewers[0].reviewer.login' <<< "${environment_json}")" = \
+  | .reviewers[0].reviewer.login' <<< "${approval_environment_json}")" = \
   ddurst-nvidia
 test "$(jq -r '.protection_rules[] \
   | select(.type == "required_reviewers") \
-  | .reviewers[0].reviewer.id' <<< "${environment_json}")" = 267424412
-branch_policy_json="$(gh api \
-  "repos/${repository}/environments/${finalizer_environment}/deployment-branch-policies?per_page=100")"
-test "$(jq .total_count <<< "${branch_policy_json}")" = 1
-test "$(jq -r .branch_policies[0].id <<< "${branch_policy_json}")" = \
-  "${finalizer_branch_policy_id}"
-test "$(jq -r .branch_policies[0].name <<< "${branch_policy_json}")" = main
-test "$(jq -r .branch_policies[0].type <<< "${branch_policy_json}")" = branch
+  | .reviewers[0].reviewer.id' <<< "${approval_environment_json}")" = \
+  267424412
+approval_branch_policy_json="$(gh api \
+  "repos/${repository}/environments/${approval_environment}/deployment-branch-policies?per_page=100")"
+test "$(jq .total_count <<< "${approval_branch_policy_json}")" = 1
+test "$(jq -r .branch_policies[0].id \
+  <<< "${approval_branch_policy_json}")" = "${approval_branch_policy_id}"
+test "$(jq -r .branch_policies[0].name \
+  <<< "${approval_branch_policy_json}")" = main
+test "$(jq -r .branch_policies[0].type \
+  <<< "${approval_branch_policy_json}")" = branch
+test "$(gh api \
+  "repos/${repository}/environments/${approval_environment}/secrets" \
+  --jq .total_count)" = 0
+test "$(gh api \
+  "repos/${repository}/environments/${approval_environment}/variables" \
+  --jq .total_count)" = 0
+
+automation_environment_json="$(gh api \
+  "repos/${repository}/environments/${automation_environment}")"
+test "$(jq -r .name <<< "${automation_environment_json}")" = \
+  "${automation_environment}"
+test "$(jq -r .id <<< "${automation_environment_json}")" = \
+  "${automation_environment_id}"
+test "$(jq -r .can_admins_bypass \
+  <<< "${automation_environment_json}")" = false
+test "$(jq -r .deployment_branch_policy.protected_branches \
+  <<< "${automation_environment_json}")" = false
+test "$(jq -r .deployment_branch_policy.custom_branch_policies \
+  <<< "${automation_environment_json}")" = true
+test "$(jq '.protection_rules | length' \
+  <<< "${automation_environment_json}")" = 1
+test "$(jq '[.protection_rules[] | select(.type == "branch_policy")] \
+  | length' <<< "${automation_environment_json}")" = 1
+test "$(jq '[.protection_rules[] | select(.type == "required_reviewers")] \
+  | length' <<< "${automation_environment_json}")" = 0
+automation_branch_policy_json="$(gh api \
+  "repos/${repository}/environments/${automation_environment}/deployment-branch-policies?per_page=100")"
+test "$(jq .total_count <<< "${automation_branch_policy_json}")" = 1
+test "$(jq -r .branch_policies[0].id \
+  <<< "${automation_branch_policy_json}")" = "${automation_branch_policy_id}"
+test "$(jq -r .branch_policies[0].name \
+  <<< "${automation_branch_policy_json}")" = main
+test "$(jq -r .branch_policies[0].type \
+  <<< "${automation_branch_policy_json}")" = branch
+test "$(gh api \
+  "repos/${repository}/environments/${automation_environment}/secrets" \
+  --jq '[.total_count, [.secrets[].name]]')" = \
+  '[1,["YAML_SIGIL_RELEASE_PR_APP_PRIVATE_KEY"]]'
+test "$(gh api \
+  "repos/${repository}/environments/${automation_environment}/variables" \
+  --jq .total_count)" = 0
 test "$(gh api "repos/${repository}/immutable-releases" --jq .enabled)" = true
 gh api "repos/${repository}/immutable-releases" \
   --jq '{enabled,enforced_by_owner}'
@@ -445,10 +506,12 @@ main commit; release immutability reports `enabled: true`; and both exact tag
 rulesets report target `tag`, enforcement `active`, and their complete frozen
 reviewed bypass actors, conditions, and rules. The operator must compare every
 field shown for both rulesets with the frozen review evidence before approving
-the exact `protected-automation` deployment. The separate `crates-io` approval
-does not substitute for this immediately pre-finalizer check. These commands
-grant no workflow credential and make no settings, App, ruleset, environment,
-tag, or Release change.
+the exact `release-finalization` deployment. That approval releases only the
+secretless gate; the dependent finalizer then enters the main-only
+`protected-automation` App-key boundary without another reviewer prompt. The
+separate `crates-io` approval does not substitute for this immediately
+pre-finalizer check. These commands grant no workflow credential and make no
+settings, App, ruleset, environment, tag, or Release change.
 
 ### Validate or recover without publishing
 

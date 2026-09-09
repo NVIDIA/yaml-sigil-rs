@@ -4,6 +4,9 @@
 run diagnostics, and draft changes, then review the result as the responsible
 author before submitting it.
 
+Repository writers use [`MAINTAINERS.md`](MAINTAINERS.md) for exact-head test
+authorization, protected-policy staging, merges, exceptions, and reverts.
+
 ## The Critical Rule
 
 **You must understand your code.** AI-assisted contributions are welcome, but
@@ -65,12 +68,15 @@ ready pull requests do not synchronize automatically. Every new head requires
 a new review and exact-SHA authorization; a stale authorization never runs the
 new head.
 
-Contributor admission has two deliberate human steps. First, a writer posts
-the exact-head command above. After the authoritative candidate lanes finish,
-the configured `ddurst-nvidia` reviewer approves that run's exact
-`protected-automation` reporter deployment. The reporter then repeats every
-live binding before the App writes `Required CI`. This per-deployment approval
-does not authorize a release finalizer or a different candidate head.
+The exact-head command is the sole per-head human admission step. After the
+authoritative candidate lanes finish, the protected reporter repeats every
+live binding and the App writes `Required CI` automatically. Release
+finalization has a separate reviewer gate and cannot authorize a candidate or
+a different head.
+
+The copied `.github/workflows/ci.yml` must exactly match protected current
+`main`. Coordinate a proposed change to that workflow with a maintainer
+before requesting candidate testing.
 
 Candidate setup completes before source materialization. The checkout uses
 anonymous Git transport, rejects requested Git filters, disables Git LFS, and
