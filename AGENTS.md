@@ -4,7 +4,8 @@
 
 Ordinary repository work does not require the maintainer guide. Before
 performing or advising on hosted maintainer operations—authorizing pull-request
-tests, merging, exceptional integration, or reverting `main`—read
+tests, merging, activating or synchronizing a coordination line, exceptional
+integration, or reverting `main`—read
 [`MAINTAINERS.md`](MAINTAINERS.md) completely.
 
 Whenever a workflow or supporting policy changes, update the matching
@@ -246,6 +247,7 @@ cargo xtask package-content
 cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
 cargo xtask sync-workspace-versions
+cargo xtask release activate --version MAJOR.MINOR.PATCH
 cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE]
 cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
 cargo xtask coverage
@@ -463,6 +465,12 @@ additional Python or shell helpers. Local version preparation and content
 validation remain provider-neutral under `cargo xtask release`. The exact
 release-plz dry run is a separate maintainer-operated acceptance step because
 release-plz requires read-only forge association context.
+
+`cargo xtask release activate --version MAJOR.MINOR.PATCH` creates only the
+unpublished `MAJOR.MINOR.PATCH-rc.0` coordination safety stub from exact clean
+`origin/main`. It updates the workspace version and internal requirements in
+the root manifest without invoking release-plz or editing changelogs. Follow
+`MAINTAINERS.md` for the separately authorized protected-ref transaction.
 
 Release preparation always lets pinned release-plz update derive the
 transaction first. Only starting its derived version as a prerelease or
