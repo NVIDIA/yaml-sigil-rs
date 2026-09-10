@@ -16,6 +16,10 @@ secrets.
 
 Release commands have these boundaries:
 
+- `cargo xtask release activate --version <MAJOR.MINOR.PATCH>` selects the
+  unpublished `<MAJOR.MINOR.PATCH>-rc.0` coordination safety stub from exact
+  clean `origin/main`. It does not invoke release-plz or edit changelogs,
+  leaves only the root `Cargo.toml` changed, and never updates a remote ref.
 - `cargo xtask release prepare --version <SEMVER>` runs pinned release-plz
   update locally and may change only expected manifests and changelogs. When
   starting its derived version as a prerelease or promoting the current

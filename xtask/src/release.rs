@@ -21,6 +21,7 @@ use crate::{safe_file, versions};
 
 const RELEASE_CONFIG: &str = ".release-plz.toml";
 const MANUAL_BRANCH_PREFIX: &str = "release-plz-manual-";
+const ACTIVATION_BRANCH_PREFIX: &str = "activate-";
 const RELEASE_OUTPUT_LIMITS: OutputLimits = OutputLimits {
     stdout: 1024 * 1024,
     stderr: 4 * 1024 * 1024,
@@ -36,6 +37,7 @@ const MANAGED_PATHS: &[&str] = &[
     "crates/yaml-sigil-verification/Cargo.toml",
     "crates/yaml-sigil-verification/CHANGELOG.md",
 ];
+const ACTIVATION_PATHS: &[&str] = &["Cargo.toml"];
 const TOKEN_ENVIRONMENTS: &[&str] = &[
     "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
     "ACTIONS_ID_TOKEN_REQUEST_URL",
@@ -66,6 +68,12 @@ pub(crate) struct ReleaseArgs {
 
 #[derive(Subcommand)]
 enum ReleaseCommand {
+    /// Prepare an unpublished rc.0 coordination-line activation from exact main.
+    Activate {
+        /// Stable target version whose coordination state starts at rc.0.
+        #[arg(long)]
+        version: Version,
+    },
     /// Run release-plz update and require one maintainer-selected version.
     Prepare {
         /// Exact stable or prerelease version for all four source crates.
@@ -82,9 +90,54 @@ enum ReleaseCommand {
 
 pub(crate) fn run(root: &Path, args: ReleaseArgs) -> Result<()> {
     match args.command {
+        ReleaseCommand::Activate { version } => activate(root, &version),
         ReleaseCommand::Prepare { version } => prepare(root, &version),
         ReleaseCommand::Check { version } => check(root, &version),
     }
+}
+
+fn activate(root: &Path, target: &Version) -> Result<()> {
+    let current = versions::current(root)?;
+    let selected = activation_version(&current, target)?;
+    require_root_lock_absent(root)?;
+    require_clean(root)?;
+    require_origin_main_base(root)?;
+    require_activation_branch(root, target)?;
+
+    // rc.0 is a non-release safety stub for the coordination line. Keep
+    // release-plz and every changelog out of this transition; release-plz
+    // first participates after promotion for a real RC or stable release.
+    versions::set_workspace_release_version(root, &current, &selected)?;
+    let synchronized = without_persisted_root_lock(root, "coordination activation", || {
+        versions::sync_workspace_dependency_versions(root, false)
+    })?;
+    if !synchronized {
+        bail!("coordination activation did not update internal requirements");
+    }
+    require_exact_changed_paths(root, ACTIVATION_PATHS, "coordination activation")?;
+    require_root_lock_absent(root)?;
+    if versions::current(root)? != selected {
+        bail!("coordination activation did not retain exact version {selected}");
+    }
+    eprintln!(
+        "release: prepared unpublished coordination state {selected}; only Cargo.toml changed"
+    );
+    Ok(())
+}
+
+fn activation_version(current: &Version, target: &Version) -> Result<Version> {
+    if !current.pre.is_empty() || !current.build.is_empty() {
+        bail!("coordination activation requires a stable current main version");
+    }
+    if !target.pre.is_empty() || !target.build.is_empty() {
+        bail!("coordination target must be a stable MAJOR.MINOR.PATCH version");
+    }
+    let selected = Version::parse(&format!("{target}-rc.0"))
+        .context("derive coordination activation version")?;
+    if selected <= *current {
+        bail!("coordination version {selected} must advance current main {current}");
+    }
+    Ok(selected)
 }
 
 fn prepare(root: &Path, selected: &Version) -> Result<()> {
@@ -424,6 +477,32 @@ fn require_managed_diff(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn require_exact_changed_paths(root: &Path, expected: &[&str], label: &str) -> Result<()> {
+    let mut actual = nul_paths(
+        &git_output(root, TRACKED_RELEASE_DIFF_ARGS)?,
+        "tracked release diff",
+    )?;
+    actual.extend(nul_paths(
+        &git_output(root, UNTRACKED_RELEASE_DIFF_ARGS)?,
+        "untracked release diff",
+    )?);
+    actual.sort();
+    actual.dedup();
+    let mut expected = expected
+        .iter()
+        .map(|path| (*path).to_string())
+        .collect::<Vec<_>>();
+    expected.sort();
+    if actual != expected {
+        bail!(
+            "{label} paths differ: expected [{}], found [{}]",
+            expected.join(", "),
+            actual.join(", ")
+        );
+    }
+    Ok(())
+}
+
 fn require_no_tracked_root_lock(root: &Path) -> Result<()> {
     let tracked = git_line(root, &["ls-files", "--", "Cargo.lock"])?;
     if !tracked.is_empty() {
@@ -489,6 +568,15 @@ fn require_origin_main_base(root: &Path) -> Result<()> {
     let head = git_line(root, &["rev-parse", "HEAD"])?;
     let origin_main = git_line(root, &["rev-parse", "refs/remotes/origin/main"])?;
     validate_origin_main_base(&head, &origin_main)
+}
+
+fn require_activation_branch(root: &Path, target: &Version) -> Result<()> {
+    let expected = format!("{ACTIVATION_BRANCH_PREFIX}{target}");
+    let observed = git_line(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    if observed != expected {
+        bail!("coordination activation branch differs: expected {expected}, found {observed}");
+    }
+    Ok(())
 }
 
 fn validate_origin_main_base(head: &str, origin_main: &str) -> Result<()> {
@@ -656,6 +744,25 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn coordination_activation_derives_only_a_forward_rc_zero() {
+        let current = Version::parse("0.5.0").unwrap();
+        assert_eq!(
+            activation_version(&current, &Version::parse("0.6.0").unwrap()).unwrap(),
+            Version::parse("0.6.0-rc.0").unwrap()
+        );
+        for target in ["0.5.0", "0.6.0-rc.1", "0.6.0+local"] {
+            assert!(activation_version(&current, &Version::parse(target).unwrap()).is_err());
+        }
+        assert!(
+            activation_version(
+                &Version::parse("0.5.1-rc.1").unwrap(),
+                &Version::parse("0.6.0").unwrap(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
