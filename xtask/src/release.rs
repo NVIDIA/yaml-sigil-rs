@@ -141,7 +141,7 @@ fn activation_version(current: &Version, target: &Version) -> Result<Version> {
 }
 
 fn prepare(root: &Path, selected: &Version) -> Result<()> {
-    versions::parse_release_version(&selected.to_string())?;
+    require_real_release_version(selected)?;
     validate_policy(root)?;
     require_release_plz(root)?;
     require_root_lock_absent(root)?;
@@ -191,8 +191,10 @@ fn apply_exact_version(
     let adjustment = require_exact_version_adjustment(original, derived, selected)?;
     let inherited_manifests = snapshot_inherited_manifests(root)?;
 
-    // Pinned release-plz performs the exact prerelease-to-stable selection
-    // only after update has derived the changelog and preliminary version.
+    // Pinned release-plz performs the exact maintainer selection only after
+    // update has derived the changelog and preliminary version. This includes
+    // replacing the non-release rc.0 activation stub with the first real RC or
+    // stable version.
     let mut set_version = release_plz_set_version(root, selected);
     without_persisted_root_lock(root, "release-plz set-version", || {
         run_release_plz(&mut set_version, "release-plz set-version")
@@ -218,6 +220,22 @@ fn require_exact_version_adjustment(
     let same_core = derived.major == selected.major
         && derived.minor == selected.minor
         && derived.patch == selected.patch;
+    let selected_real_rc = selected
+        .pre
+        .as_str()
+        .strip_prefix("rc.")
+        .is_some_and(|ordinal| {
+            !ordinal.is_empty()
+                && ordinal != "0"
+                && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+        });
+    let activation_stub_release = original.pre.as_str() == "rc.0"
+        && derived == original
+        && selected > original
+        && (selected.pre.is_empty() || selected_real_rc);
+    if same_core && activation_stub_release {
+        return Ok("replaced the rc.0 activation stub with the first release");
+    }
     let stable_promotion = !original.pre.is_empty()
         && selected.pre.is_empty()
         && original.major == selected.major
@@ -239,7 +257,8 @@ fn require_exact_version_adjustment(
     }
     bail!(
         "release-plz derived {derived}, not selected release {selected}; only a new \
-         prerelease or promotion of the current same-core prerelease is supported"
+         prerelease, the first same-core release from rc.0, or promotion of the \
+         current same-core prerelease is supported"
     )
 }
 
@@ -308,7 +327,7 @@ fn expected_literal_manifest(body: &str, selected: &Version) -> Result<String> {
 }
 
 pub(crate) fn check(root: &Path, expected: &Version) -> Result<()> {
-    versions::parse_release_version(&expected.to_string())?;
+    require_real_release_version(expected)?;
     validate_policy(root)?;
     require_root_lock_absent(root)?;
     require_clean(root)?;
@@ -322,6 +341,14 @@ pub(crate) fn check(root: &Path, expected: &Version) -> Result<()> {
     require_root_lock_absent(root)?;
     require_clean(root)?;
     eprintln!("release: validated exact four-crate release {expected}");
+    Ok(())
+}
+
+pub(crate) fn require_real_release_version(version: &Version) -> Result<()> {
+    versions::parse_release_version(&version.to_string())?;
+    if version.pre.as_str() == "rc.0" {
+        bail!("release version may not be the rc.0 coordination stub");
+    }
     Ok(())
 }
 
@@ -728,12 +755,25 @@ mod tests {
             )
             .is_ok()
         );
+        for selected in ["0.6.0-rc.1", "0.6.0"] {
+            assert!(
+                require_exact_version_adjustment(
+                    &Version::parse("0.6.0-rc.0").unwrap(),
+                    &Version::parse("0.6.0-rc.0").unwrap(),
+                    &Version::parse(selected).unwrap(),
+                )
+                .is_ok()
+            );
+        }
         for (original, derived, selected) in [
             ("0.5.0", "0.5.1", "0.5.1"),
             ("0.5.0-rc.2", "0.5.0-rc.3", "0.5.0-rc.4"),
             ("0.5.0-rc.2", "0.6.0-rc.1", "0.5.0"),
             ("0.5.0-rc.3", "0.5.0-rc.2", "0.5.0"),
             ("0.5.0", "0.5.1", "0.6.0-rc.1"),
+            ("0.6.0-rc.0", "0.6.0-rc.0", "0.7.0-rc.1"),
+            ("0.6.0-rc.0", "0.6.0-rc.0", "0.6.0-rc.1.preview"),
+            ("0.6.0-rc.0", "0.6.0-rc.0", "0.6.0-zz.1"),
         ] {
             assert!(
                 require_exact_version_adjustment(
@@ -744,6 +784,14 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn release_selection_rejects_coordination_stub() {
+        assert!(require_real_release_version(&Version::parse("1.2.3").unwrap()).is_ok());
+        assert!(require_real_release_version(&Version::parse("1.2.3-rc.1").unwrap()).is_ok());
+        assert!(require_real_release_version(&Version::parse("1.2.3-rc.0").unwrap()).is_err());
+        assert!(require_real_release_version(&Version::parse("1.2.3+local").unwrap()).is_err());
     }
 
     #[test]

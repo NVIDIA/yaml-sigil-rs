@@ -207,6 +207,7 @@ fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
         return Ok(());
     }
 
+    release::require_real_release_version(&version).map_err(|error| error.to_string())?;
     versions::validate(&arguments.source_root, &version, true)
         .map_err(|error| error.to_string())?;
     let states = maybe_reconcile_registry(arguments.operation, true, || {
@@ -251,6 +252,7 @@ fn finalize(root: &Path, arguments: &FinalizeArgs) -> Result<(), String> {
     {
         return Err("finalizer version differs from checked-out source".to_string());
     }
+    release::require_real_release_version(&arguments.version).map_err(|error| error.to_string())?;
     versions::validate(&arguments.source_root, &arguments.version, true)
         .map_err(|error| error.to_string())?;
     let states = registry_states(&arguments.source_sha, &arguments.version)?;
