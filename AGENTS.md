@@ -11,6 +11,11 @@ Whenever a workflow or supporting policy changes, update the matching
 procedure in `MAINTAINERS.md` in the same change. Keep that runbook concise,
 coherent, and aligned with the executable behavior.
 
+Use [`CONTRIBUTING.md`](CONTRIBUTING.md) to choose `main` or an advertised
+breaking-change coordination base before starting work. Keep compatible and
+protected-policy changes on `main`; target the active coordination branch only
+for next-line work. A coordination branch never supplies its own CI policy.
+
 ## Project-Local Skill
 
 Use the project-local
@@ -422,11 +427,14 @@ add complexity without consolidating policy.
 The surviving provider helpers have deliberately narrow roles:
 
 - `report_required_ci.py` and its focused fixture tests bind one terminal
-  copied-ref run and the exact verified signer, raw author/committer, and
-  author DCO identities before the scoped App creates `Required CI`.
-- `bind-candidate-pr.py` anonymously binds the open pull request, current main,
-  copied ref, exact basic verification inventory, and optional canonical
-  release branch before source materialization.
+  copied-ref run, its aggregate job's pre-execution policy/base attestation,
+  exact contribution base, protected current `main`, verified signer, raw
+  author/committer, and author DCO identities before the scoped App creates the
+  base-specific required verdict.
+- `bind-candidate-pr.py` anonymously binds the open pull request, exact
+  contribution base, protected current `main`, copied ref, verification
+  inventory, and optional main-only canonical release branch before source
+  materialization.
 - `materialize-candidate.sh` and its tests perform anonymous exact-head
   materialization while rejecting filters, ancestor Cargo configuration, and
   candidate-selected submodule behavior.
@@ -491,9 +499,10 @@ GitHub-hosted macOS and Windows jobs are advisory. Explicitly admitted copied
 refs run public-workspace `cargo check` and `cargo test` without secrets,
 OIDC, protected environments, cache saves, or retained artifacts. Complete
 provider-neutral source, package, version-policy, and release-branch
-validation remains authoritative on NVIDIA Linux. Only `Candidate CI (Linux)`
-feeds the checkout-free App reporter; advisory conclusions never affect
-`Required CI`.
+validation remains authoritative on NVIDIA Linux. Only the aggregate whose name
+starts with `Candidate CI (Linux)` and records the exact policy/base binding
+feeds the checkout-free App reporter; advisory conclusions never affect the
+base-specific required verdict.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior
 change, even when the workflow inputs remain unchanged. While evaluating a

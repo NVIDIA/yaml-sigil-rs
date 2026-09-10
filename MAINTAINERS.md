@@ -35,9 +35,11 @@ configuration or scripts that materialize a candidate, bind a pull request,
 report `Required CI`, or control a release.
 
 Review the complete base-to-head diff. Confirm that the head is rebased onto
-current `main`, its commits are linear, and each human-authored commit is
-GitHub Verified and DCO-compliant. Recheck after either `main` or the head
-moves.
+its exact current base, its commits are linear, and each human-authored commit
+is GitHub Verified and DCO-compliant. Route compatible work and every protected-
+policy change to `main`. Route breaking or dependent next-line work only to an
+advertised, protected `dev/MAJOR.MINOR.PATCH` coordination branch. Recheck after
+the base, protected `main` policy, or head moves.
 
 ### Test an ordinary pull request
 
@@ -58,6 +60,39 @@ moves.
 4. If the PR head or `main` changes, rebase, review, and authorize the new
    exact head. Never reuse a stale command or verdict.
 
+### Test a coordination-line pull request
+
+Use this only after a `dev/MAJOR.MINOR.PATCH` base has been explicitly
+activated, advertised, and protected. Landing this runbook or its workflow
+support does not activate a line.
+
+1. Record the full current protected-policy, contribution-base, and candidate
+   objects:
+
+   ```shell
+   gh api repos/NVIDIA/yaml-sigil-rs/git/ref/heads/main --jq .object.sha
+   gh api repos/NVIDIA/yaml-sigil-rs/git/ref/heads/dev/MAJOR.MINOR.PATCH \
+     --jq .object.sha
+   gh pr view <PR-URL> --json baseRefName,baseRefOid,headRefOid
+   ```
+
+2. Require the pull request to target the recorded coordination ref and its
+   base SHA. Require its workflow and root Cargo configuration to match exact
+   protected `main`; the coordination line cannot admit its own policy.
+3. Review the exact head, then use the same `/ok to test <HEAD-SHA>` command.
+4. Require App-owned
+   `Required CI [refs/heads/dev/MAJOR.MINOR.PATCH]` on that exact head. The
+   ordinary `Required CI` context and a result for another line do not count.
+5. Immediately before integration, reread all three objects, the open pull
+   request, reviews, and the exact required context. Any movement requires a
+   fresh rebase, review, and test. Use default squash until the line's optional
+   writer-preserved intake procedure has separately passed its readiness test.
+
+After source integration, require the secretless coordination-branch Linux
+result, inspect advisory hosts, and require zero retained artifacts. No
+coordination ref may trigger publication, a protected environment, App-token
+minting, or a tag or Release mutation.
+
 ### Test a protected-policy change
 
 The reporter deliberately rejects a candidate `ci.yml` that differs from
@@ -66,8 +101,8 @@ protected current `main`. Do not weaken that binding to make a proposal pass.
 1. Complete the same exact-head review. Confirm the staging workflow has no
    publication, OIDC, protected environment, secret, cache-save, or retained
    artifact path.
-2. The maintainer permitted by the current `ci-testing/*` ruleset pushes the
-   exact reviewed, current-with-`main` head without force to a new
+2. A writer permitted by the live rules for `ci-testing/*` pushes the exact
+   reviewed, current-with-`main` head without force to a new
    `ci-testing/<purpose>-<YYYYMMDD>` branch:
 
    ```shell
@@ -84,12 +119,11 @@ protected current `main`. Do not weaken that binding to make a proposal pass.
    contributor admission changed, run one inert outside-account canary and
    close it without merging.
 6. After the pull-request lifecycle and every bound run are terminal, read the
-   exact `ci-testing/*` ref. Treat an already absent ref as clean. If it is
-   present, do not attempt deletion while current ruleset `22299699` (`Protect
-   CI testing branch history`) blocks every actor. Remediating that setting is
-   a separate administrator-authorized task. Only afterward, require the ref
-   still equals the staged SHA before one deletion, then prove it is absent.
-   Stop if the ref moved or the result is ambiguous.
+   exact `ci-testing/*` ref and its live deletion rules. Treat an already absent
+   ref as clean. If the rules block deletion, stop for a separately authorized
+   settings transaction. Otherwise, require the ref still equals the staged
+   SHA before one deletion, then prove it is absent. Stop if the ref moved or
+   the result is ambiguous.
 
 For a release-policy change, also use the validation-only procedure in
 `RELEASING.md`. Never exercise publication from `ci-testing/*`.
@@ -98,16 +132,16 @@ An external contributor cannot stage an upstream `ci-testing/*` ref. The
 permitted maintainer may stage the contributor's exact reviewed commit; that
 does not authorize integration.
 
-The current `yaml-sigil-rs` ruleset restricts creation and update of
-`ci-testing/*` to its configured bypass maintainer. Another writer must use
-that maintainer or obtain a separately reviewed ruleset change.
+A writer whom the live `ci-testing/*` rules do not permit must use an eligible
+maintainer or obtain a separately reviewed ruleset change.
 
 ### Merge an accepted, passing pull request
 
 #### Default squash
 
-1. Re-read the exact head and current base. Require App-owned `Required CI`
-   success, resolved review threads, verified signatures, DCO, and explicit
+1. Re-read the exact head and current base. Require the App-owned verdict for
+   that exact base—`Required CI` for `main`, or the base-specific coordination
+   context—plus resolved review threads, verified signatures, DCO, and explicit
    merge authorization.
 2. Guard the merge against head drift:
 
@@ -121,7 +155,9 @@ that maintainer or obtain a separately reviewed ruleset change.
 3. Verify the merge commit has one parent, its tree equals the reviewed head,
    GitHub marks it Verified, its DCO trailer is correct, and it is associated
    with the pull request.
-4. Require current-main CI success with zero retained artifacts.
+4. Require CI success on the updated destination with zero retained artifacts. A
+   `main` merge must also leave release qualification as a no-op unless it is
+   the separately prepared release pull request.
 
 #### Preserve exact commits
 
@@ -133,10 +169,10 @@ authorization alone does not create that path.
 ### Merge with accepted failing checks
 
 - Bind each failure to the exact head, run, and job.
-- If App-owned `Required CI` succeeded and only a documented advisory check
-  failed, obtain explicit acceptance of that failure and use the normal squash
-  path.
-- A candidate-caused `Required CI` failure remains merge-blocking. The
+- If the App-owned verdict required for the exact base succeeded and only a
+  documented advisory check failed, obtain explicit acceptance of that failure
+  and use the normal squash path.
+- A candidate-caused required-verdict failure remains merge-blocking. The
   exceptional transaction is eligible only when exact evidence proves that
   the reviewed protected-policy change itself prevents the current check
   mechanism from evaluating it, or a platform outage prevents check creation,

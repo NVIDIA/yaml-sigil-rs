@@ -54,6 +54,23 @@ cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
 Official RC and stable publication rejects an unsynchronized or dirty source
 tree. Pull requests do not publish preview versions.
 
+## Choose the pull-request base
+
+Target `main` for changes compatible with the current public API. A maintainer
+may advertise one protected `dev/MAJOR.MINOR.PATCH` coordination branch for a
+breaking API or behavior change, work that depends on that unpromoted change,
+or its migration documentation and tests. Do not invent a coordination branch.
+When compatibility is uncertain, ask a maintainer before opening the pull
+request.
+
+Apply a fix needed by both lines to `main` first; the release coordinator moves
+it forward. Protected CI, admission, and release-policy changes always target
+`main`. Releases are prepared only from qualified `main`.
+
+Squash is the default integration method on either base. A trusted writer may
+preserve an intentional commit series only through the separately authorized
+procedure in [`MAINTAINERS.md`](MAINTAINERS.md).
+
 ## Pull-request CI
 
 The repository uses `copy-pr-bot` for explicit contributor admission. A
@@ -70,9 +87,13 @@ new head.
 
 The exact-head command is the sole per-head human admission step. After the
 authoritative candidate lanes finish, the protected reporter repeats every
-live binding and the App writes `Required CI` automatically. Release
+live binding and the App writes `Required CI` for `main`, or
+`Required CI [refs/heads/dev/MAJOR.MINOR.PATCH]` for the exact active
+coordination base. A result for one base never satisfies another. Release
 finalization has a separate reviewer gate and cannot authorize a candidate or
 a different head.
+The authoritative aggregate job records its pre-execution protected-policy SHA
+and exact base ref/SHA; movement of either object invalidates the run.
 
 The copied `.github/workflows/ci.yml` must exactly match protected current
 `main`. Coordinate a proposed change to that workflow with a maintainer
@@ -85,24 +106,26 @@ receives no repository credential, secret, OIDC permission, protected
 environment, trusted cache-save path, or retained artifact. No privileged
 post-step consumes candidate-writable state.
 
-Every human-authored pull-request commit must form a linear history from
-current `main`, be GitHub Verified, and contain the exact DCO identity required
-for that author. A writer's command authorizes testing only and does not
-authorize integration.
+Every human-authored pull-request commit must form a linear history from the
+exact current pull-request base, be GitHub Verified, and contain the exact DCO
+identity required for that author. A writer's command authorizes testing only
+and does not authorize integration.
 
-Before final authorization, fetch current upstream `main`, rebase the original
-contributor branch with `git rebase --gpg-sign <upstream>/main`, and push the
-rewritten branch back to the same fork with `--force-with-lease`. Confirm every
-rewritten commit is GitHub Verified and DCO-compliant, then request testing for
-the new exact SHA.
+Before final authorization, fetch the current upstream pull-request base,
+rebase the original contributor branch onto that exact ref with
+`git rebase --gpg-sign`, and push the rewritten branch back to the same fork
+with an exact lease. Confirm every rewritten commit is GitHub Verified and
+DCO-compliant, then request testing for the new exact SHA.
 
-The authoritative candidate result is `Candidate CI (Linux)` on the NVIDIA
-runner. A separate protected, checkout-free reporter binds the workflow ID,
-run and attempt, repository, open pull request, copied ref, current head,
+The authoritative candidate result is the NVIDIA-runner aggregate whose name
+starts with `Candidate CI (Linux)` and records the exact protected-policy and
+base objects. A separate protected, checkout-free reporter binds the workflow
+ID, run and attempt, repository, open pull request, copied ref, current head,
 authoritative job conclusion, and zero-artifact result before the
-repository-scoped App creates `Required CI` on that exact head. Stable macOS
-and Windows jobs are advisory and cannot influence the required verdict. The
-independent Rust `1.95.0` Linux lane protects the documented minimum version.
+repository-scoped App creates the base-specific required verdict described
+above. Stable macOS and Windows jobs are advisory and cannot influence that
+verdict. The independent Rust `1.95.0` Linux lane protects the documented
+minimum version.
 
 #### Signing Off Your Work
 

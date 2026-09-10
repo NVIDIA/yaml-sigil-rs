@@ -41,7 +41,7 @@ jobs:
           test -s "${RUNNER_TEMP}/required-ci/reporter.py"
           python3 -m py_compile "${RUNNER_TEMP}/required-ci/reporter.py"
 
-      - name: Inspect exact copied-ref result
+      - name: Inspect exact-base copied-ref result
         id: inspect
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -53,7 +53,6 @@ jobs:
           --workflow-id "333755871"
           --workflow-path ".github/workflows/ci.yml"
           --job-name "Candidate CI (Linux)"
-          --check-name "Required CI"
           --app-slug "nvidia-yamlsigil-release-pr"
 
       # Mint only a checks token scoped to this repository after the complete
@@ -70,7 +69,7 @@ jobs:
 
       # Re-read every live binding immediately before the existing App creates
       # the sole protected required-check verdict.
-      - name: Create exact-head Required CI
+      - name: Create exact-base required check
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
@@ -83,5 +82,4 @@ jobs:
           --workflow-id "333755871"
           --workflow-path ".github/workflows/ci.yml"
           --job-name "Candidate CI (Linux)"
-          --check-name "Required CI"
           --app-slug "nvidia-yamlsigil-release-pr"
