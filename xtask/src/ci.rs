@@ -118,28 +118,6 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         args: &["test", "--locked", "--manifest-path", "xtask/Cargo.toml"],
     },
     Step {
-        label: "core-only downstream facade test",
-        program: "cargo",
-        args: &[
-            "test",
-            "--manifest-path",
-            "tests/downstream/Cargo.toml",
-            "--package",
-            "yaml-sigil-core-downstream-core-only",
-        ],
-    },
-    Step {
-        label: "independent Buffa downstream facade test",
-        program: "cargo",
-        args: &[
-            "test",
-            "--manifest-path",
-            "tests/downstream/Cargo.toml",
-            "--package",
-            "yaml-sigil-core-downstream-buffa-0-5",
-        ],
-    },
-    Step {
         label: "Unused Rust dependencies",
         program: "cargo-machete",
         args: &["--with-metadata"],

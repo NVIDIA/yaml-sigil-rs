@@ -26,13 +26,22 @@ fn capability_yaml_roundtrip() {
 }
 
 #[test]
-fn capability_protobuf_facade_decode_encode_roundtrip() {
-    use yaml_sigil_core::pb::{SignedYamlArtifact, YamlSigilSignature};
+fn capability_buffa_decode_encode_roundtrip() {
+    use buffa::MessageField;
+    use yaml_sigil_core::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
     use yaml_sigil_core::{decode_signed_yaml_artifact, encode_signed_yaml_artifact};
 
-    let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
-    let outer = SignedYamlArtifact::new(b"k: v\n".to_vec(), Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let inner = YamlSigilSignature {
+        alg: Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL.into(),
+        signature: vec![1, 2, 3],
+        ..Default::default()
+    };
+    let outer = SignedYamlArtifact {
+        payload: b"k: v\n".to_vec(),
+        signature: MessageField::from(inner),
+        ..Default::default()
+    };
+    let wire = encode_signed_yaml_artifact(&outer);
     let back = decode_signed_yaml_artifact(&wire).unwrap();
-    assert_eq!(back.payload(), outer.payload());
+    assert_eq!(back.payload, outer.payload);
 }

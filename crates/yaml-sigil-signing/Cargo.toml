@@ -39,6 +39,7 @@ workspace = true
 
 [dependencies]
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+buffa = { workspace = true }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 p256 = { version = "0.13.2", features = ["ecdsa"] }
 thiserror = "2"

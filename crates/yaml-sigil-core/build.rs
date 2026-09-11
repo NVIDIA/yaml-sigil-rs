@@ -41,8 +41,6 @@ fn main() {
     buffa_build::Config::new()
         .files(std::slice::from_ref(&proto_relative))
         .descriptor_set(descriptor_path)
-        .generate_views(true)
-        .preserve_unknown_fields(true)
         .include_file("yaml_sigil_include.rs")
         .compile()
         .expect("buffa codegen failed");

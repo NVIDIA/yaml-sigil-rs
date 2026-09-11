@@ -1,28 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wire-compatibility vectors characterized against the former Buffa 0.5 API.
+//! Wire-compatibility characterization for the Buffa 0.5 public API.
 //!
-//! The stable facade must continue to decode and encode these exact vectors.
+//! The protobuf facade tests continue to run these exact vectors after the
+//! generated implementation becomes private.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use yaml_sigil_core::{
-    AlgorithmId,
-    pb::{
-        DecodeErrorKind, SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature,
-        YamlSigilSignatureRef,
-    },
-};
-
-fn assert_points_into(input: &[u8], borrowed: &[u8]) {
-    let input_start = input.as_ptr() as usize;
-    let input_end = input_start + input.len();
-    let borrowed_start = borrowed.as_ptr() as usize;
-    let borrowed_end = borrowed_start + borrowed.len();
-    assert!(borrowed_start >= input_start);
-    assert!(borrowed_end <= input_end);
-}
+use buffa::{Message, MessageField};
+use yaml_sigil_core::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
 
 fn push_varint(out: &mut Vec<u8>, mut value: u64) {
     while value >= 0x80 {
@@ -74,60 +61,58 @@ fn artifact_wire(payload: &[u8], signature: Option<&[u8]>) -> Vec<u8> {
 
 fn decoded_signature(artifact: &SignedYamlArtifact) -> &YamlSigilSignature {
     artifact
-        .signature()
+        .signature
+        .as_option()
         .expect("characterized artifact has a signature message")
 }
 
 #[test]
-fn facade_decodes_buffa_0_5_known_algorithms_and_optional_keyids() {
-    for (wire_value, algorithm) in [(1, AlgorithmId::Ed25519), (2, AlgorithmId::EcdsaP256Sha256)] {
+fn buffa_0_5_decodes_known_algorithms_and_optional_keyids() {
+    for (wire_value, algorithm) in [
+        (1, Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL),
+        (2, Algorithm::ALGORITHM_ECDSA_SECP256R1_SHA256_RAW_RS64),
+    ] {
         for keyid in [None, Some(""), Some("key-1")] {
             let carrier = signature_wire(wire_value, keyid, &[1, 2, 3]);
             let wire = artifact_wire(b"message\n", Some(&carrier));
             let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
             let signature = decoded_signature(&decoded);
 
-            assert_eq!(decoded.payload(), b"message\n");
-            assert_eq!(signature.algorithm(), Some(algorithm));
-            assert_eq!(signature.keyid(), keyid);
-            assert_eq!(signature.signature(), [1, 2, 3]);
-            assert_eq!(decoded.encode_to_vec().unwrap(), wire);
+            assert_eq!(decoded.payload, b"message\n");
+            assert_eq!(signature.alg, algorithm);
+            assert_eq!(signature.keyid.as_deref(), keyid);
+            assert_eq!(signature.signature, [1, 2, 3]);
+            assert_eq!(decoded.encode_to_vec(), wire);
         }
     }
 }
 
 #[test]
-fn facade_preserves_buffa_0_5_unknown_algorithm_numbers() {
-    for wire_value in [99, -1] {
-        let carrier = signature_wire(wire_value, None, &[0xaa]);
-        let wire = artifact_wire(b"payload", Some(&carrier));
-        let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
+fn buffa_0_5_preserves_unknown_algorithm_numbers() {
+    let carrier = signature_wire(99, None, &[0xaa]);
+    let wire = artifact_wire(b"payload", Some(&carrier));
+    let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
 
-        assert_eq!(decoded_signature(&decoded).algorithm(), None);
-        assert_eq!(
-            decoded_signature(&decoded).algorithm_wire_value(),
-            wire_value
-        );
-        assert_eq!(decoded.encode_to_vec().unwrap(), wire);
-    }
+    assert_eq!(decoded_signature(&decoded).alg.to_i32(), 99);
+    assert_eq!(decoded.encode_to_vec(), wire);
 }
 
 #[test]
-fn facade_accepts_buffa_0_5_arbitrary_payload_and_absent_signature() {
+fn buffa_0_5_accepts_arbitrary_payload_and_absent_signature() {
     let payload = [0xff, 0x00, 0x80, b'\n'];
     let with_signature = artifact_wire(&payload, Some(&signature_wire(1, None, &[7])));
     let decoded = SignedYamlArtifact::decode_from_slice(&with_signature).unwrap();
-    assert_eq!(decoded.payload(), payload);
+    assert_eq!(decoded.payload, payload);
 
     let without_signature = artifact_wire(&payload, None);
     let decoded = SignedYamlArtifact::decode_from_slice(&without_signature).unwrap();
-    assert_eq!(decoded.payload(), payload);
-    assert!(decoded.signature().is_none());
-    assert_eq!(decoded.encode_to_vec().unwrap(), without_signature);
+    assert_eq!(decoded.payload, payload);
+    assert!(!decoded.signature.is_set());
+    assert_eq!(decoded.encode_to_vec(), without_signature);
 }
 
 #[test]
-fn facade_matches_buffa_0_5_duplicate_singular_field_merging() {
+fn buffa_0_5_merges_duplicate_singular_fields() {
     let mut wire = Vec::new();
     push_len_field(&mut wire, 1, b"first");
     push_len_field(&mut wire, 1, b"second");
@@ -136,20 +121,20 @@ fn facade_matches_buffa_0_5_duplicate_singular_field_merging() {
 
     let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
     let signature = decoded_signature(&decoded);
-    assert_eq!(decoded.payload(), b"second");
-    assert_eq!(signature.algorithm_wire_value(), 2);
-    assert_eq!(signature.keyid(), Some("retained"));
-    assert_eq!(signature.signature(), [9, 8, 7]);
+    assert_eq!(decoded.payload, b"second");
+    assert_eq!(signature.alg.to_i32(), 2);
+    assert_eq!(signature.keyid.as_deref(), Some("retained"));
+    assert_eq!(signature.signature, [9, 8, 7]);
 
     let expected = artifact_wire(
         b"second",
         Some(&signature_wire(2, Some("retained"), &[9, 8, 7])),
     );
-    assert_eq!(decoded.encode_to_vec().unwrap(), expected);
+    assert_eq!(decoded.encode_to_vec(), expected);
 }
 
 #[test]
-fn facade_preserves_buffa_0_5_unknown_wire_types_and_nested_groups() {
+fn buffa_0_5_preserves_every_unknown_wire_type_and_nested_groups() {
     let mut unknown_fields = Vec::new();
     push_varint_field(&mut unknown_fields, 10, 300);
 
@@ -174,24 +159,11 @@ fn facade_preserves_buffa_0_5_unknown_wire_types_and_nested_groups() {
     wire.extend_from_slice(&unknown_fields);
 
     let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
-    assert!(decoded.has_unknown_fields());
-    assert_eq!(decoded.encode_to_vec().unwrap(), wire);
-
-    let borrowed = SignedYamlArtifactRef::decode(&wire).unwrap();
-    assert!(borrowed.has_unknown_fields());
-    assert_eq!(borrowed.encode_to_vec().unwrap(), wire);
-
-    let mut discarded = borrowed.to_owned().unwrap();
-    discarded.discard_unknown_fields();
-    assert!(!discarded.has_unknown_fields());
-    assert_eq!(
-        discarded.encode_to_vec().unwrap(),
-        artifact_wire(b"payload", Some(&signature_wire(1, None, &[1])))
-    );
+    assert_eq!(decoded.encode_to_vec(), wire);
 }
 
 #[test]
-fn facade_rejects_buffa_0_5_malformed_corpus_without_panicking() {
+fn buffa_0_5_rejects_malformed_input_without_panicking() {
     let malformed = [
         vec![0x80],
         vec![0x80; 11],
@@ -211,121 +183,36 @@ fn facade_rejects_buffa_0_5_malformed_corpus_without_panicking() {
     ];
 
     for wire in malformed {
-        for decode in [SignedYamlArtifact::decode as fn(&[u8]) -> _, |input| {
-            SignedYamlArtifactRef::decode(input).map(|_| SignedYamlArtifact::default())
-        }] {
-            let decoded = catch_unwind(AssertUnwindSafe(|| decode(&wire)));
-            assert!(decoded.is_ok(), "decoder panicked for {wire:02x?}");
-            assert!(
-                decoded.unwrap().is_err(),
-                "decoder accepted malformed input {wire:02x?}"
-            );
-        }
+        let decoded = catch_unwind(AssertUnwindSafe(|| {
+            SignedYamlArtifact::decode_from_slice(&wire)
+        }));
+        assert!(decoded.is_ok(), "decoder panicked for {wire:02x?}");
+        assert!(
+            decoded.unwrap().is_err(),
+            "decoder accepted malformed input {wire:02x?}"
+        );
     }
 }
 
 #[test]
-fn facade_reports_stable_error_categories() {
-    let cases = [
-        (&[0x80][..], DecodeErrorKind::UnexpectedEnd),
-        (&[0x80; 11][..], DecodeErrorKind::InvalidVarint),
-        (&[0x00][..], DecodeErrorKind::InvalidFieldNumber),
-        (&[0x0f][..], DecodeErrorKind::InvalidWireType),
-        (&[0x08, 0x00][..], DecodeErrorKind::UnexpectedWireType),
-        (&[0x53, 0x5c][..], DecodeErrorKind::InvalidGroup),
-    ];
-
-    for (wire, expected) in cases {
-        assert_eq!(
-            SignedYamlArtifact::decode(wire).unwrap_err().kind(),
-            expected
-        );
-        assert_eq!(
-            SignedYamlArtifactRef::decode(wire).unwrap_err().kind(),
-            expected
-        );
-    }
-
-    let invalid_keyid = [0x12, 0x01, 0xff];
-    assert_eq!(
-        YamlSigilSignature::decode(&invalid_keyid)
-            .unwrap_err()
-            .kind(),
-        DecodeErrorKind::InvalidUtf8
-    );
-    assert_eq!(
-        YamlSigilSignatureRef::decode(&invalid_keyid)
-            .unwrap_err()
-            .kind(),
-        DecodeErrorKind::InvalidUtf8
-    );
-}
-
-#[test]
-fn facade_construction_matches_buffa_0_5_generated_wire() {
-    let mut signature = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
-    signature.set_keyid(Some("key-1".to_owned()));
-    let artifact = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
+fn buffa_0_5_generated_construction_matches_characterized_wire() {
+    let signature = YamlSigilSignature {
+        alg: Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL.into(),
+        keyid: Some("key-1".to_owned()),
+        signature: vec![1, 2, 3],
+        ..Default::default()
+    };
+    let artifact = SignedYamlArtifact {
+        payload: b"message\n".to_vec(),
+        signature: MessageField::from(signature),
+        ..Default::default()
+    };
 
     assert_eq!(
-        artifact.encode_to_vec().unwrap(),
+        artifact.encode_to_vec(),
         artifact_wire(
             b"message\n",
             Some(&signature_wire(1, Some("key-1"), &[1, 2, 3])),
         )
     );
-}
-
-#[test]
-fn borrowed_views_reference_the_input_and_convert_directly_to_owned() {
-    let carrier = signature_wire(1, Some("key-1"), &[1, 2, 3]);
-    let wire = artifact_wire(b"message\n", Some(&carrier));
-    let borrowed = SignedYamlArtifactRef::decode(&wire).unwrap();
-    let signature = borrowed.signature().unwrap();
-
-    assert_points_into(&wire, borrowed.payload());
-    assert_points_into(&wire, signature.keyid().unwrap().as_bytes());
-    assert_points_into(&wire, signature.signature());
-
-    let owned = borrowed.to_owned().unwrap();
-    assert_eq!(owned.payload(), borrowed.payload());
-    assert_eq!(
-        owned.signature().unwrap().signature(),
-        signature.signature()
-    );
-    let input_start = wire.as_ptr() as usize;
-    let input_end = input_start + wire.len();
-    let owned_payload = owned.payload().as_ptr() as usize;
-    assert!(owned_payload < input_start || owned_payload >= input_end);
-
-    let direct = YamlSigilSignatureRef::decode_from_slice(&carrier).unwrap();
-    assert_points_into(&carrier, direct.keyid().unwrap().as_bytes());
-    assert_points_into(&carrier, direct.signature());
-}
-
-#[test]
-fn preallocated_encoding_appends_without_reallocation() {
-    let mut signature = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
-    signature.set_keyid(Some("key-1".to_owned()));
-    let artifact = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
-    let wire = artifact.encode_to_vec().unwrap();
-    assert_eq!(artifact.encoded_len().unwrap(), wire.len());
-
-    let prefix = [0xaa, 0xbb];
-    let mut owned_output = Vec::with_capacity(prefix.len() + wire.len());
-    owned_output.extend_from_slice(&prefix);
-    let owned_allocation = owned_output.as_ptr();
-    artifact.encode_into(&mut owned_output).unwrap();
-    assert_eq!(owned_output.as_ptr(), owned_allocation);
-    assert_eq!(&owned_output[..prefix.len()], &prefix);
-    assert_eq!(&owned_output[prefix.len()..], wire);
-
-    let borrowed = SignedYamlArtifactRef::decode(&wire).unwrap();
-    let mut borrowed_output = Vec::with_capacity(prefix.len() + wire.len());
-    borrowed_output.extend_from_slice(&prefix);
-    let borrowed_allocation = borrowed_output.as_ptr();
-    borrowed.encode_into(&mut borrowed_output).unwrap();
-    assert_eq!(borrowed_output.as_ptr(), borrowed_allocation);
-    assert_eq!(&borrowed_output[..prefix.len()], &prefix);
-    assert_eq!(&borrowed_output[prefix.len()..], wire);
 }

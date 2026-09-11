@@ -473,8 +473,9 @@ fn verify_ed25519_wrong_key_fails() {
 
 #[test]
 fn verify_ed25519_rejects_direct_weak_public_key() {
+    use buffa::MessageField;
     use yaml_sigil_core::encode_signed_yaml_artifact;
-    use yaml_sigil_core::pb::{SignedYamlArtifact, YamlSigilSignature};
+    use yaml_sigil_core::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
 
     // The identity point is a valid typed dalek key but is small-order. Pairing
     // it with identity R and zero S satisfies dalek's ordinary verification
@@ -487,9 +488,17 @@ fn verify_ed25519_rejects_direct_weak_public_key() {
 
     let mut forged_signature = vec![0u8; 64];
     forged_signature[0] = 1;
-    let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, forged_signature);
-    let outer = SignedYamlArtifact::new(b"attacker: chosen\n".to_vec(), Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let inner = YamlSigilSignature {
+        alg: Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL.into(),
+        signature: forged_signature,
+        ..Default::default()
+    };
+    let outer = SignedYamlArtifact {
+        payload: b"attacker: chosen\n".to_vec(),
+        signature: MessageField::from(inner),
+        ..Default::default()
+    };
+    let wire = encode_signed_yaml_artifact(&outer);
 
     let error = verify_proto(
         &wire,
@@ -702,8 +711,9 @@ fn verify_yaml_unknown_alg_is_malformed() {
 
 #[test]
 fn verify_proto_accepts_non_yaml_fit_payload() {
+    use buffa::MessageField;
     use yaml_sigil_core::encode_signed_yaml_artifact;
-    use yaml_sigil_core::pb::{SignedYamlArtifact, YamlSigilSignature};
+    use yaml_sigil_core::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
 
     // The protobuf form imposes no UTF-8 / BOM / line-terminator rule on the
     // payload. An artifact whose payload would never be YAML-fit (here, a
@@ -711,9 +721,17 @@ fn verify_proto_accepts_non_yaml_fit_payload() {
     // structurally. The placeholder all-zero signature still won't verify,
     // so the outcome is `SignedButFailedVerification`. See
     // docs/conformance-validation.md §3f and §5.r (§5b resolved).
-    let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![0u8; 64]);
-    let outer = SignedYamlArtifact::new(vec![0xEF, 0xBB, 0xBF, b'h', b'i', b'\n'], Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let inner = YamlSigilSignature {
+        alg: Algorithm::ALGORITHM_ED25519_PUREEDDSA_RAW_RS64_CANONICAL.into(),
+        signature: vec![0u8; 64],
+        ..Default::default()
+    };
+    let outer = SignedYamlArtifact {
+        payload: vec![0xEF, 0xBB, 0xBF, b'h', b'i', b'\n'],
+        signature: MessageField::from(inner),
+        ..Default::default()
+    };
+    let wire = encode_signed_yaml_artifact(&outer);
     let (_, vk) = ed25519_pair();
     let st = verify_proto(
         &wire,
@@ -729,13 +747,21 @@ fn verify_proto_accepts_non_yaml_fit_payload() {
 
 #[test]
 fn verify_proto_unspecified_alg_wire() {
+    use buffa::MessageField;
     use yaml_sigil_core::encode_signed_yaml_artifact;
-    use yaml_sigil_core::pb::{SignedYamlArtifact, YamlSigilSignature};
+    use yaml_sigil_core::pb::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
 
-    let mut inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
-    inner.set_algorithm_wire_value(0);
-    let outer = SignedYamlArtifact::new(b"ok\n".to_vec(), Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let inner = YamlSigilSignature {
+        alg: Algorithm::ALGORITHM_UNSPECIFIED.into(),
+        signature: vec![1, 2, 3],
+        ..Default::default()
+    };
+    let outer = SignedYamlArtifact {
+        payload: b"ok\n".to_vec(),
+        signature: MessageField::from(inner),
+        ..Default::default()
+    };
+    let wire = encode_signed_yaml_artifact(&outer);
     let keys = PublicKeys {
         ed25519: None,
         p256: None,

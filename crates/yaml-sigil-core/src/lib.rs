@@ -2,26 +2,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Shared YamlSigil v1alpha1 primitives: artifact decomposition, payload invariants,
-//! algorithm string mapping, and stable protobuf wire types.
-
-mod generated_proto {
-    #![allow(clippy::all)]
-    #![allow(dead_code)]
-    #![allow(missing_docs)]
-    include!(concat!(env!("OUT_DIR"), "/yaml_sigil_include.rs"));
-}
+//! algorithm string mapping, and protobuf wire types via `buffa`.
 
 pub mod algorithm;
 pub mod conformance;
 pub mod decomposition;
 pub mod error;
 pub mod payload;
-pub mod pb;
 pub mod proto_outer;
 pub mod signature_doc;
 #[cfg(feature = "json-schema-validate")]
 pub mod tier_a_schema;
 pub mod wire;
+
+/// Generated protobuf message types.
+///
+/// # Resource usage
+///
+/// These types implement [`buffa::Message`] and expose its direct decode and merge APIs. Those
+/// APIs impose no deployment-specific size limits on artifact, payload, or signature-carrier
+/// data. Decoding copies length-delimited fields into owned message buffers, so allocation and
+/// copying are linear in field size. Callers handling untrusted data must enforce
+/// deployment-appropriate size limits before decoding. Direct consumers can set a top-level input
+/// bound with [`buffa::DecodeOptions::with_max_message_size`] and then decode through
+/// [`buffa::DecodeOptions::decode_from_slice`].
+pub mod pb {
+    #![allow(clippy::all)]
+    #![allow(dead_code)]
+    #![allow(missing_docs)]
+    include!(concat!(env!("OUT_DIR"), "/yaml_sigil_include.rs"));
+    pub use self::yaml_sigil::v1alpha1::{Algorithm, SignedYamlArtifact, YamlSigilSignature};
+}
 
 pub use algorithm::{AlgorithmId, SCHEMA_V1ALPHA1};
 pub use conformance::{
