@@ -49,8 +49,7 @@ impl SignatureDocument {
 /// The parser accepts at most 16 KiB and independently limits nesting depth,
 /// parser events, constructed nodes, cumulative scalar bytes, collection
 /// sizes, documents, merge keys, and alias expansion. It rejects anchors,
-/// aliases, and custom tags. The byte bound applies to the markerless YAML
-/// signature carrier, not the complete artifact.
+/// aliases, and custom tags.
 #[tracing::instrument(level = "debug", skip(bytes), fields(len = bytes.len()))]
 pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreError> {
     ensure_signature_document_byte_budget(bytes)?;

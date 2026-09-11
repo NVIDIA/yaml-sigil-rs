@@ -42,8 +42,8 @@ crates provide the shared document handling used by those higher-level APIs.
 This crate contains the document machinery shared by the other crates. It
 recognizes document boundaries, applies payload rules, reads and writes YAML
 signature documents, handles the protobuf wire format, and maps signature
-algorithms. It exposes a stable protobuf facade backed by private generated
-code from [`buffa`](https://crates.io/crates/buffa) and parses YAML with
+algorithms. It generates protobuf helpers with
+[`buffa`](https://crates.io/crates/buffa) and parses YAML with
 [`noyalib`](https://crates.io/crates/noyalib). Its optional
 `json-schema-validate` feature validates signature documents against the local
 schema.
@@ -128,58 +128,6 @@ file extension.
 
 YAML decompose and verify operations require complete artifacts because
 boundary selection uses the last constrained marker.
-
-### Resource boundaries
-
-YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
-size. Applications accepting potentially untrusted artifacts should select a
-deployment-appropriate input bound and apply it before calling core, signing,
-verification, transcription, or transcoding entry points. A deployment can
-choose a lower value, a higher value, or no additional whole-artifact limit.
-
-This example uses `4 MiB`. That value is also the intended default for future
-opt-in bounded APIs, but it is not a YamlSigil or gRPC protocol requirement.
-Current APIs do not enforce it.
-
-```rust
-use yaml_sigil_core::pb::SignedYamlArtifactRef;
-
-#[derive(Debug)]
-enum InputError {
-    ArtifactTooLarge,
-    InvalidProtobuf,
-}
-
-fn check_artifact_size(
-    artifact: &[u8],
-    maximum: Option<usize>,
-) -> Result<(), InputError> {
-    if maximum.is_some_and(|limit| artifact.len() > limit) {
-        return Err(InputError::ArtifactTooLarge);
-    }
-
-    Ok(())
-}
-
-fn inspect(input: &[u8]) -> Result<(), InputError> {
-    let deployment_limit = Some(4 * 1024 * 1024);
-    check_artifact_size(input, deployment_limit)?;
-    let _artifact = SignedYamlArtifactRef::decode(input)
-        .map_err(|_| InputError::InvalidProtobuf)?;
-    Ok(())
-}
-```
-
-Passing `None` to the application check selects no additional
-whole-artifact byte limit. Protobuf format limits, parser safeguards,
-address-space limits, allocator limits, and other deployment controls still
-apply. The existing 16,384-octet YAML signature-carrier constraint is
-independent of complete artifact size.
-
-A local whole-artifact rejection does not make an artifact malformed or
-non-conforming, and whole-artifact limits do not change conformance results.
-If an application checks produced bytes only after signing, composition, or
-transcoding, that check does not bound work or allocation already performed.
 
 ## Build
 

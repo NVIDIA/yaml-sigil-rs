@@ -87,15 +87,6 @@ an unnatural workaround.
 
 ## Import Review Notes
 
-- 2026-09-06: Replaced the public generated protobuf types with the
-  private-field `yaml_sigil_core::pb` facade. The Buffa 0.5 characterization
-  vectors and independent downstream fixture confirm the same field numbers,
-  known and unknown algorithm values, optional `keyid`, arbitrary payloads,
-  absent and duplicate fields, unknown fields, groups, and malformed-input
-  outcomes under Buffa 0.9.2. Owned decoding preserves unknown fields until an
-  explicit discard. Borrowed views retain input-backed fields. Specification
-  inputs, conformance fixture bytes, suite mappings, expected outcomes, and
-  notices are unchanged.
 - 2026-09-06: Reviewed and imported `yaml-sigil-spec` `origin/main` at
   `bcfa1e05a61fc27c6fd814a3910e7a24a560f038`. The specification delta since
   `07d76b3624265af9632568abcb4bac5143af5a8e` changes repository and
@@ -309,28 +300,11 @@ The parser rejects anchors, aliases, custom tags, and duplicate keys. The
 numeric parser-resource bounds are implementation-specific. YamlSigil
 standardizes only the 16,384-octet markerless carrier limit.
 
-## Whole-artifact resource policy
-
-YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
-size. A deployment may apply a smaller or larger whole-artifact bound, or no
-additional library-level bound. `4 MiB` is an example and the intended default
-for future opt-in bounded APIs, not a current YamlSigil or gRPC protocol
-requirement.
-
-Whole-artifact limits do not affect conformance results. Rejecting an artifact
-under a local resource policy does not make it malformed or non-conforming.
-The 16,384-octet markerless YAML signature-carrier constraint remains separate
-from complete artifact size. Protobuf format limits, parser safeguards,
-address-space limits, allocator limits, and deployment controls still apply
-when no additional whole-artifact bound is selected. A future `v1alpha2`
-specification may consider normative resource policy separately.
-
 ## Known Behaviors
 
-- `Verifier` advertises `AdvertisedConformanceProfile::Permissive`. The private
-  protobuf decoder behind the stable facade uses last-wins behavior for
-  duplicate inner fields, so advertising a stricter unified inner profile
-  would be misleading.
+- `Verifier` advertises `AdvertisedConformanceProfile::Permissive`. Stock
+  protobuf decoders use last-wins behavior for duplicate inner fields, so
+  advertising a stricter unified inner profile would be misleading.
 - Known YAML duplicate mapping keys are rejected during signature-document
   parsing under every profile. Unknown YAML fields also reject, which is
   stricter than `Permissive` requires.

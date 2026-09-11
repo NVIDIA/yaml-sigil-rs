@@ -801,8 +801,8 @@ fn verifier_capabilities_surface() {
     assert!(c.supports_pre_verify);
     // `DefaultVerifier` advertises Permissive unconditionally. The spec requires
     // Strict / SignatureStrict to reject duplicate known singular fields on
-    // both wire forms; the private protobuf decoder applies last-wins behavior
-    // to duplicate scalars, so Strict would be non-conforming. See
+    // both wire forms; the stock buffa decoder applies last-wins behavior to
+    // duplicate scalars, so Strict would be non-conforming. See
     // docs/conformance-validation.md.
     assert_eq!(
         c.conformance_profile,

@@ -59,8 +59,8 @@ const FIXTURES: &[ProtoFixture] = &[
         // follow-up that resolved §5a). Our `Transcriber::decompose` walks
         // only the outer envelope — the duplicate scalar is invisible to
         // it and the carrier bytes are returned as-is under both outer
-        // modes. The verifier's private protobuf decoder applies last-wins
-        // to duplicate scalars — verbatim Permissive
+        // modes. The verifier's inner-decode path uses stock buffa,
+        // which applies last-wins to duplicate scalars — verbatim Permissive
         // behavior. Our `verifier_capabilities()` advertises Permissive
         // unconditionally (see `docs/conformance-validation.md` §3g and
         // §5.r §5a "resolved upstream"); the spec's

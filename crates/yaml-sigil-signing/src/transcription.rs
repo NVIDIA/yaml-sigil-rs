@@ -6,15 +6,6 @@
 //! Empty decoded signature octets pass through here: rejection is the
 //! verifier's verification-stage responsibility (`MalformedAttemptedSigned`),
 //! not metadata extraction.
-//!
-//! # Resource boundaries
-//!
-//! Both transcoding directions accept a complete artifact and construct a
-//! complete output artifact. They add no deployment-specific whole-input or
-//! whole-output byte limit. Bound potentially untrusted input before either
-//! call, and apply any output policy to the returned bytes. Input and output
-//! limits are independent operational choices and do not determine YamlSigil
-//! `v1alpha1` conformance.
 
 use base64::Engine;
 use thiserror::Error;
@@ -101,8 +92,6 @@ fn proto_decompose(wire: &[u8]) -> Result<(Vec<u8>, Vec<u8>), TranscodeError> {
 }
 
 /// Convert a signed YAML artifact into protobuf `SignedYamlArtifact` wire bytes.
-///
-/// This function has the resource behavior documented on this module.
 #[instrument(level = "debug", skip(yaml_artifact), fields(len = yaml_artifact.len()))]
 pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>, TranscodeError> {
     let (payload, carrier) = yaml_decompose(yaml_artifact)?;
@@ -128,11 +117,10 @@ pub fn signed_yaml_stream_to_proto_wire(yaml_artifact: &[u8]) -> Result<Vec<u8>,
 ///
 /// # Resource usage
 ///
-/// This function adds no deployment-specific complete-artifact limit.
-/// Protobuf decomposition copies recognized fields into owned buffers, and
-/// conversion constructs an owned YAML stream. Work and allocation are linear
-/// in field and output size. Applications accepting potentially untrusted
-/// input should apply their chosen input bound before this call.
+/// The library imposes no universal artifact, payload, or signature-carrier size limit.
+/// Protobuf decomposition copies recognized fields into owned buffers, and conversion constructs
+/// an owned YAML stream. Allocation and copying are linear in field and output size. Callers
+/// handling untrusted data must enforce deployment-appropriate size limits before invocation.
 #[instrument(level = "debug", skip(wire), fields(len = wire.len()))]
 pub fn proto_wire_to_signed_yaml_stream(wire: &[u8]) -> Result<Vec<u8>, TranscodeError> {
     let (payload, carrier) = proto_decompose(wire)?;

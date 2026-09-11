@@ -30,12 +30,10 @@ pub fn compose_proto_outer(payload: &[u8], signature_carrier: &[u8]) -> Vec<u8> 
 ///
 /// # Resource usage
 ///
-/// YamlSigil `v1alpha1` defines no maximum complete artifact size, and this
-/// function adds no deployment-specific limit. It copies recognized fields
-/// into owned buffers with work and allocation linear in their total size.
-/// Applications accepting potentially untrusted input should apply their
-/// chosen whole-artifact bound before this call. A local resource rejection is
-/// independent of artifact conformance.
+/// The library imposes no universal artifact, payload, or signature-carrier size limit.
+/// Recognized fields are copied into owned buffers. Allocation and copying are linear in the
+/// total size of those fields. Callers handling untrusted data must enforce
+/// deployment-appropriate size limits before invoking this function.
 #[tracing::instrument(level = "debug", skip(wire), fields(len = wire.len(), ?mode))]
 pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterDecomposeOutcome {
     match crate::pb::decompose_raw_outer(wire, mode) {
@@ -54,9 +52,9 @@ pub fn decompose_proto_outer(wire: &[u8], mode: OuterConformance) -> ProtoOuterD
 ///
 /// # Resource usage
 ///
-/// This decoder adds no deployment-specific signature-carrier limit. It
-/// copies recognized fields into owned buffers with work and allocation
-/// linear in field size. Apply any local input bound before this call.
+/// This decoder imposes no universal signature-carrier size limit. It copies recognized fields
+/// into owned buffers, so allocation and copying are linear in field size. Callers handling
+/// untrusted data must enforce deployment-appropriate size limits before invocation.
 pub fn decode_signature_carrier(
     carrier: &[u8],
 ) -> Result<crate::pb::YamlSigilSignature, CoreError> {
