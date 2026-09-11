@@ -25,6 +25,5 @@ src/wire.rs
 tests/implementation_stack_smoke.rs
 tests/json_schema_signature_doc.rs
 tests/proto_outer_conformance.rs
-tests/protobuf_wire_compatibility.rs
 tests/yaml_signature_document_conformance.rs
 tests/yaml_signature_document_tier_a_schema.rs
