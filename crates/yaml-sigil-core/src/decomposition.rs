@@ -5,6 +5,8 @@
 
 use std::ops::Range;
 
+use crate::{ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult};
+
 /// Successful split of an artifact into payload and signature-document byte ranges.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignatureRanges {
@@ -90,8 +92,9 @@ fn find_last_marker(bytes: &[u8]) -> Option<usize> {
 /// Run Artifact Decomposition on UTF-8 artifact bytes with no prior YAML parse.
 ///
 /// This linear scan accepts a complete YAML artifact and does not impose an
-/// additional whole-artifact size limit. Apply any deployment-specific input
-/// bound before this call. The signature-carrier parser applies its separate
+/// additional whole-artifact size limit. Use
+/// [`decompose_artifact_with_resource_limits`] to apply the shared input
+/// policy first. The signature-carrier parser applies its separate
 /// 16,384-octet constraint after decomposition.
 #[tracing::instrument(level = "debug", skip(artifact), fields(len = artifact.len()))]
 pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
@@ -123,6 +126,17 @@ pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
     })
 }
 
+/// Run artifact decomposition after applying an explicit complete-input policy.
+///
+/// The raw input length is checked before UTF-8 validation or marker search.
+pub fn decompose_artifact_with_resource_limits(
+    artifact: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<DecompositionOutcome> {
+    let artifact = limits.check_input_size(ArtifactResourceForm::Yaml, artifact)?;
+    Ok(decompose_artifact(artifact))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +152,19 @@ mod tests {
             decompose_artifact(b"hello: world\n"),
             DecompositionOutcome::Unsigned
         );
+    }
+
+    #[test]
+    fn resource_limit_precedes_invalid_yaml_bytes() {
+        let limits = crate::ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(2).unwrap());
+        let error =
+            decompose_artifact_with_resource_limits(&[0xff, 0xfe, 0xfd], &limits).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            crate::ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(error.observed_or_projected_artifact_bytes(), Some(3));
     }
 
     #[test]

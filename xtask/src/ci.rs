@@ -140,6 +140,17 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         ],
     },
     Step {
+        label: "downstream resource API test",
+        program: "cargo",
+        args: &[
+            "test",
+            "--manifest-path",
+            "tests/downstream/Cargo.toml",
+            "--package",
+            "yaml-sigil-downstream-resource-api",
+        ],
+    },
+    Step {
         label: "Unused Rust dependencies",
         program: "cargo-machete",
         args: &["--with-metadata"],

@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "yaml-sigil-downstream-resource-api"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+yaml-sigil-core = { path = "../../../crates/yaml-sigil-core" }
+yaml-sigil-signing = { path = "../../../crates/yaml-sigil-signing" }
+yaml-sigil-transcription = { path = "../../../crates/yaml-sigil-transcription" }
+yaml-sigil-verification = { path = "../../../crates/yaml-sigil-verification" }
