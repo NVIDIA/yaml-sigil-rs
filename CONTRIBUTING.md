@@ -107,15 +107,16 @@ environment, trusted cache-save path, or retained artifact. No privileged
 post-step consumes candidate-writable state.
 
 Every human-authored pull-request commit must form a linear history from the
-exact current pull-request base, be GitHub Verified, and contain the exact DCO
-identity required for that author. A writer's command authorizes testing only
-and does not authorize integration.
+exact current pull-request base and contain the exact DCO identity required for
+that author. Cryptographic signatures are optional for ordinary contributor
+commits. A writer's command authorizes testing only and does not authorize
+integration.
 
 Before final authorization, fetch the current upstream pull-request base,
-rebase the original contributor branch onto that exact ref with
-`git rebase --gpg-sign`, and push the rewritten branch back to the same fork
-with an exact lease. Confirm every rewritten commit is GitHub Verified and
-DCO-compliant, then request testing for the new exact SHA.
+require the contributor branch to be linearly rebased onto that exact ref, and
+push any rewritten branch back to the same fork with an exact lease. Confirm
+every rewritten commit is DCO-compliant, then request testing for the new exact
+SHA.
 
 The authoritative candidate result is the NVIDIA-runner aggregate whose name
 starts with `Candidate CI (Linux)` and records the exact protected-policy and

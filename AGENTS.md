@@ -423,11 +423,10 @@ The surviving provider helpers have deliberately narrow roles:
 
 - `report_required_ci.py` and its focused fixture tests bind one terminal
   copied-ref run, its aggregate job's pre-execution policy/base attestation,
-  exact contribution base, protected current `main`, verified signer, raw
-  author/committer, and author DCO identities before the scoped App creates the
-  base-specific required verdict.
+  exact contribution base, protected current `main`, and raw-author DCO
+  identities before the scoped App creates the base-specific required verdict.
 - `bind-candidate-pr.py` anonymously binds the open pull request, exact
-  contribution base, protected current `main`, copied ref, verification
+  contribution base, protected current `main`, copied ref, ordered commit
   inventory, and optional main-only canonical release branch before source
   materialization.
 - `materialize-candidate.sh` and its tests perform anonymous exact-head
