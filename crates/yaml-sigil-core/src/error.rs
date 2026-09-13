@@ -11,6 +11,11 @@ pub enum CoreError {
     InvalidUtf8,
     #[error("protobuf decode error: {0}")]
     ProtobufDecode(String),
+    /// Unstable diagnostic text from YAML signature-document handling.
+    ///
+    /// The string is intended for human troubleshooting. Callers must not
+    /// parse or match it as a machine-readable error kind because its wording
+    /// can change with the private serialization backend.
     #[error("YAML signature document parse error: {0}")]
     SignatureYaml(String),
     #[error("invalid base64 in signature field")]
