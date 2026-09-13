@@ -68,14 +68,19 @@ pub fn decode_independent(input: &[u8]) -> Result<(Vec<u8>, i32, Vec<u8>), buffa
 #[cfg(test)]
 mod tests {
     use yaml_sigil_core::{
-        AlgorithmId,
+        AlgorithmId, ArtifactResourceLimits,
         pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
     };
 
     #[test]
     fn independently_generated_buffa_messages_exchange_bytes_with_the_facade() {
         let independent_wire = super::encode_independent();
-        let borrowed = SignedYamlArtifactRef::decode(&independent_wire).unwrap();
+        let borrowed = SignedYamlArtifactRef::decode_with_resource_limits(
+            &independent_wire,
+            &ArtifactResourceLimits::default(),
+        )
+        .unwrap()
+        .unwrap();
         let signature = borrowed.signature().unwrap();
         assert_eq!(borrowed.payload(), b"message\n");
         assert_eq!(signature.algorithm(), Some(AlgorithmId::Ed25519));
@@ -87,5 +92,12 @@ mod tests {
         let facade = SignedYamlArtifact::new(b"other\n".to_vec(), Some(facade_signature));
         let decoded = super::decode_independent(&facade.encode_to_vec().unwrap()).unwrap();
         assert_eq!(decoded, (b"other\n".to_vec(), 2, vec![4, 5, 6]));
+        assert_eq!(
+            borrowed
+                .encode_to_vec_with_resource_limits(&ArtifactResourceLimits::default())
+                .unwrap()
+                .unwrap(),
+            independent_wire
+        );
     }
 }
