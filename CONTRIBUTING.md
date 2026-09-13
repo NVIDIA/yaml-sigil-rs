@@ -71,6 +71,34 @@ Squash is the default integration method on either base. A trusted writer may
 preserve an intentional commit series only through the separately authorized
 procedure in [`MAINTAINERS.md`](MAINTAINERS.md).
 
+## Preserve serialization backend boundaries
+
+Serde is the intentional public data-model boundary for
+`yaml_sigil_core::SignatureDocument`. Keep every concrete serialization
+library, including the current YAML backend, private unless a separate API
+decision deliberately exposes it. Do not add backend types through public
+parameters, return values, trait bounds, associated types, re-exports, feature
+flags, or error variants.
+
+Preserve these boundaries when changing a serialization dependency:
+
+- Preserve the exact Serde field names, required fields, optional `keyid`
+  behavior, and unknown-field rejection documented on `SignatureDocument`.
+  Treat changes to that representation as public API changes under SemVer.
+- Keep `parse_signature_document` authoritative for untrusted YAML because it
+  applies YamlSigil's byte limit and parser policies.
+- Keep `serialize_signature_document` authoritative for canonical YAML output.
+- Treat `CoreError::SignatureYaml` text as an unstable human diagnostic that
+  callers must not parse.
+- Test Serde interoperability by comparing `SignatureDocument` values, not
+  serialized YAML bytes or presentation details.
+- Describe an exact-pinned downstream dependency test as characterization of
+  that selected release, not a permanent compatibility guarantee.
+
+Apply the same rules to any serialization library adopted later. A dependency
+visible in Cargo metadata or named as the current implementation does not make
+it a required consumer integration.
+
 ## Pull-request CI
 
 The repository uses `copy-pr-bot` for explicit contributor admission. A
