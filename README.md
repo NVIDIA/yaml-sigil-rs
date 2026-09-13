@@ -126,8 +126,9 @@ and deciding which public keys are trusted.
 ### Local cryptographic providers
 
 The signing and verification crates retain their RustCrypto convenience APIs
-and also accept synchronous local-provider adapters through the
-[`signature`](https://crates.io/crates/signature) 2.2 operation traits. This
+and also accept synchronous provider adapters through the
+[`signature`](https://crates.io/crates/signature) 2.2 operation traits and
+awaitable adapters through native async provider traits. This
 lets an adapter keep its private key or opaque key handle inside `ring`,
 `aws-lc-rs`, an HSM integration, or another local provider while YamlSigil
 continues to own payload preparation, artifact framing, public-key checks, and
@@ -141,6 +142,12 @@ public-only suite and tracks Ed25519 and P-256 independently. Explicitly named
 unqualified builders and operations are available when a caller deliberately
 accepts the narrower assurance.
 
+Direct `yaml-sigil-traits` implementations are also supported when you need
+to own the complete operation. The [provider guide](./docs/crypto-providers.md)
+explains the three choices, binding, async scheduling, optional limits, and
+the tested and untested boundaries. Qualification offers narrower evidence
+than complete conformance.
+
 YamlSigil enforces the algorithm's public-key admissibility and signature
 rules at this boundary. The provider remains responsible for private-key
 generation quality, entropy, storage, access policy, and operational controls
@@ -151,6 +158,13 @@ signature octets. P-256 adapters apply SHA-256 once to the supplied message
 bytes. Provider interoperability and qualification do not establish or imply
 FIPS validation. That claim depends on the provider build, configuration,
 platform, operational boundary, and deployment.
+
+The runnable [`ring` and `aws-lc-rs` examples](./examples/README.md) implement
+the public adapter traits, generate fresh Ed25519 or P-256 keys, and sign and
+verify YAML artifacts. Both use `clap` and run their round-trip tests in CI.
+The [`async-provider` example](./examples/async_provider.rs) demonstrates
+awaitable signing, key binding, qualification, and verification through a
+simulated P-256 service, with both qualified and unqualified modes.
 
 ### Workspace-only support crates
 

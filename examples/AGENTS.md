@@ -26,7 +26,7 @@ Use `clap` derive for CLI argument parsing. Keep each command's options suited
 to the behavior it demonstrates; unrelated examples need not share an input
 format, algorithm, or output convention.
 
-Keep shared CLI code in `cli-common/` when multiple examples need it. Reuse applicable
+Keep shared CLI code in [`cli-common/`](./cli-common/). Reuse applicable
 parsing, input/output, operation, and test helpers when examples demonstrate
 the same flow. Examples using the same provider can share native adapters
 there; link to those adapters from each entry point. Keep calls demonstrating

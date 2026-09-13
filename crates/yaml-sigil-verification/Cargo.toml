@@ -54,7 +54,11 @@ yaml-sigil-transcription = { workspace = true, default-features = false }
 json-schema-validate = ["yaml-sigil-core/json-schema-validate"]
 
 [dev-dependencies]
-aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips"] }
+# These adapters test interoperability. The non-fips backend avoids
+# FIPS-specific build-tool and platform requirements beyond these tests.
+# Keep provider tests runnable on Windows x86-64 hosts without NASM, including
+# when this package is tested separately from the examples workspace member.
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips", "prebuilt-nasm"] }
 rand_core = { workspace = true }
 ring = "=0.17.14"
 tokio = { workspace = true, features = ["macros", "rt"] }

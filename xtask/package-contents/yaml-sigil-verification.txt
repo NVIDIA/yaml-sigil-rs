@@ -8,6 +8,8 @@ LICENSE
 README.md
 SECURITY.md
 THIRD_PARTY_NOTICES.md
+src/async_provider.rs
+src/async_provider_tests.rs
 src/crypto.rs
 src/lib.rs
 src/proto_verify.rs
