@@ -354,6 +354,14 @@ failure for providers that reject a permitted cofactored-equation vector is
 recorded as a provider-slot result and does not change artifact
 classification or the advertised conformance profile.
 
+The P-256 qualification suite checks two live public-key bindings, including
+low-S and high-S acceptance and cross-key rejection. Regression tests reject
+factories that cache the first key, retarget or invalidate existing handles,
+or accept signatures for either bound key. Provider key types also have
+compile-time `Send + Sync` checks and a test that signs and verifies across
+worker threads. These checks add no conformance fixture or change to artifact
+classification.
+
 ## Known Behaviors
 
 - `Verifier` advertises `AdvertisedConformanceProfile::Permissive`. The private
