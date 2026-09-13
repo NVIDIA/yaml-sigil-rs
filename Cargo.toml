@@ -12,6 +12,7 @@ members = [
     "crates/yaml-sigil-verification",
     "crates/yaml-sigil-test-keys",
     "crates/yaml-sigil-conformance",
+    "examples",
 ]
 exclude = [
     "tests/downstream/buffa-0-5",

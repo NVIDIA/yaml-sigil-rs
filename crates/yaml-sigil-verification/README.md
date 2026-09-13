@@ -26,6 +26,12 @@ verifier states.
   variants retain YamlSigil artifact handling around qualified provider keys.
 - The corresponding `verify_with_unqualified_provider` functions make the
   qualification bypass explicit.
+- `AsyncProviderVerifierFactory` and `AsyncProviderVerifier` support awaitable
+  binding and verification. `AsyncVerificationProviderBuilder` offers async
+  qualification and an explicitly unqualified builder.
+- `ProviderAsyncVerifier` and `UnqualifiedProviderAsyncVerifier` implement
+  `AsyncVerifier` with the corresponding bound keys. Async free functions also
+  expose metadata and pre-verification reuse.
 - `DefaultVerifier` and `DefaultAsyncVerifier` delegate to the free functions.
 - `Verifier`, `AsyncVerifier`, result types, and capability types are
   re-exported from
@@ -71,6 +77,17 @@ opaque inputs to these artifact operations. Implementing the separate
 `yaml_sigil_traits::verification::Verifier` contract means supplying the
 complete operation, including artifact processing.
 
+For complete `clap` commands using fresh Ed25519 or P-256 keys, see the
+[`ring` and `aws-lc-rs` examples](https://github.com/NVIDIA/yaml-sigil-rs/tree/main/examples).
+Both sign and verify YAML artifacts and execute round-trip tests in CI.
+They demonstrate synchronous operations. The
+[`async-provider` example](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/examples/async_provider.rs)
+demonstrates awaitable operations through a simulated service. The
+[provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
+compares qualified, unqualified, and direct trait implementations and records
+what the implementation checks and tests for each choice. Qualification offers
+narrower evidence than complete conformance.
+
 Implement `ProviderVerifierFactory` to bind canonical public-key bytes to an
 opaque local provider handle. Ed25519 keys use 32 canonical compressed octets.
 P-256 keys use the 65-octet uncompressed encoding from
@@ -91,9 +108,15 @@ qualification again. Finite qualification shows that the instance passes the
 included suite; it is not proof for every possible input or future
 configuration.
 
-The P-256 suite keeps two distinct key bindings live and interleaves valid
-signatures with cross-key rejection checks. It rejects adapters that cache
-the first key or retarget existing handles when another key is bound.
+Both algorithm suites keep distinct key bindings live and interleave valid
+signatures with cross-key rejection checks in both directions. They reject
+common adapter mistakes such as caching the first key or retargeting an
+existing handle when another key is bound. Keep each handle's key state or
+stable key identifier separate, even when handles share a client.
+
+The adapter remains trusted code. Qualification does not defend against an
+implementation deliberately written to pass the fixed suite and misbehave
+on other inputs.
 
 Qualified results are authoritative. YamlSigil does not retry a provider
 mismatch through RustCrypto. Implementations that can distinguish an
@@ -111,7 +134,18 @@ establish or imply FIPS validation.
 To bound provider verification, admit the original artifact with
 `ArtifactResourceLimits::check_input_size` before calling a provider operation.
 A bounded pre-verification response can also be passed to
-`verify_from_pre_verify_with_provider`.
+`verify_from_pre_verify_with_provider`. The same admission and reuse work for
+the async and explicitly unqualified variants, so no additional provider
+verification-limit wrappers are needed. Admit the original input before any
+artifact-dependent remote work.
+
+Async binding can suspend and return a handle that borrows its factory or
+client without a `'static` requirement. It cannot retain a borrow of the
+temporary public-key input. Qualification awaits the same finite public suite
+as sync qualification. Parsing and structural checks remain synchronous, and
+verification awaits the adapter's classified result. The library selects no
+runtime, timeout, retry, or remote cancellation policy. The guide explains
+these scheduling boundaries and the difference from `DefaultAsyncVerifier`.
 
 ## Resource boundaries
 
