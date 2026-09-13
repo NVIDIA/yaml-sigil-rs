@@ -19,6 +19,10 @@ each signing request.
   `sign_with_unqualified_provider` makes the deliberate bypass explicit.
 - `ProviderSigningKeyBuilder` binds a synchronous `signature` 2.2 signer to
   canonical public-key bytes and offers `build` and `build_unqualified`.
+- `AsyncProviderSigner` and `AsyncProviderSigningKeyBuilder` support awaitable
+  operations. `ProviderAsyncSigner` and `UnqualifiedProviderAsyncSigner`
+  implement `AsyncSigner` with the corresponding bound keys.
+- Sync and async provider signing offer `_and_resource_limits` functions.
 - `DefaultSigner` and `DefaultAsyncSigner` delegate to the free functions.
 - `Signer`, `AsyncSigner`, outcome types, and capability types are re-exported
   from
@@ -51,6 +55,16 @@ root and in its public `provider` module. The bound key is an opaque input to
 the artifact operation. Implementing the separate
 `yaml_sigil_traits::signing::Signer` contract means supplying the complete
 signing operation, including artifact processing.
+
+For complete `clap` commands using fresh Ed25519 or P-256 keys, see the
+[`ring` and `aws-lc-rs` examples](https://github.com/NVIDIA/yaml-sigil-rs/tree/main/examples).
+Both sign and verify YAML artifacts and execute round-trip tests in CI.
+They demonstrate synchronous operations. The
+[`async-provider` example](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/examples/async_provider.rs)
+demonstrates awaitable operations through a simulated service. The
+[provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
+compares qualified, unqualified, and direct trait implementations and records
+what the implementation checks and tests for each choice.
 
 Use `ProviderSigningKeyBuilder::ed25519` with a 32-octet canonical compressed
 public key or `ProviderSigningKeyBuilder::ecdsa_p256_sha256` with a 65-octet
@@ -86,9 +100,19 @@ Provider support or successful output self-verification does not establish or
 imply FIPS validation. Such a claim depends on the complete provider build,
 configuration, platform, operational boundary, and deployment.
 
-Provider signing currently has no resource-aware entry point. Apply any
-application-specific payload bound before signing. Rejecting an oversized
-returned artifact does not bound work or allocation already performed.
+Use `sign_with_provider_and_resource_limits` or
+`sign_with_unqualified_provider_and_resource_limits` for bounded provider
+signing. The async counterparts are
+`sign_with_async_provider_and_resource_limits` and
+`sign_with_unqualified_async_provider_and_resource_limits`. They reuse the
+preflight and exact output checks below. Ordinary provider entry points and
+the async trait facades remain unbounded by that optional policy.
+
+Async provider operations do not require a synchronous adapter or a library
+runtime. Clients can be borrowed without a `'static` requirement. Local
+payload preparation and qualified output self-verification remain synchronous;
+the provider's signing operation can suspend. The adapter or caller owns
+blocking-pool placement, timeouts, retries, and remote cancellation semantics.
 
 ## Resource boundaries
 

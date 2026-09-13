@@ -8,6 +8,7 @@ LICENSE
 README.md
 SECURITY.md
 THIRD_PARTY_NOTICES.md
+src/async_provider.rs
 src/lib.rs
 src/proto_carrier.rs
 src/provider.rs

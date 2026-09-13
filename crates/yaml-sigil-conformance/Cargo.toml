@@ -34,6 +34,7 @@ yaml-sigil-verification = { path = "../yaml-sigil-verification", default-feature
 yaml-sigil-signing = { path = "../yaml-sigil-signing", default-features = false }
 
 [dev-dependencies]
+signature = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 yaml-sigil-test-keys = { path = "../yaml-sigil-test-keys" }
 
