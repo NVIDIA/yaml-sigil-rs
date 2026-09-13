@@ -115,6 +115,13 @@ pub struct ProviderSigningKeyError {
 }
 
 impl ProviderSigningKeyError {
+    pub(crate) fn invalid_public_key(algorithm: AlgorithmId) -> Self {
+        Self {
+            kind: ProviderSigningKeyErrorKind::InvalidPublicKey,
+            algorithm,
+        }
+    }
+
     /// Return the stable error category.
     pub fn kind(&self) -> ProviderSigningKeyErrorKind {
         self.kind
@@ -146,7 +153,7 @@ pub struct ProviderSigningKeyBuilder<'a> {
     public_key_bytes: Vec<u8>,
 }
 
-fn bounded_public_key_copy(algorithm: AlgorithmId, public_key_bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn bounded_public_key_copy(algorithm: AlgorithmId, public_key_bytes: &[u8]) -> Vec<u8> {
     let expected_len = match algorithm {
         AlgorithmId::Ed25519 => 32,
         AlgorithmId::EcdsaP256Sha256 => 65,

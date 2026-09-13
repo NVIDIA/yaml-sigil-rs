@@ -21,12 +21,20 @@ build = false
 workspace = true
 
 [dev-dependencies]
-# These groups describe usage, including example tests. Cargo makes every
-# entry available to every example target; the groups do not gate builds.
-
-# github-keys: CLI, errors, and public signing/verification APIs.
 anyhow = "1.0"
+# These adapters demonstrate interoperability. The non-fips backend avoids
+# FIPS-specific build-tool and platform requirements beyond this example.
+# Keep Windows x86-64 examples runnable when NASM is absent from the host.
+# The provider uses its bundled assembly objects only as a fallback there.
+aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips", "prebuilt-nasm"] }
+base64 = { workspace = true }
 clap = { version = "4.6", features = ["derive"] }
+p256 = { workspace = true }
+rand_core = { workspace = true }
+ring = "=0.17.14"
+signature = { workspace = true }
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 yaml-sigil-core = { workspace = true }
 yaml-sigil-signing = { workspace = true }
 yaml-sigil-verification = { workspace = true }
@@ -43,12 +51,26 @@ ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 # github-keys: both anonymous GitHub account-key APIs return paginated JSON.
 serde_json = { workspace = true }
 
-# github-keys tests: temporary files, encrypted synthetic keys, signature
-# mutations, and the P-256 adaptation documented in its README.
-tempfile = "3"
-rand_core = { workspace = true }
-base64 = { workspace = true }
-p256 = { workspace = true }
+# Execute the parser and round-trip tests in cargo test --workspace.
+[[example]]
+name = "ring-provider"
+path = "ring_provider.rs"
+test = true
+
+[[example]]
+name = "aws-lc-provider"
+path = "aws_lc_provider.rs"
+test = true
+
+[[example]]
+name = "ring-unqualified-provider"
+path = "ring_unqualified_provider.rs"
+test = true
+
+[[example]]
+name = "async-provider"
+path = "async_provider.rs"
+test = true
 
 [[example]]
 name = "github-keys"

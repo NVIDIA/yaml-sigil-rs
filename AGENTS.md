@@ -37,9 +37,10 @@ Follow [`xtask/AGENTS.md`](xtask/AGENTS.md) when changing the developer task
 crate or its release-command boundaries.
 
 Follow [`docs/AGENTS.md`](docs/AGENTS.md) when changing documentation or
-implementation behavior covered by a guide. Follow
-[`examples/AGENTS.md`](examples/AGENTS.md) when changing runnable examples
-or their shared CLI modules.
+implementation behavior covered by a guide. It defines the update triggers
+for the provider guide, conformance record, and YAML backend evaluation.
+Follow [`examples/AGENTS.md`](examples/AGENTS.md) when changing runnable
+examples or their shared CLI modules.
 
 ## Agent Documentation Standards
 
@@ -666,6 +667,13 @@ signatures use canonical 64-octet `R || S`; P-256 provider signatures use
 64-octet big-endian `r || s`, never DER. P-256 providers apply SHA-256 exactly
 once to the message bytes supplied by YamlSigil.
 
+Async providers implement the native `AsyncProviderSigner`,
+`AsyncProviderVerifier`, and `AsyncProviderVerifierFactory` contracts. Keep
+their futures `Send` and allow borrowed clients without a `'static`
+requirement. Do not add a library-selected executor, synchronous shim, hidden
+retry, or cancellation guarantee for an already submitted remote operation.
+Retain the same qualified and explicitly unqualified choices for both modes.
+
 Signing adapters bind their opaque handle to canonical public-key bytes. The
 normal builder validates that key and self-verifies every real output without
 issuing a synthetic signing request. Keep the bypass named `unqualified`, and
@@ -676,6 +684,18 @@ and owned by the exact adapter instance it tested. Track algorithm slots
 independently, do not retry a qualified provider result through RustCrypto,
 and keep provider failure distinct from signature mismatch. Replacing or
 reconfiguring a provider requires qualification again.
+
+Treat direct `yaml-sigil-traits` implementations as a supported third
+integration choice. Keep the differences in runtime checks, regression
+evidence, and integrator responsibilities current in
+[`docs/crypto-providers.md`](docs/crypto-providers.md). Do not describe finite
+qualification as complete conformance. Keep the existing RustCrypto key
+types exposed until a concrete compatibility need justifies a new boundary.
+
+Bounded provider signing reuses the standard signing preflight and final
+output checks. Verification callers admit the original artifact with
+`check_input_size` or bounded pre-verification before provider work. Keep
+these optional resource policies separate from conformance.
 
 Keep provider-specific crates out of the published API and ordinary
 dependencies. Provider interoperability and qualification do not establish a
