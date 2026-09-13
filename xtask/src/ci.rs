@@ -140,6 +140,17 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         ],
     },
     Step {
+        label: "independent noyalib downstream Serde test",
+        program: "cargo",
+        args: &[
+            "test",
+            "--manifest-path",
+            "tests/downstream/Cargo.toml",
+            "--package",
+            "yaml-sigil-core-downstream-noyalib-0-0-35",
+        ],
+    },
+    Step {
         label: "Unused Rust dependencies",
         program: "cargo-machete",
         args: &["--with-metadata"],
@@ -149,6 +160,25 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         program: "cargo",
         args: &[
             "deny", "check", "bans", "licenses", "sources", "-D", "warnings",
+        ],
+    },
+    Step {
+        label: "downstream dependency policy",
+        program: "cargo",
+        args: &[
+            "deny",
+            "--manifest-path",
+            "tests/downstream/Cargo.toml",
+            "--locked",
+            "check",
+            "licenses",
+            "sources",
+            "-D",
+            "warnings",
+            "-A",
+            "no-license-field",
+            "-A",
+            "unlicensed",
         ],
     },
     Step {
@@ -175,6 +205,16 @@ const AFTER_PACKAGE_CONTENT: &[Step] = &[
         label: "Rust dependency audit",
         program: "cargo",
         args: &["audit"],
+    },
+    Step {
+        label: "downstream dependency audit",
+        program: "cargo",
+        args: &[
+            "audit",
+            "--file",
+            "tests/downstream/Cargo.lock",
+            "--no-fetch",
+        ],
     },
     Step {
         label: "xtask dependency audit",
@@ -223,6 +263,12 @@ mod tests {
         assert!(AGENT_GUIDANCE.contains(
             "cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources"
         ));
+        assert!(AGENT_GUIDANCE.contains(
+            "cargo deny --manifest-path tests/downstream/Cargo.toml --locked check licenses sources"
+        ));
+        assert!(
+            AGENT_GUIDANCE.contains("cargo audit --file tests/downstream/Cargo.lock --no-fetch")
+        );
     }
 
     #[test]
