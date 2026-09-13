@@ -79,8 +79,19 @@ protobuf messages only through the private-field types in
 views, fields, or errors in public signatures. Of the published crates, only
 `yaml-sigil-core` depends directly on Buffa. Preserve unknown fields and raw
 unknown algorithm numbers across owned decode and re-encode. Keep the Buffa
-0.5 wire-characterization tests and both `tests/downstream` facade fixtures
-passing when changing protobuf code or dependencies.
+0.5 wire-characterization tests and the protobuf `tests/downstream` facade
+fixtures passing when changing protobuf code or dependencies.
+
+Keep Serde as the public data-model boundary for `SignatureDocument`. Keep
+current and future concrete serialization backends private, including their
+types, traits, errors, and feature selection. Direct Serde deserialization does
+not replace the bounded and policy-configured `parse_signature_document` entry
+point for untrusted YAML. Preserve the exact field names, required fields,
+optional `keyid` behavior, and unknown-field rejection documented on
+`SignatureDocument` as public API. Keep `serialize_signature_document`
+canonical, treat `CoreError::SignatureYaml` text as unstable diagnostic output,
+and compare semantic values rather than serialized bytes in backend
+interoperability tests.
 
 YamlSigil `v1alpha1` defines no maximum complete artifact size. Treat an
 external whole-artifact limit as optional operational hardening, not a
@@ -280,10 +291,13 @@ cargo test --workspace --all-features
 cargo test --locked --manifest-path xtask/Cargo.toml
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-core-only
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-buffa-0-5
+cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-noyalib-0-0-35
 cargo-machete --with-metadata
 cargo deny check bans licenses sources -D warnings
+cargo deny --manifest-path tests/downstream/Cargo.toml --locked check licenses sources -D warnings -A no-license-field -A unlicensed
 cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources -D warnings -A unnecessary-skip -A unmatched-skip
 cargo audit
+cargo audit --file tests/downstream/Cargo.lock --no-fetch
 cargo audit --file xtask/Cargo.lock
 ```
 
@@ -293,9 +307,10 @@ committed `xtask/Cargo.lock`. The root lockfile is intentionally absent, so the
 full workspace audit inside the final `cargo xtask ci` phase is candidate
 execution, not trusted pre-execution policy evidence. The Cargo Deny checks
 also run inside that final phase because they resolve candidate dependency
-graphs. Candidate tools, Cargo state, targets, temporary files, and
-materialized source stay under fresh runner-temporary paths; no policy or
-privileged step follows candidate Rust.
+graphs. The downstream tests generate their separate ignored lockfile before
+the downstream license, source, and RustSec checks consume it. Candidate tools,
+Cargo state, targets, temporary files, and materialized source stay under fresh
+runner-temporary paths; no policy or privileged step follows candidate Rust.
 
 The static package-content stage runs
 `cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
@@ -581,7 +596,7 @@ The workspace uses `resolver = "3"` and Rust edition 2024.
 | Area | Features | Notes |
 |------|----------|-------|
 | Protobuf codegen | n/a | Generated privately with `buffa` from the local `yaml_sigil.proto`, using Buf from `buf-tools`; public access uses `yaml_sigil_core::pb`. |
-| YAML parser | n/a | YAML signature documents are parsed with `noyalib`. |
+| YAML parser | n/a | Serde is public; YAML signature documents use a private `noyalib` backend. |
 | JSON Schema helper | `json-schema-validate` | Exposes validation against the local signature-document schema. |
 
 ## Conformance
