@@ -3,7 +3,7 @@
 
 //! Local cryptographic-provider signing adapters.
 //!
-//! Adapters implement `signature::Signer<[u8; 64]>`; YamlSigil passes the
+//! Adapters implement `signature::Signer<[u8; 64]> + Sync`; YamlSigil passes the
 //! exact final message bytes and never asks for a prehash. Ed25519 output is
 //! canonical RFC 8032 `R || S`. P-256 output is big-endian `r || s`, and the
 //! adapter applies SHA-256 exactly once.
@@ -137,9 +137,12 @@ impl fmt::Debug for ProviderSigningKeyError {
 
 /// Builder that binds an initialized provider signer to canonical public-key
 /// bytes without requesting an extra signature.
+///
+/// The borrowed signer must be `Sync` so the builder and its bound keys can
+/// be shared across worker threads. Stateful adapters synchronize internally.
 pub struct ProviderSigningKeyBuilder<'a> {
     algorithm: AlgorithmId,
-    signer: &'a dyn signature::Signer<[u8; 64]>,
+    signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
     public_key_bytes: Vec<u8>,
 }
 
@@ -160,7 +163,10 @@ impl<'a> ProviderSigningKeyBuilder<'a> {
     ///
     /// `public_key_bytes` must correspond to `signer`. The qualified build
     /// path enforces that relationship by checking each real output.
-    pub fn ed25519(signer: &'a dyn signature::Signer<[u8; 64]>, public_key_bytes: &[u8]) -> Self {
+    pub fn ed25519(
+        signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
+        public_key_bytes: &[u8],
+    ) -> Self {
         Self {
             algorithm: AlgorithmId::Ed25519,
             signer,
@@ -175,7 +181,7 @@ impl<'a> ProviderSigningKeyBuilder<'a> {
     /// producing the fixed-width signature. `public_key_bytes` must
     /// correspond to `signer`.
     pub fn ecdsa_p256_sha256(
-        signer: &'a dyn signature::Signer<[u8; 64]>,
+        signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
         public_key_bytes: &[u8],
     ) -> Self {
         Self {
@@ -235,7 +241,7 @@ impl fmt::Debug for ProviderSigningKeyBuilder<'_> {
 
 /// Provider signer whose real outputs are self-verified by YamlSigil.
 pub struct ProviderSigningKey<'a> {
-    signer: &'a dyn signature::Signer<[u8; 64]>,
+    signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
     public_key: ProviderPublicKey,
 }
 
@@ -270,7 +276,7 @@ impl fmt::Debug for ProviderSigningKey<'_> {
 
 /// Provider signer that deliberately skips cryptographic self-verification.
 pub struct UnqualifiedProviderSigningKey<'a> {
-    signer: &'a dyn signature::Signer<[u8; 64]>,
+    signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
     public_key: ProviderPublicKey,
 }
 
@@ -319,7 +325,8 @@ pub type UnqualifiedProviderSignRequest<'a> =
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use ed25519_dalek::SigningKey;
 
@@ -327,24 +334,24 @@ mod tests {
 
     struct RecordingEd25519Signer {
         key: SigningKey,
-        calls: Cell<usize>,
-        messages: RefCell<Vec<Vec<u8>>>,
+        calls: AtomicUsize,
+        messages: Mutex<Vec<Vec<u8>>>,
     }
 
     impl RecordingEd25519Signer {
         fn new(seed: u8) -> Self {
             Self {
                 key: SigningKey::from_bytes(&[seed; 32]),
-                calls: Cell::new(0),
-                messages: RefCell::new(Vec::new()),
+                calls: AtomicUsize::new(0),
+                messages: Mutex::new(Vec::new()),
             }
         }
     }
 
     impl signature::Signer<[u8; 64]> for RecordingEd25519Signer {
         fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], signature::Error> {
-            self.calls.set(self.calls.get() + 1);
-            self.messages.borrow_mut().push(message.to_vec());
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.messages.lock().unwrap().push(message.to_vec());
             let signature: ed25519_dalek::Signature =
                 signature::Signer::try_sign(&self.key, message)?;
             Ok(signature.to_bytes())
@@ -360,6 +367,17 @@ mod tests {
     }
 
     #[test]
+    fn provider_keys_and_requests_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<ProviderSigningKeyBuilder<'static>>();
+        assert_send_sync::<ProviderSigningKey<'static>>();
+        assert_send_sync::<UnqualifiedProviderSigningKey<'static>>();
+        assert_send_sync::<ProviderSignRequest<'static>>();
+        assert_send_sync::<UnqualifiedProviderSignRequest<'static>>();
+    }
+
+    #[test]
     fn qualified_builder_does_not_request_a_synthetic_signature() {
         let signer = RecordingEd25519Signer::new(3);
         let public_key = signer.key.verifying_key().to_bytes();
@@ -368,10 +386,13 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(signer.calls.get(), 0);
+        assert_eq!(signer.calls.load(Ordering::Relaxed), 0);
         assert_eq!(key.try_sign(b"real payload\n").unwrap().len(), 64);
-        assert_eq!(signer.calls.get(), 1);
-        assert_eq!(signer.messages.borrow().as_slice(), [b"real payload\n"]);
+        assert_eq!(signer.calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            signer.messages.lock().unwrap().as_slice(),
+            [b"real payload\n"]
+        );
     }
 
     #[test]
@@ -386,7 +407,7 @@ mod tests {
             key.try_sign(b"payload"),
             Err(SignError::KeyOperationFailure)
         ));
-        assert_eq!(signer.calls.get(), 1);
+        assert_eq!(signer.calls.load(Ordering::Relaxed), 1);
     }
 
     #[test]
