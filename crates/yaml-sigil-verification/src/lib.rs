@@ -10,16 +10,65 @@
 //!
 //! # Resource boundaries
 //!
-//! Verification and pre-verification add no deployment-specific maximum
-//! complete artifact size for YAML or protobuf input. Applications accepting
-//! potentially untrusted artifacts should apply their chosen whole-input
-//! bound before these calls. A local resource-policy rejection remains
+//! Resource-aware verification and pre-verification check the original input
+//! before option, artifact, or cryptographic processing. Existing entry points
+//! retain their unbounded behavior. A local resource-policy rejection remains
 //! separate from invocation errors, artifact validity, cryptographic results,
 //! and YamlSigil `v1alpha1` conformance.
 //!
 //! YAML signature metadata retains its independent 16,384-octet carrier
 //! constraint and parser safeguards. The private protobuf decoder retains its
 //! format and implementation safeguards.
+//!
+//! # Layered resource results
+//!
+//! The outer result reports local resource admission. The inner result keeps
+//! the existing verification contract.
+//!
+//! ```no_run
+//! use yaml_sigil_verification::{
+//!     ArtifactForm, ArtifactResourceLimits, PublicKeys, VerifierOptions,
+//!     VerifierState, verify_with_resource_limits,
+//! };
+//!
+//! # fn verify_bounded(
+//! #     input: &[u8],
+//! #     keys: &PublicKeys<'_>,
+//! # ) -> Result<VerifierState, Box<dyn std::error::Error>> {
+//! let admitted = verify_with_resource_limits(
+//!     input,
+//!     ArtifactForm::Yaml,
+//!     keys,
+//!     VerifierOptions::default(),
+//!     &ArtifactResourceLimits::default(),
+//! )?;
+//! Ok(admitted?)
+//! # }
+//! ```
+//!
+//! Apply the standalone zero-copy input filter before an existing async trait
+//! call when you need the portable trait surface.
+//!
+//! ```no_run
+//! use yaml_sigil_verification::{
+//!     ArtifactForm, ArtifactResourceForm, ArtifactResourceLimits,
+//!     ArtifactResourceResult, AsyncVerifier, DefaultAsyncVerifier,
+//! };
+//!
+//! # async fn pre_verify_bounded(input: &[u8]) -> ArtifactResourceResult<()> {
+//! let limits = ArtifactResourceLimits::default();
+//! let input = limits.check_input_size(ArtifactResourceForm::Yaml, input)?;
+//! let _ = AsyncVerifier::pre_verify(
+//!     &DefaultAsyncVerifier,
+//!     input,
+//!     ArtifactForm::Yaml,
+//!     false,
+//!     false,
+//! )
+//! .await;
+//! Ok(())
+//! # }
+//! ```
 
 mod crypto;
 mod proto_verify;
@@ -29,6 +78,10 @@ use yaml_sigil_core::{
     AlgorithmId, ProtobufWireDecodeAdvertisement, YamlSignatureDocumentDuplicateKeyPolicy,
 };
 
+pub use yaml_sigil_core::{
+    ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
+    ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
+};
 // The portable traits and DTOs live in `yaml-sigil-traits`. This implementation
 // binds the generic key-bearing DTO to its RustCrypto key types and owns key
 // parsing, retaining established `yaml_sigil_verification` paths.
@@ -110,9 +163,9 @@ pub fn verifier_capabilities() -> VerifierCapabilities {
 ///
 /// # Resource usage
 ///
-/// Both forms accept a complete artifact without adding a
-/// deployment-specific whole-input limit. Apply any local resource policy
-/// before this call.
+/// Both forms accept a complete artifact without adding an implementation-local
+/// input limit. Use [`verify_with_resource_limits`] to apply the shared policy
+/// first.
 #[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
 pub fn verify(
     input_bytes: &[u8],
@@ -121,6 +174,30 @@ pub fn verify(
     options: VerifierOptions,
 ) -> Result<VerifierState, InvocationError> {
     verify_with_metadata(input_bytes, form, keys, options, false).map(|r| r.state)
+}
+
+fn resource_form(form: ArtifactForm) -> ArtifactResourceForm {
+    match form {
+        ArtifactForm::Yaml => ArtifactResourceForm::Yaml,
+        ArtifactForm::Proto => ArtifactResourceForm::Protobuf,
+    }
+}
+
+/// Verify after applying an explicit complete-input resource policy.
+///
+/// The raw input length is checked before form, option, artifact, or
+/// cryptographic processing. The inner result retains the existing invocation
+/// error and verifier-state contract.
+#[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
+pub fn verify_with_resource_limits(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &PublicKeys<'_>,
+    options: VerifierOptions,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<VerifierState, InvocationError>> {
+    limits.check_input_size(resource_form(form), input_bytes)?;
+    Ok(verify(input_bytes, form, keys, options))
 }
 
 /// Verify with optional parser observations (IDL `VerifyRequest.include_parser_observations`).
@@ -157,10 +234,31 @@ pub fn verify_with_metadata(
     })
 }
 
+/// Verify with metadata after applying an explicit complete-input policy.
+#[tracing::instrument(level = "info", skip_all, fields(len = input_bytes.len(), form = ?form))]
+pub fn verify_with_metadata_and_resource_limits(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    keys: &PublicKeys<'_>,
+    options: VerifierOptions,
+    include_parser_observations: bool,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<VerifyResult, InvocationError>> {
+    limits.check_input_size(resource_form(form), input_bytes)?;
+    Ok(verify_with_metadata(
+        input_bytes,
+        form,
+        keys,
+        options,
+        include_parser_observations,
+    ))
+}
+
 /// Verify a YAML artifact byte sequence.
 ///
-/// Apply any deployment-specific complete-artifact limit before this call.
-/// The markerless signature carrier has a separate 16,384-octet constraint.
+/// Use [`verify_yaml_with_resource_limits`] to apply the shared complete-input
+/// policy. The markerless signature carrier has a separate 16,384-octet
+/// constraint.
 #[tracing::instrument(level = "info", skip_all, fields(len = artifact.len()))]
 pub fn verify_yaml(
     artifact: &[u8],
@@ -168,6 +266,17 @@ pub fn verify_yaml(
     options: VerifierOptions,
 ) -> Result<VerifierState, InvocationError> {
     verify(artifact, ArtifactForm::Yaml, keys, options)
+}
+
+/// Verify a YAML artifact after applying an explicit complete-input policy.
+pub fn verify_yaml_with_resource_limits(
+    artifact: &[u8],
+    keys: &PublicKeys<'_>,
+    options: VerifierOptions,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<VerifierState, InvocationError>> {
+    limits.check_input_size(ArtifactResourceForm::Yaml, artifact)?;
+    Ok(verify_yaml(artifact, keys, options))
 }
 
 /// Verify protobuf `SignedYamlArtifact` wire bytes.
@@ -185,6 +294,17 @@ pub fn verify_proto(
     options: VerifierOptions,
 ) -> Result<VerifierState, InvocationError> {
     verify(wire, ArtifactForm::Proto, keys, options)
+}
+
+/// Verify protobuf wire after applying an explicit complete-input policy.
+pub fn verify_proto_with_resource_limits(
+    wire: &[u8],
+    keys: &PublicKeys<'_>,
+    options: VerifierOptions,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<VerifierState, InvocationError>> {
+    limits.check_input_size(ArtifactResourceForm::Protobuf, wire)?;
+    Ok(verify_proto(wire, keys, options))
 }
 
 /// Cryptographic verification from extracted payload + wire algorithm + signature octets.
@@ -275,9 +395,9 @@ pub(crate) fn verify_extracted_signature(
 ///
 /// # Resource usage
 ///
-/// Both forms accept a complete artifact without adding a
-/// deployment-specific whole-input limit. Apply any local resource policy
-/// before this call.
+/// Both forms accept a complete artifact without adding an implementation-local
+/// input limit. Use [`pre_verify_with_resource_limits`] to apply the shared
+/// policy first.
 pub fn pre_verify(
     input_bytes: &[u8],
     form: ArtifactForm,
@@ -295,11 +415,42 @@ pub fn pre_verify(
     }
 }
 
+/// Pre-verify after applying an explicit complete-input policy.
+///
+/// Enforcement occurs once while the original encoded artifact is available.
+/// Continue with the existing [`verify_from_pre_verify`] function; it neither
+/// reconstructs nor rechecks complete-artifact size.
+pub fn pre_verify_with_resource_limits(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    allow_unsigned: bool,
+    include_parser_observations: bool,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<PreVerifyResponse> {
+    limits.check_input_size(resource_form(form), input_bytes)?;
+    Ok(pre_verify(
+        input_bytes,
+        form,
+        allow_unsigned,
+        include_parser_observations,
+    ))
+}
+
 /// Lightweight structural peek for YAML with no keys or cryptography.
 ///
 /// This function has the YAML resource behavior documented on [`verify_yaml`].
 pub fn pre_verify_yaml(artifact: &[u8], allow_unsigned: bool) -> PreVerifyResponse {
     pre_verify(artifact, ArtifactForm::Yaml, allow_unsigned, false)
+}
+
+/// Pre-verify YAML after applying an explicit complete-input policy.
+pub fn pre_verify_yaml_with_resource_limits(
+    artifact: &[u8],
+    allow_unsigned: bool,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<PreVerifyResponse> {
+    limits.check_input_size(ArtifactResourceForm::Yaml, artifact)?;
+    Ok(pre_verify_yaml(artifact, allow_unsigned))
 }
 
 /// Lightweight structural peek for protobuf wire (no keys, no crypto).
@@ -315,6 +466,15 @@ pub fn pre_verify_proto(wire: &[u8]) -> PreVerifyResponse {
     pre_verify(wire, ArtifactForm::Proto, false, false)
 }
 
+/// Pre-verify protobuf wire after applying an explicit complete-input policy.
+pub fn pre_verify_proto_with_resource_limits(
+    wire: &[u8],
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<PreVerifyResponse> {
+    limits.check_input_size(ArtifactResourceForm::Protobuf, wire)?;
+    Ok(pre_verify_proto(wire))
+}
+
 /// Boolean summary of [`pre_verify`] without crypto (IDL `CanPreVerify`).
 ///
 /// # Resource usage
@@ -326,6 +486,17 @@ pub fn can_pre_verify(input_bytes: &[u8], form: ArtifactForm, allow_unsigned: bo
         PreVerifyOutcome::Unsigned if allow_unsigned && form == ArtifactForm::Yaml => true,
         _ => false,
     }
+}
+
+/// Report pre-verification capability after applying an explicit input policy.
+pub fn can_pre_verify_with_resource_limits(
+    input_bytes: &[u8],
+    form: ArtifactForm,
+    allow_unsigned: bool,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<bool> {
+    limits.check_input_size(resource_form(form), input_bytes)?;
+    Ok(can_pre_verify(input_bytes, form, allow_unsigned))
 }
 
 /// Run only the verification stage using a prior YAML [`PreVerifyResponse`].
@@ -382,9 +553,9 @@ pub fn verify_from_pre_verify(
 
 /// In-process default verifier that delegates to the crate's free functions.
 ///
-/// Its entry points retain the unconfigured resource behavior documented on
-/// [`pre_verify`] and [`verify`]. A future implementation-configurable
-/// verifier can be added alongside this unit type.
+/// Its entry points retain the unbounded resource behavior documented on
+/// [`pre_verify`] and [`verify`]. Use the resource-aware free functions when
+/// you need the shared policy.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultVerifier;
 
@@ -517,6 +688,154 @@ mod trait_smoke_tests {
     fn default_verifier_capabilities_match_free_function() {
         let v = DefaultVerifier;
         assert_eq!(v.capabilities(), verifier_capabilities());
+    }
+
+    fn finite(maximum: usize) -> ArtifactResourceLimits {
+        ArtifactResourceLimits::unbounded()
+            .with_max_artifact_bytes(std::num::NonZeroUsize::new(maximum).unwrap())
+    }
+
+    fn no_keys() -> PublicKeys<'static> {
+        PublicKeys {
+            ed25519: None,
+            p256: None,
+        }
+    }
+
+    #[test]
+    fn input_resource_check_precedes_invalid_options_and_malformed_bytes() {
+        let options = VerifierOptions {
+            algorithm_parameters: vec![1],
+            ..VerifierOptions::default()
+        };
+        let error = verify_with_resource_limits(
+            &[0xff, 0xff],
+            ArtifactForm::Proto,
+            &no_keys(),
+            options,
+            &finite(1),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(error.artifact_form(), Some(ArtifactResourceForm::Protobuf));
+        assert_eq!(error.observed_or_projected_artifact_bytes(), Some(2));
+
+        let metadata_error = verify_with_metadata_and_resource_limits(
+            &[0xff, 0xff],
+            ArtifactForm::Yaml,
+            &no_keys(),
+            VerifierOptions {
+                algorithm_parameters: vec![1],
+                ..VerifierOptions::default()
+            },
+            true,
+            &finite(1),
+        )
+        .unwrap_err();
+        assert_eq!(
+            metadata_error.kind(),
+            ArtifactResourceErrorKind::InputArtifactTooLarge
+        );
+        assert_eq!(
+            metadata_error.artifact_form(),
+            Some(ArtifactResourceForm::Yaml)
+        );
+    }
+
+    #[test]
+    fn all_structural_entry_points_use_the_original_input_boundary() {
+        let input = [0xff, 0xfe];
+        let limits = finite(1);
+        assert!(
+            pre_verify_with_resource_limits(&input, ArtifactForm::Yaml, false, true, &limits,)
+                .is_err()
+        );
+        assert!(pre_verify_yaml_with_resource_limits(&input, false, &limits).is_err());
+        assert!(pre_verify_proto_with_resource_limits(&input, &limits).is_err());
+        assert!(
+            verify_yaml_with_resource_limits(
+                &input,
+                &no_keys(),
+                VerifierOptions::default(),
+                &limits,
+            )
+            .is_err()
+        );
+        assert!(
+            can_pre_verify_with_resource_limits(&input, ArtifactForm::Proto, false, &limits,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn protobuf_input_rejection_precedes_all_characterized_wire_shapes() {
+        let inputs = [
+            vec![0xff, 0xff],
+            vec![0x0a, 0x80],
+            vec![0x00, 0x00],
+            vec![0x0f, 0x00],
+            vec![0x80; 11],
+            vec![0x50, 0x01],
+            vec![0x53, 0x08, 0x01, 0x54],
+            vec![0x0a, 0x01, b'a', 0x0a, 0x01, b'b'],
+        ];
+
+        for input in inputs {
+            let limits = finite(1);
+            let verify_error = verify_proto_with_resource_limits(
+                &input,
+                &no_keys(),
+                VerifierOptions::default(),
+                &limits,
+            )
+            .unwrap_err();
+            let pre_verify_error =
+                pre_verify_proto_with_resource_limits(&input, &limits).unwrap_err();
+            let can_pre_verify_error =
+                can_pre_verify_with_resource_limits(&input, ArtifactForm::Proto, false, &limits)
+                    .unwrap_err();
+
+            for error in [verify_error, pre_verify_error, can_pre_verify_error] {
+                assert_eq!(
+                    error.kind(),
+                    ArtifactResourceErrorKind::InputArtifactTooLarge
+                );
+                assert_eq!(error.artifact_form(), Some(ArtifactResourceForm::Protobuf));
+                assert_eq!(
+                    error.observed_or_projected_artifact_bytes(),
+                    Some(input.len())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_pre_verify_handoff_does_not_recheck_an_encoded_artifact() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[44; 32]);
+        let artifact = yaml_sigil_signing::sign_yaml(&yaml_sigil_signing::SignYamlParams {
+            payload: b"handoff: true\n",
+            algorithm: AlgorithmId::Ed25519,
+            key: yaml_sigil_signing::SigningKey::Ed25519(&signing_key),
+            keyid: None,
+            append_missing_final_newline: false,
+        })
+        .unwrap();
+        let limits = finite(artifact.len());
+        let pre = pre_verify_yaml_with_resource_limits(&artifact, false, &limits).unwrap();
+        assert_eq!(pre.outcome, PreVerifyOutcome::Ok);
+
+        let verifying_key = signing_key.verifying_key();
+        let keys = PublicKeys {
+            ed25519: Some(&verifying_key),
+            p256: None,
+        };
+        assert!(matches!(
+            verify_from_pre_verify(&pre, &keys, VerifierOptions::default()).unwrap(),
+            VerifierState::Verified { .. }
+        ));
     }
 
     // The concrete RustCrypto bindings must remain expressible on a

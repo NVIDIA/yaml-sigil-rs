@@ -84,8 +84,9 @@ protobuf messages only through the private-field types in
 views, fields, or errors in public signatures. Of the published crates, only
 `yaml-sigil-core` depends directly on Buffa. Preserve unknown fields and raw
 unknown algorithm numbers across owned decode and re-encode. Keep the Buffa
-0.5 wire-characterization tests and the protobuf `tests/downstream` facade
-fixtures passing when changing protobuf code or dependencies.
+0.5 wire-characterization tests, the protobuf `tests/downstream` facade
+fixtures, and the downstream resource-API fixture passing when changing
+protobuf code or dependencies.
 
 Keep Serde as the public data-model boundary for `SignatureDocument`. Keep
 current and future concrete serialization backends private, including their
@@ -99,12 +100,14 @@ and compare semantic values rather than serialized bytes in backend
 interoperability tests.
 
 YamlSigil `v1alpha1` defines no maximum complete artifact size. Treat an
-external whole-artifact limit as optional operational hardening, not a
-conformance requirement. `4 MiB` is an example and the intended default for a
-future opt-in bounded API, not a current YamlSigil or gRPC requirement. Keep
-the 16,384-octet YAML signature-carrier constraint separate. A future
-`v1alpha2` proposal may define normative resource policy, but do not imply that
-it exists today.
+opt-in whole-artifact limit as implementation-local operational hardening, not
+a conformance requirement. `ArtifactResourceLimits::default()` selects
+`DEFAULT_MAX_ARTIFACT_BYTES` only when a caller explicitly passes it to a
+resource-aware operation. Existing entry points remain unbounded by that
+policy. Keep the 16,384-octet YAML signature-carrier constraint separate.
+Publishing the bounded API does not remediate an existing caller; adoption at
+the affected trust boundary or evidence of an equivalent earlier raw-input
+bound is required.
 
 ## Third-party material and attribution
 
@@ -297,6 +300,7 @@ cargo test --locked --manifest-path xtask/Cargo.toml
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-core-only
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-buffa-0-5
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-noyalib-0-0-35
+cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-downstream-resource-api
 cargo-machete --with-metadata
 cargo deny check bans licenses sources -D warnings
 cargo deny --manifest-path tests/downstream/Cargo.toml --locked check licenses sources -D warnings -A no-license-field -A unlicensed
@@ -625,8 +629,8 @@ deliberate divergences.
 
 Whole-artifact deployment limits do not change conformance outcomes. A local
 resource-policy rejection does not make the artifact malformed or
-non-conforming. Preserve this distinction when documenting or adding optional
-bounded APIs.
+non-conforming. Preserve this distinction when documenting or changing the
+opt-in bounded APIs.
 
 When a fixture would require going far outside the natural patterns of the Rust
 crates in use, prefer recording a divergence in

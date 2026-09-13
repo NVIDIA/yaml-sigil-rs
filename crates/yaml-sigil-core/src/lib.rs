@@ -7,15 +7,17 @@
 //! # Resource boundaries
 //!
 //! YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
-//! size. Applications accepting potentially untrusted artifacts should apply
-//! a deployment-appropriate whole-input bound before calling this crate. The
-//! 16,384-octet YAML signature-carrier constraint remains independent of a
-//! complete-artifact bound. Rejecting an artifact under local resource policy
-//! does not make it malformed or non-conforming.
+//! size. The [`resource`] module and `_with_resource_limits` entry points let
+//! callers opt into implementation-local complete-artifact byte limits. The
+//! existing entry points remain unbounded by that policy.
 //!
-//! Current entry points do not add a configurable whole-artifact limit.
-//! Protobuf format limits, parser safeguards, address-space limits, allocator
-//! limits, and deployment controls still apply.
+//! Publishing these APIs does not protect an existing caller automatically.
+//! Adopt a resource-aware entry point at the affected trust boundary, or
+//! enforce an equivalent earlier bound on the original raw input. The
+//! 16,384-octet YAML signature-carrier constraint remains independent of a
+//! complete-artifact bound. Protobuf format limits, parser safeguards,
+//! address-space limits, allocator limits, and deployment controls still
+//! apply.
 
 mod generated_proto {
     #![allow(clippy::all)]
@@ -31,6 +33,7 @@ pub mod error;
 pub mod payload;
 pub mod pb;
 pub mod proto_outer;
+pub mod resource;
 pub mod signature_doc;
 #[cfg(feature = "json-schema-validate")]
 pub mod tier_a_schema;
@@ -42,12 +45,19 @@ pub use conformance::{
     YamlSignatureDocumentDuplicateKeyPolicy, YamlSignatureDocumentUnknownFieldPolicy,
     yaml_unknown_field_policies,
 };
-pub use decomposition::{DecompositionOutcome, SignatureRanges, decompose_artifact};
+pub use decomposition::{
+    DecompositionOutcome, SignatureRanges, decompose_artifact,
+    decompose_artifact_with_resource_limits,
+};
 pub use error::CoreError;
 pub use payload::{PayloadInvariantError, validate_payload_stream};
 pub use proto_outer::{
-    ProtoOuterDecomposeOutcome, compose_proto_outer, decode_signature_carrier,
-    decompose_proto_outer,
+    ProtoOuterDecomposeOutcome, compose_proto_outer, compose_proto_outer_with_resource_limits,
+    decode_signature_carrier, decompose_proto_outer, decompose_proto_outer_with_resource_limits,
+};
+pub use resource::{
+    ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
+    ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
 };
 pub use signature_doc::{
     SignatureDocument, TIER_A_TOP_LEVEL_KEYS, has_unknown_signature_document_fields,
@@ -56,6 +66,8 @@ pub use signature_doc::{
 #[cfg(feature = "json-schema-validate")]
 pub use tier_a_schema::signature_document_validates_tier_a_schema;
 pub use wire::{
-    ProtoArtifactView, decode_signed_yaml_artifact, encode_signed_yaml_artifact,
-    view_signature_carrier, view_signed_yaml_artifact,
+    ProtoArtifactView, decode_signed_yaml_artifact,
+    decode_signed_yaml_artifact_with_resource_limits, encode_signed_yaml_artifact,
+    encode_signed_yaml_artifact_with_resource_limits, view_signature_carrier,
+    view_signed_yaml_artifact,
 };
