@@ -78,6 +78,11 @@ P-256 keys use the 65-octet uncompressed encoding from
 before asking the factory to bind it and rejects malformed 64-octet
 signatures before provider verification.
 
+Bound `ProviderVerifier` handles must implement `Send + Sync`. Both qualified
+and unqualified bound keys preserve those guarantees, so you can move or share
+them across worker threads. Adapters with mutable state synchronize it
+internally.
+
 `VerificationProviderBuilder::qualify` runs a bounded, public-only fixed suite
 once for the exact adapter instance it consumes. It records independent
 Ed25519 and P-256 status. A rejected slot cannot create a qualified key, but it
@@ -85,6 +90,10 @@ does not disable another slot. Replacing or reconfiguring the adapter requires
 qualification again. Finite qualification shows that the instance passes the
 included suite; it is not proof for every possible input or future
 configuration.
+
+The P-256 suite keeps two distinct key bindings live and interleaves valid
+signatures with cross-key rejection checks. It rejects adapters that cache
+the first key or retarget existing handles when another key is bound.
 
 Qualified results are authoritative. YamlSigil does not retry a provider
 mismatch through RustCrypto. Implementations that can distinguish an

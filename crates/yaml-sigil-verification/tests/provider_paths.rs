@@ -7,8 +7,8 @@
 //! behavior and is not relicensed under this file's Apache-2.0 declaration.
 //! See `../THIRD_PARTY_NOTICES.md` for attribution and applicable terms.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use aws_lc_rs as aws;
 use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
@@ -347,7 +347,7 @@ fn assert_rejected_as_cofactored_incompatible(status: &ProviderQualificationStat
 }
 
 fn exercise_qualified_pair<F: ProviderVerifierFactory>(
-    signer: &dyn signature::Signer<[u8; 64]>,
+    signer: &(dyn signature::Signer<[u8; 64]> + Sync),
     public_key: &[u8],
     algorithm: AlgorithmId,
     provider: &QualifiedVerificationProvider<F>,
@@ -428,12 +428,12 @@ fn real_provider_qualification_and_cross_provider_matrix() {
     let (aws_ed, aws_ed_public) = aws_ed25519_signer();
     let (aws_p, aws_p_public) = aws_p256_signer();
 
-    let ed25519_signers: [(&dyn signature::Signer<[u8; 64]>, &[u8]); 3] = [
+    let ed25519_signers: [(&(dyn signature::Signer<[u8; 64]> + Sync), &[u8]); 3] = [
         (&rustcrypto_ed, &rustcrypto_ed_public),
         (&ring_ed, &ring_ed_public),
         (&aws_ed, &aws_ed_public),
     ];
-    let p256_signers: [(&dyn signature::Signer<[u8; 64]>, &[u8]); 3] = [
+    let p256_signers: [(&(dyn signature::Signer<[u8; 64]> + Sync), &[u8]); 3] = [
         (&rustcrypto_p, rustcrypto_p_public.as_bytes()),
         (&ring_p, &ring_p_public),
         (&aws_p, &aws_p_public),
@@ -475,9 +475,56 @@ fn real_provider_qualification_and_cross_provider_matrix() {
     }
 }
 
+#[test]
+fn provider_keys_can_be_shared_across_workers() {
+    let signer = RustCryptoEd25519Signer(ed25519_dalek::SigningKey::from_bytes(&[74; 32]));
+    let public_key = signer.0.verifying_key().to_bytes();
+    let signing_key = ProviderSigningKeyBuilder::ed25519(&signer, &public_key)
+        .build()
+        .unwrap();
+    let provider = VerificationProviderBuilder::new(ReferenceFactory).qualify();
+    let verifying_key = provider.bind_ed25519(&public_key).unwrap();
+    let request = ProviderSignRequest {
+        payload: b"provider: shared workers\n",
+        algorithm: AlgorithmId::Ed25519,
+        key: ProviderSigningKeys::Ed25519(&signing_key),
+        keyid: None,
+        append_missing_final_newline: false,
+        output_form: OutputForm::Protobuf,
+        algorithm_parameters: &[],
+    };
+    let keys = ProviderPublicKeys {
+        ed25519: Some(&verifying_key),
+        p256: None,
+    };
+
+    std::thread::scope(|scope| {
+        for _ in 0..2 {
+            scope.spawn(|| {
+                let SignOutcome::Success(success) = sign_with_provider(&request) else {
+                    panic!("shared provider signing failed");
+                };
+                assert_eq!(
+                    verify_with_provider(
+                        &success.artifact,
+                        ArtifactForm::Proto,
+                        &keys,
+                        VerifierOptions::default(),
+                    )
+                    .unwrap(),
+                    VerifierState::Verified {
+                        payload: request.payload.to_vec(),
+                        algorithm: AlgorithmId::Ed25519,
+                    },
+                );
+            });
+        }
+    });
+}
+
 struct ScriptedVerifier {
     outcome: ProviderVerificationOutcome,
-    calls: Rc<Cell<usize>>,
+    calls: Arc<AtomicUsize>,
     messages: RecordedMessages,
 }
 
@@ -498,15 +545,15 @@ impl ProviderVerifier for ScriptedVerifier {
         message: &[u8],
         _signature: &[u8; 64],
     ) -> ProviderVerificationOutcome {
-        self.calls.set(self.calls.get() + 1);
-        self.messages.borrow_mut().push(message.to_vec());
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.messages.lock().unwrap().push(message.to_vec());
         self.outcome
     }
 }
 
 struct ScriptedFactory {
     outcome: ProviderVerificationOutcome,
-    calls: Rc<Cell<usize>>,
+    calls: Arc<AtomicUsize>,
     messages: RecordedMessages,
 }
 
@@ -518,23 +565,23 @@ impl ProviderVerifierFactory for ScriptedFactory {
     ) -> Result<Box<dyn ProviderVerifier + 'factory>, signature::Error> {
         Ok(Box::new(ScriptedVerifier {
             outcome: self.outcome,
-            calls: Rc::clone(&self.calls),
-            messages: Rc::clone(&self.messages),
+            calls: Arc::clone(&self.calls),
+            messages: Arc::clone(&self.messages),
         }))
     }
 }
 
-type RecordedMessages = Rc<RefCell<Vec<Vec<u8>>>>;
-type ScriptedFactoryFixture = (ScriptedFactory, Rc<Cell<usize>>, RecordedMessages);
+type RecordedMessages = Arc<Mutex<Vec<Vec<u8>>>>;
+type ScriptedFactoryFixture = (ScriptedFactory, Arc<AtomicUsize>, RecordedMessages);
 
 fn scripted_factory(outcome: ProviderVerificationOutcome) -> ScriptedFactoryFixture {
-    let calls = Rc::new(Cell::new(0));
-    let messages = Rc::new(RefCell::new(Vec::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let messages = Arc::new(Mutex::new(Vec::new()));
     (
         ScriptedFactory {
             outcome,
-            calls: Rc::clone(&calls),
-            messages: Rc::clone(&messages),
+            calls: Arc::clone(&calls),
+            messages: Arc::clone(&messages),
         },
         calls,
         messages,
@@ -594,7 +641,7 @@ fn verification_preserves_mismatch_and_provider_failure_categories() {
             ),
             expected
         );
-        assert_eq!(calls.get(), 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 }
 
@@ -632,7 +679,7 @@ fn malformed_signature_octets_never_reach_a_provider() {
             Ok(VerifierState::MalformedAttemptedSigned)
         );
     }
-    assert_eq!(calls.get(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 
     let p256_signing_key = p256::ecdsa::SigningKey::from_slice(&[42; 32]).unwrap();
     let p256_key = provider
@@ -669,7 +716,7 @@ fn malformed_signature_octets_never_reach_a_provider() {
             Ok(VerifierState::MalformedAttemptedSigned)
         );
     }
-    assert_eq!(calls.get(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -690,7 +737,7 @@ fn pre_verification_handoff_runs_provider_verification_once() {
     };
 
     let pre = pre_verify(&artifact, ArtifactForm::Proto, false, false);
-    assert_eq!(calls.get(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert!(matches!(
         verify_from_pre_verify_with_unqualified_provider(
             &pre,
@@ -699,7 +746,7 @@ fn pre_verification_handoff_runs_provider_verification_once() {
         ),
         Ok(VerifierState::Verified { .. })
     ));
-    assert_eq!(calls.get(), 1);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert!(matches!(
         verify_from_pre_verify_with_provider(&pre, &keys, VerifierOptions::default()),
         Ok(VerifierState::Verified { .. })
@@ -709,13 +756,13 @@ fn pre_verification_handoff_runs_provider_verification_once() {
 struct ExpectedP256Signer {
     key: p256::ecdsa::SigningKey,
     expected_message: Vec<u8>,
-    calls: Rc<Cell<usize>>,
+    calls: Arc<AtomicUsize>,
 }
 
 impl signature::Signer<[u8; 64]> for ExpectedP256Signer {
     fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], signature::Error> {
         assert_eq!(message, self.expected_message);
-        self.calls.set(self.calls.get() + 1);
+        self.calls.fetch_add(1, Ordering::Relaxed);
         let signature: p256::ecdsa::Signature = self.key.try_sign(message)?;
         Ok(signature.to_bytes().into())
     }
@@ -735,11 +782,11 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             b"\xff\x00opaque\x80".as_slice(),
         ),
     ] {
-        let calls = Rc::new(Cell::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
         let signer = ExpectedP256Signer {
             key: p256::ecdsa::SigningKey::from_slice(&[43; 32]).unwrap(),
             expected_message: expected_message.to_vec(),
-            calls: Rc::clone(&calls),
+            calls: Arc::clone(&calls),
         };
         let public_key = signer.key.verifying_key().to_encoded_point(false);
         let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
@@ -757,7 +804,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
         let SignOutcome::Success(success) = sign_with_provider(&request) else {
             panic!("qualified P-256 signing failed");
         };
-        assert_eq!(calls.get(), 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
 
         let (factory, verify_calls, messages) =
             scripted_factory(ProviderVerificationOutcome::Verified);
@@ -782,8 +829,8 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             ),
             Ok(VerifierState::Verified { .. })
         ));
-        assert_eq!(verify_calls.get(), 1);
-        assert_eq!(messages.borrow().as_slice(), [expected_message]);
+        assert_eq!(verify_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(messages.lock().unwrap().as_slice(), [expected_message]);
     }
 }
 
@@ -830,8 +877,11 @@ fn provider_metadata_and_exact_message_paths_remain_available() {
     )
     .unwrap();
     assert!(matches!(result.state, VerifierState::Verified { .. }));
-    assert_eq!(calls.get(), 1);
-    assert_eq!(messages.borrow().as_slice(), [b"scripted-provider: test\n"]);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        messages.lock().unwrap().as_slice(),
+        [b"scripted-provider: test\n"]
+    );
 
     let qualified = VerificationProviderBuilder::new(ReferenceFactory).qualify();
     let qualified_key = qualified.bind_ed25519(public_key.as_bytes()).unwrap();

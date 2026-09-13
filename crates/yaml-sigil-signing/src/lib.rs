@@ -772,31 +772,32 @@ impl AsyncSigner for DefaultAsyncSigner {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use ed25519_dalek::SigningKey as EdSk;
 
     struct CapturingEd25519Signer {
         key: EdSk,
-        calls: Cell<usize>,
-        messages: RefCell<Vec<Vec<u8>>>,
+        calls: AtomicUsize,
+        messages: Mutex<Vec<Vec<u8>>>,
     }
 
     impl CapturingEd25519Signer {
         fn new(seed: u8) -> Self {
             Self {
                 key: EdSk::from_bytes(&[seed; 32]),
-                calls: Cell::new(0),
-                messages: RefCell::new(Vec::new()),
+                calls: AtomicUsize::new(0),
+                messages: Mutex::new(Vec::new()),
             }
         }
     }
 
     impl signature::Signer<[u8; 64]> for CapturingEd25519Signer {
         fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], signature::Error> {
-            self.calls.set(self.calls.get() + 1);
-            self.messages.borrow_mut().push(message.to_vec());
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.messages.lock().unwrap().push(message.to_vec());
             let signature: ed25519_dalek::Signature =
                 signature::Signer::try_sign(&self.key, message)?;
             Ok(signature.to_bytes())
@@ -1137,7 +1138,7 @@ mod tests {
         };
         assert_eq!(yaml_success.modified_payload, b"provider: yaml\n");
         assert!(yaml_success.artifact.starts_with(b"provider: yaml\n---\n"));
-        assert_eq!(signer.messages.borrow()[0], b"provider: yaml\n");
+        assert_eq!(signer.messages.lock().unwrap()[0], b"provider: yaml\n");
 
         let protobuf_payload = [0xff, 0x00, 0x80, 0x0a];
         let protobuf_request = ProviderSignRequest {
@@ -1153,7 +1154,7 @@ mod tests {
             sign_with_provider(&protobuf_request),
             SignOutcome::Success(_)
         ));
-        assert_eq!(signer.messages.borrow()[1], protobuf_payload);
+        assert_eq!(signer.messages.lock().unwrap()[1], protobuf_payload);
     }
 
     #[test]
@@ -1233,7 +1234,7 @@ mod tests {
                 SignOutcome::Invocation(SignInvocationError::InvalidKeyid)
             ));
         }
-        assert_eq!(signer.calls.get(), 0);
+        assert_eq!(signer.calls.load(Ordering::Relaxed), 0);
     }
 
     #[test]
