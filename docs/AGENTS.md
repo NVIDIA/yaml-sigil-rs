@@ -11,6 +11,7 @@ does not directly edit a Markdown file.
 
 | Document | Update when |
 |----------|-------------|
+| [`crypto-providers.md`](./crypto-providers.md) | Public crypto types, adapter contracts, qualified or unqualified behavior, async semantics, key binding, error mapping, resource admission, integration examples, qualification call counts, operation costs, or regression coverage change. Update its three-path checklist with the evidence and remaining integrator responsibilities. |
 | [`conformance-validation.md`](./conformance-validation.md) | Fixtures, fixture mappings, expected outcomes, ignored tests, advertised profiles, specification imports, attribution-only imports, public APIs exercised by conformance, or deliberate divergences change. Name the affected paths, expected outcomes, and divergence reasons. |
 | [`yaml-backend-evaluation.md`](./yaml-backend-evaluation.md) | The current YAML backend, configuration, parser budgets, public Serde boundary, or interoperability evidence changes. Update the sections describing the current implementation and validation. Preserve historical evaluations as dated findings; label corrections or new evaluations explicitly. |
 
