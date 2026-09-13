@@ -24,6 +24,25 @@ const SIGNATURE_DOCUMENT_MAX_MERGE_KEYS: usize = 8;
 pub const TIER_A_TOP_LEVEL_KEYS: &[&str] = &["schema", "alg", "keyid", "signature"];
 
 /// Parsed `YamlSigilSignature.v1alpha1` YAML mapping (transport form).
+///
+/// Serde is the stable public data-model interoperability boundary for this
+/// type. Direct Serde deserialization bypasses YamlSigil's YAML byte limit,
+/// parser resource budgets, and policies for documents, duplicate keys, merge
+/// keys, anchors, and tags. Use [`parse_signature_document`] as the
+/// authoritative entry point for untrusted YAML signature carriers.
+///
+/// The stable Serde representation uses the exact field names `schema`, `alg`,
+/// `keyid`, and `signature`. The `schema`, `alg`, and `signature` fields are
+/// required strings. `keyid` is an optional string: a missing field
+/// deserializes as `None`, and `None` is omitted during serialization.
+/// Unknown fields are rejected. Treat changes to these representation rules as
+/// public API changes under SemVer.
+///
+/// Serde compatibility does not promise identical YAML acceptance, resource
+/// policy, presentation preservation, or canonical bytes across serialization
+/// backends. Use [`serialize_signature_document`] for canonical YAML emission.
+/// Callers that need lossless forwarding must retain the original carrier
+/// bytes. Concrete serialization backends are private implementation details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SignatureDocument {
@@ -210,6 +229,78 @@ mod tests {
     use crate::error::CoreError;
 
     use super::SignatureDocument;
+
+    fn serde_document(keyid: Option<&str>) -> SignatureDocument {
+        SignatureDocument {
+            schema: crate::SCHEMA_V1ALPHA1.into(),
+            alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+            keyid: keyid.map(str::to_owned),
+            signature: "Zm9v".into(),
+        }
+    }
+
+    #[test]
+    fn serde_representation_uses_stable_field_names_and_omits_absent_keyid() {
+        assert_eq!(
+            serde_json::to_value(serde_document(Some("key-1"))).unwrap(),
+            serde_json::json!({
+                "schema": crate::SCHEMA_V1ALPHA1,
+                "alg": "ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
+                "keyid": "key-1",
+                "signature": "Zm9v",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(serde_document(None)).unwrap(),
+            serde_json::json!({
+                "schema": crate::SCHEMA_V1ALPHA1,
+                "alg": "ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
+                "signature": "Zm9v",
+            })
+        );
+    }
+
+    #[test]
+    fn serde_representation_defaults_absent_keyid() {
+        let value = serde_json::json!({
+            "schema": crate::SCHEMA_V1ALPHA1,
+            "alg": "ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
+            "signature": "Zm9v",
+        });
+
+        assert_eq!(
+            serde_json::from_value::<SignatureDocument>(value).unwrap(),
+            serde_document(None)
+        );
+    }
+
+    #[test]
+    fn serde_representation_requires_fields_and_rejects_unknown_fields() {
+        let complete = serde_json::json!({
+            "schema": crate::SCHEMA_V1ALPHA1,
+            "alg": "ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
+            "signature": "Zm9v",
+        });
+
+        for required in ["schema", "alg", "signature"] {
+            let mut missing = complete.clone();
+            missing
+                .as_object_mut()
+                .expect("test value is an object")
+                .remove(required);
+            assert!(
+                serde_json::from_value::<SignatureDocument>(missing).is_err(),
+                "missing required field {required:?} was accepted"
+            );
+        }
+
+        let mut unknown = complete;
+        unknown
+            .as_object_mut()
+            .expect("test value is an object")
+            .insert("unexpected".into(), serde_json::json!(true));
+        assert!(serde_json::from_value::<SignatureDocument>(unknown).is_err());
+    }
 
     #[test]
     fn validate_schema_rejects_wrong_schema() {

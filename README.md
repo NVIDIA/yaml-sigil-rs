@@ -43,10 +43,21 @@ This crate contains the document machinery shared by the other crates. It
 recognizes document boundaries, applies payload rules, reads and writes YAML
 signature documents, handles the protobuf wire format, and maps signature
 algorithms. It exposes a stable protobuf facade backed by private generated
-code from [`buffa`](https://crates.io/crates/buffa) and parses YAML with
+code from [`buffa`](https://crates.io/crates/buffa). Its public
+`SignatureDocument` Serde data model and YamlSigil-owned parser and serializer
+keep the concrete YAML backend private. The implementation currently uses
 [`noyalib`](https://crates.io/crates/noyalib). Its optional
 `json-schema-validate` feature validates signature documents against the local
 schema.
+
+Serde is the stable public data-model boundary for `SignatureDocument`.
+Consumers can exchange semantic values through Serde without depending on the
+`noyalib` release selected by this workspace. Direct Serde deserialization does
+not apply YamlSigil's YAML byte limit or parser policies, so use
+`parse_signature_document` for untrusted YAML signature carriers. Serde
+compatibility does not promise identical YAML acceptance, resource policy,
+presentation, or bytes. Use `serialize_signature_document` for canonical YAML,
+and retain the original carrier bytes when forwarding must be lossless.
 
 The other released crates build on this layer. Signing uses it to apply the
 document rules and encode signature information. Transcription uses it to take
