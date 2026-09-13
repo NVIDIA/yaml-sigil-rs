@@ -15,6 +15,11 @@
 //! qualification again. A qualified provider result is authoritative; the
 //! operation path does not retry it through RustCrypto.
 //!
+//! Qualification checks fixed cases to catch incompatibilities and adapter
+//! mistakes. The adapter remains trusted code; this is not a defense against
+//! an implementation deliberately written to pass the suite and misbehave
+//! on other inputs.
+//!
 //! # Implement a verification adapter
 //!
 //! Add a direct dependency on `signature` 2.2 and implement these public
@@ -183,7 +188,9 @@ pub trait ProviderVerifierFactory {
     ///
     /// The implementation must bind the returned opaque handle to exactly the
     /// supplied canonical key. It must not substitute a configured default or
-    /// ignore the bytes.
+    /// ignore the bytes. Keep per-handle key state or a stable key identifier.
+    /// Binding or using another handle must not retarget or invalidate this
+    /// one. A lock around a shared "current key" does not preserve that binding.
     fn bind<'factory>(
         &'factory self,
         algorithm: AlgorithmId,
@@ -561,7 +568,7 @@ pub type ProviderPublicKeys<'a> =
 pub type UnqualifiedProviderPublicKeys<'a> =
     GenericPublicKeys<'a, UnqualifiedProviderVerifyingKey<'a>, UnqualifiedProviderVerifyingKey<'a>>;
 
-fn validate_public_key(
+pub(crate) fn validate_public_key(
     algorithm: AlgorithmId,
     canonical_public_key: &[u8],
 ) -> Result<(), ProviderKeyBindingError> {
@@ -575,14 +582,14 @@ fn validate_public_key(
     }
 }
 
-fn binding_error(
+pub(crate) fn binding_error(
     algorithm: AlgorithmId,
     kind: ProviderKeyBindingErrorKind,
 ) -> ProviderKeyBindingError {
     ProviderKeyBindingError { kind, algorithm }
 }
 
-fn qualification_status(
+pub(crate) fn qualification_status(
     algorithm: AlgorithmId,
     result: Result<(), ProviderQualificationErrorKind>,
 ) -> ProviderQualificationStatus {
@@ -594,7 +601,7 @@ fn qualification_status(
     }
 }
 
-fn expect_provider_result(
+pub(crate) fn expect_provider_result(
     outcome: ProviderVerificationOutcome,
     expected: ProviderVerificationOutcome,
 ) -> Result<(), ProviderQualificationErrorKind> {
@@ -614,12 +621,12 @@ fn expect_provider_result(
     }
 }
 
-const RFC8032_TEST_1_PUBLIC_KEY: [u8; 32] = [
+pub(crate) const RFC8032_TEST_1_PUBLIC_KEY: [u8; 32] = [
     0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
     0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
 ];
 
-const RFC8032_TEST_1_SIGNATURE: [u8; 64] = [
+pub(crate) const RFC8032_TEST_1_SIGNATURE: [u8; 64] = [
     0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72, 0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
     0x84, 0x87, 0x7f, 0x1e, 0xb8, 0xe5, 0xd9, 0x74, 0xd8, 0x73, 0xe0, 0x65, 0x22, 0x49, 0x01, 0x55,
     0x5f, 0xb8, 0x82, 0x15, 0x90, 0xa3, 0x3b, 0xac, 0xc6, 0x1e, 0x39, 0x70, 0x1c, 0xf9, 0xb4, 0x6b,
@@ -629,23 +636,23 @@ const RFC8032_TEST_1_SIGNATURE: [u8; 64] = [
 // Locally generated fixed vectors that exercise the cofactored equation with
 // a mixed-order `R` point and a mixed-order public key. These are public
 // qualification inputs, not production signing keys or provider operations.
-const ED25519_MIXED_R_MESSAGE: &[u8] = b"YamlSigil Ed25519 mixed R qualification";
-const ED25519_MIXED_R_PUBLIC_KEY: [u8; 32] = [
+pub(crate) const ED25519_MIXED_R_MESSAGE: &[u8] = b"YamlSigil Ed25519 mixed R qualification";
+pub(crate) const ED25519_MIXED_R_PUBLIC_KEY: [u8; 32] = [
     0xb8, 0x62, 0x40, 0x9f, 0xb5, 0xc4, 0xc4, 0x12, 0x3d, 0xf2, 0xab, 0xf7, 0x46, 0x2b, 0x88, 0xf0,
     0x41, 0xad, 0x36, 0xdd, 0x68, 0x64, 0xce, 0x87, 0x2f, 0xd5, 0x47, 0x2b, 0xe3, 0x63, 0xc5, 0xb1,
 ];
-const ED25519_MIXED_R_SIGNATURE: [u8; 64] = [
+pub(crate) const ED25519_MIXED_R_SIGNATURE: [u8; 64] = [
     0xc8, 0x91, 0xdd, 0x2f, 0xc0, 0xca, 0x87, 0xa7, 0x46, 0x01, 0x93, 0x89, 0x5e, 0x04, 0x6a, 0x91,
     0x4c, 0x11, 0xb6, 0x6f, 0xdf, 0xfa, 0x8e, 0x6b, 0x7c, 0x3b, 0xa8, 0x31, 0x38, 0x49, 0x9c, 0x70,
     0x60, 0xe4, 0x42, 0xf8, 0xcd, 0xcf, 0xda, 0x4b, 0xcf, 0x5f, 0xf4, 0x18, 0x62, 0x71, 0xe1, 0x69,
     0x96, 0x2e, 0x40, 0xab, 0x92, 0x36, 0x45, 0x62, 0x76, 0x0b, 0x99, 0xec, 0x91, 0x99, 0x67, 0x0e,
 ];
-const ED25519_MIXED_A_MESSAGE: &[u8] = b"YamlSigil Ed25519 mixed A qualification";
-const ED25519_MIXED_A_PUBLIC_KEY: [u8; 32] = [
+pub(crate) const ED25519_MIXED_A_MESSAGE: &[u8] = b"YamlSigil Ed25519 mixed A qualification";
+pub(crate) const ED25519_MIXED_A_PUBLIC_KEY: [u8; 32] = [
     0xe9, 0xb2, 0xfe, 0x98, 0x15, 0x87, 0xef, 0xae, 0x64, 0x78, 0xf4, 0x8b, 0xa1, 0xfa, 0x60, 0xce,
     0xc6, 0x12, 0x6d, 0x0e, 0x26, 0xdd, 0xe7, 0x2a, 0x0a, 0x24, 0xf6, 0x40, 0xdc, 0xd7, 0x83, 0xe5,
 ];
-const ED25519_MIXED_A_SIGNATURE: [u8; 64] = [
+pub(crate) const ED25519_MIXED_A_SIGNATURE: [u8; 64] = [
     0x13, 0x37, 0x03, 0x6a, 0xc3, 0x2d, 0x8f, 0x30, 0xd4, 0x58, 0x9c, 0x3c, 0x1c, 0x59, 0x58, 0x12,
     0xce, 0x0f, 0xff, 0x40, 0xe3, 0x7c, 0x6f, 0x5a, 0x97, 0xab, 0x21, 0x3f, 0x31, 0x82, 0x90, 0xad,
     0x4f, 0x77, 0x53, 0x17, 0x4a, 0x7f, 0x11, 0xe9, 0x72, 0x16, 0x75, 0x31, 0xf9, 0x64, 0xed, 0x73,
@@ -656,7 +663,7 @@ const ED25519_MIXED_A_SIGNATURE: [u8; 64] = [
 // uncompressed point encoding from *Standards for Efficient Cryptography 1
 // (SEC 1)*. The two signatures share `r` and use the mathematically equivalent
 // low-S and high-S representatives required by the YamlSigil P-256 slot.
-const P256_QUALIFICATION_PUBLIC_KEY: [u8; 65] = [
+pub(crate) const P256_QUALIFICATION_PUBLIC_KEY: [u8; 65] = [
     0x04, 0x1e, 0x18, 0x53, 0x2f, 0xd4, 0x75, 0x4c, 0x02, 0xf3, 0x04, 0x1d, 0x9c, 0x75, 0xce, 0xb3,
     0x3b, 0x83, 0xff, 0xd8, 0x1a, 0xc7, 0xce, 0x4f, 0xe8, 0x82, 0xcc, 0xb1, 0xc9, 0x8b, 0xc5, 0x89,
     0x6e, 0xa4, 0x6c, 0x31, 0x1c, 0x4e, 0x2f, 0xf4, 0x0d, 0xd9, 0x6a, 0x36, 0x53, 0xe6, 0xe4, 0x54,
@@ -664,14 +671,14 @@ const P256_QUALIFICATION_PUBLIC_KEY: [u8; 65] = [
     0xa3,
 ];
 
-const P256_QUALIFICATION_LOW_SIGNATURE: [u8; 64] = [
+pub(crate) const P256_QUALIFICATION_LOW_SIGNATURE: [u8; 64] = [
     0xb6, 0xc6, 0x64, 0x31, 0x44, 0xa6, 0x2c, 0x53, 0x5d, 0x06, 0xa8, 0x0d, 0xc8, 0x54, 0x36, 0xf8,
     0xd6, 0x07, 0x99, 0x77, 0x8e, 0xc2, 0xef, 0x85, 0x27, 0xae, 0x22, 0xbe, 0xe8, 0x4c, 0xc9, 0x91,
     0x32, 0xaa, 0xd3, 0x55, 0x2c, 0x8a, 0x59, 0x6a, 0x73, 0x1d, 0x9d, 0x02, 0xb7, 0xa9, 0xcd, 0x14,
     0xb5, 0x6b, 0x3f, 0x0c, 0x7b, 0xd5, 0xe8, 0xc9, 0xec, 0x08, 0xcc, 0x60, 0x3c, 0x75, 0xa8, 0xf1,
 ];
 
-const P256_QUALIFICATION_HIGH_SIGNATURE: [u8; 64] = [
+pub(crate) const P256_QUALIFICATION_HIGH_SIGNATURE: [u8; 64] = [
     0xb6, 0xc6, 0x64, 0x31, 0x44, 0xa6, 0x2c, 0x53, 0x5d, 0x06, 0xa8, 0x0d, 0xc8, 0x54, 0x36, 0xf8,
     0xd6, 0x07, 0x99, 0x77, 0x8e, 0xc2, 0xef, 0x85, 0x27, 0xae, 0x22, 0xbe, 0xe8, 0x4c, 0xc9, 0x91,
     0xcd, 0x55, 0x2c, 0xa9, 0xd3, 0x75, 0xa6, 0x96, 0x8c, 0xe2, 0x62, 0xfd, 0x48, 0x56, 0x32, 0xeb,
@@ -681,7 +688,7 @@ const P256_QUALIFICATION_HIGH_SIGNATURE: [u8; 64] = [
 // A second locally generated public vector for the same message, using
 // p256 0.13.2 and deterministic test key bytes [73; 32]. Keeping both handles
 // live tests that binding another key does not reuse or retarget a handle.
-const P256_ALTERNATE_PUBLIC_KEY: [u8; 65] = [
+pub(crate) const P256_ALTERNATE_PUBLIC_KEY: [u8; 65] = [
     0x04, 0x15, 0x73, 0x18, 0x65, 0xc4, 0x45, 0x0f, 0x07, 0xda, 0x2e, 0x52, 0xec, 0xe8, 0x33, 0x3a,
     0x92, 0xe6, 0x17, 0xfa, 0x3c, 0x13, 0xcc, 0x05, 0xa7, 0xc2, 0x88, 0x6a, 0x55, 0x8a, 0xda, 0xd4,
     0x08, 0xde, 0x94, 0x8a, 0xf1, 0x4b, 0x54, 0xa5, 0xb0, 0xcf, 0xb4, 0xc8, 0x13, 0x8b, 0x5a, 0xfe,
@@ -689,7 +696,7 @@ const P256_ALTERNATE_PUBLIC_KEY: [u8; 65] = [
     0x3e,
 ];
 
-const P256_ALTERNATE_SIGNATURE: [u8; 64] = [
+pub(crate) const P256_ALTERNATE_SIGNATURE: [u8; 64] = [
     0x46, 0x76, 0xd6, 0xb5, 0x1e, 0x9e, 0x5a, 0x5b, 0x29, 0xa5, 0x3c, 0x1f, 0x9f, 0xd4, 0x37, 0xe1,
     0x7e, 0x6b, 0x6e, 0x40, 0xa3, 0xc7, 0xfd, 0xb7, 0xa9, 0x28, 0x92, 0xe0, 0x3d, 0x1a, 0xc6, 0x05,
     0x33, 0xfb, 0xd2, 0x05, 0xb4, 0x7c, 0xfd, 0xe1, 0xf5, 0xae, 0xa8, 0x35, 0xd5, 0x8a, 0x7d, 0xc2,
@@ -726,6 +733,27 @@ fn qualify_ed25519_provider<P: ProviderVerifierFactory>(
         let verifier = provider
             .bind(AlgorithmId::Ed25519, public_key)
             .map_err(|_| ProviderQualificationErrorKind::KeyBindingFailed)?;
+        expect_provider_result(
+            verifier.verify_provider(message, signature),
+            ProviderVerificationOutcome::Verified,
+        )?;
+        // Keep the original handle live across each later bind. A shared
+        // mutable "current key" can pass isolated round trips while silently
+        // retargeting older handles. Reuse the same attributed public inputs.
+        expect_provider_result(
+            standard.verify_provider(b"", &RFC8032_TEST_1_SIGNATURE),
+            ProviderVerificationOutcome::Verified,
+        )?;
+        expect_provider_result(
+            verifier.verify_provider(b"", &RFC8032_TEST_1_SIGNATURE),
+            ProviderVerificationOutcome::SignatureMismatch,
+        )?;
+        expect_provider_result(
+            standard.verify_provider(message, signature),
+            ProviderVerificationOutcome::SignatureMismatch,
+        )?;
+        // Recheck the later handle too: using the first must not invalidate
+        // it, which could otherwise look like success in negative checks.
         expect_provider_result(
             verifier.verify_provider(message, signature),
             ProviderVerificationOutcome::Verified,
@@ -911,12 +939,13 @@ mod tests {
     }
 
     struct FaultyBindingFactory {
+        algorithm: AlgorithmId,
         fault: BindingFault,
-        keys: Arc<Mutex<Vec<p256::ecdsa::VerifyingKey>>>,
+        keys: Arc<Mutex<Vec<ReferenceKey>>>,
     }
 
     struct FaultyBindingVerifier {
-        keys: Arc<Mutex<Vec<p256::ecdsa::VerifyingKey>>>,
+        keys: Arc<Mutex<Vec<ReferenceKey>>>,
         key_index: Option<usize>,
     }
 
@@ -925,8 +954,13 @@ mod tests {
             // Deliberately violates the exact-key binding contract by using
             // shared cached keys instead of the key supplied for this handle.
             let mut keys = self.keys.lock().unwrap();
-            let verifies = |key: &p256::ecdsa::VerifyingKey| {
-                crate::crypto::verify_ecdsa_p256_sha256(key, message, signature).is_ok()
+            let verifies = |key: &ReferenceKey| match key {
+                ReferenceKey::Ed25519(key) => {
+                    crate::crypto::verify_ed25519(key, message, signature).is_ok()
+                }
+                ReferenceKey::EcdsaP256Sha256(key) => {
+                    crate::crypto::verify_ecdsa_p256_sha256(key, message, signature).is_ok()
+                }
             };
             let verified = if let Some(index) = self.key_index {
                 let verified = keys.get(index).is_some_and(verifies);
@@ -951,11 +985,19 @@ mod tests {
             algorithm: AlgorithmId,
             canonical_public_key: &[u8],
         ) -> Result<Box<dyn ProviderVerifier + 'factory>, signature::Error> {
-            if algorithm != AlgorithmId::EcdsaP256Sha256 {
+            if algorithm != self.algorithm {
                 return Err(signature::Error::new());
             }
-            let key = crate::crypto::resolve_p256_verifying_key(canonical_public_key)
-                .map_err(|_| signature::Error::new())?;
+            let key = match algorithm {
+                AlgorithmId::Ed25519 => ReferenceKey::Ed25519(
+                    crate::crypto::resolve_ed25519_verifying_key(canonical_public_key)
+                        .map_err(|_| signature::Error::new())?,
+                ),
+                AlgorithmId::EcdsaP256Sha256 => ReferenceKey::EcdsaP256Sha256(
+                    crate::crypto::resolve_p256_verifying_key(canonical_public_key)
+                        .map_err(|_| signature::Error::new())?,
+                ),
+            };
             let mut keys = self.keys.lock().unwrap();
             let key_index =
                 matches!(self.fault, BindingFault::InvalidateAlternate).then_some(keys.len());
@@ -977,52 +1019,62 @@ mod tests {
     }
 
     #[test]
-    fn qualification_rejects_cached_retargeted_or_invalidated_p256_handles() {
-        for fault in [
-            BindingFault::CacheFirst,
-            BindingFault::Retarget,
-            BindingFault::InvalidateAlternate,
-        ] {
-            let provider = VerificationProviderBuilder::new(FaultyBindingFactory {
-                fault,
-                keys: Arc::new(Mutex::new(Vec::new())),
-            })
-            .qualify();
-            let ProviderQualificationStatus::Rejected(error) =
-                provider.status(AlgorithmId::EcdsaP256Sha256)
-            else {
-                panic!("a factory that reuses key bindings must not qualify");
-            };
-            assert_eq!(
-                error.kind(),
-                ProviderQualificationErrorKind::ValidSignatureRejected
-            );
-            assert_eq!(
-                provider
-                    .bind_ecdsa_p256_sha256(&P256_ALTERNATE_PUBLIC_KEY)
-                    .unwrap_err()
-                    .kind(),
-                ProviderKeyBindingErrorKind::AlgorithmNotQualified,
-            );
+    fn qualification_rejects_cached_retargeted_or_invalidated_handles() {
+        for algorithm in [AlgorithmId::Ed25519, AlgorithmId::EcdsaP256Sha256] {
+            for fault in [
+                BindingFault::CacheFirst,
+                BindingFault::Retarget,
+                BindingFault::InvalidateAlternate,
+            ] {
+                let provider = VerificationProviderBuilder::new(FaultyBindingFactory {
+                    algorithm,
+                    fault,
+                    keys: Arc::new(Mutex::new(Vec::new())),
+                })
+                .qualify();
+                let ProviderQualificationStatus::Rejected(error) = provider.status(algorithm)
+                else {
+                    panic!("a factory that reuses {algorithm:?} key bindings must not qualify");
+                };
+                assert_eq!(
+                    error.kind(),
+                    ProviderQualificationErrorKind::ValidSignatureRejected
+                );
+                let bind_error = match algorithm {
+                    AlgorithmId::Ed25519 => provider
+                        .bind_ed25519(&ED25519_MIXED_R_PUBLIC_KEY)
+                        .unwrap_err(),
+                    AlgorithmId::EcdsaP256Sha256 => provider
+                        .bind_ecdsa_p256_sha256(&P256_ALTERNATE_PUBLIC_KEY)
+                        .unwrap_err(),
+                };
+                assert_eq!(
+                    bind_error.kind(),
+                    ProviderKeyBindingErrorKind::AlgorithmNotQualified
+                );
+            }
         }
     }
 
     #[test]
-    fn qualification_rejects_cross_key_p256_acceptance() {
-        let provider = VerificationProviderBuilder::new(FaultyBindingFactory {
-            fault: BindingFault::AcceptAny,
-            keys: Arc::new(Mutex::new(Vec::new())),
-        })
-        .qualify();
-        let ProviderQualificationStatus::Rejected(error) =
-            provider.status(AlgorithmId::EcdsaP256Sha256)
-        else {
-            panic!("a handle that accepts signatures for another key must not qualify");
-        };
-        assert_eq!(
-            error.kind(),
-            ProviderQualificationErrorKind::InvalidSignatureAccepted
-        );
+    fn qualification_rejects_cross_key_acceptance() {
+        for algorithm in [AlgorithmId::Ed25519, AlgorithmId::EcdsaP256Sha256] {
+            let provider = VerificationProviderBuilder::new(FaultyBindingFactory {
+                algorithm,
+                fault: BindingFault::AcceptAny,
+                keys: Arc::new(Mutex::new(Vec::new())),
+            })
+            .qualify();
+            let ProviderQualificationStatus::Rejected(error) = provider.status(algorithm) else {
+                panic!(
+                    "a handle that accepts signatures for another {algorithm:?} key must not qualify"
+                );
+            };
+            assert_eq!(
+                error.kind(),
+                ProviderQualificationErrorKind::InvalidSignatureAccepted
+            );
+        }
     }
 
     #[test]
@@ -1044,7 +1096,7 @@ mod tests {
         assert!(provider.status(AlgorithmId::Ed25519).is_qualified());
         assert!(provider.status(AlgorithmId::EcdsaP256Sha256).is_qualified());
         assert_eq!(provider.provider.binds.load(Ordering::Relaxed), 5);
-        assert_eq!(provider.provider.verifications.load(Ordering::Relaxed), 15);
+        assert_eq!(provider.provider.verifications.load(Ordering::Relaxed), 23);
     }
 
     #[test]

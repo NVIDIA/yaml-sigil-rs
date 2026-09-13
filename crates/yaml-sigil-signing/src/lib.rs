@@ -29,11 +29,28 @@
 //! bypass. The provider receives message bytes, not a prehash.
 //! See [`provider`] for the public extension contract and a complete adapter
 //! example.
+//!
+//! [`async_provider`] supplies an awaitable signing contract and provider-backed
+//! implementations of [`AsyncSigner`]. Sync and async provider signing also
+//! offer explicit `_and_resource_limits` operations with the same preflight
+//! and final output checks as [`sign_with_resource_limits`]. The
+//! [provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
+//! compares qualified, unqualified, and direct trait integrations.
 
+pub mod async_provider;
 mod proto_carrier;
 pub mod provider;
 mod provider_crypto;
 pub mod transcription;
+
+pub use async_provider::{
+    AsyncProviderSignRequest, AsyncProviderSigner, AsyncProviderSigningKey,
+    AsyncProviderSigningKeyBuilder, AsyncProviderSigningKeys, ProviderAsyncSigner,
+    UnqualifiedAsyncProviderSignRequest, UnqualifiedAsyncProviderSigningKey,
+    UnqualifiedAsyncProviderSigningKeys, UnqualifiedProviderAsyncSigner, sign_with_async_provider,
+    sign_with_async_provider_and_resource_limits, sign_with_unqualified_async_provider,
+    sign_with_unqualified_async_provider_and_resource_limits,
+};
 
 pub use provider::{
     ProviderSignRequest, ProviderSigningKey, ProviderSigningKeyBuilder, ProviderSigningKeyError,
@@ -204,8 +221,8 @@ fn varint_len(mut value: u64) -> u64 {
     length
 }
 
-fn checked_yaml_signing_lower_bound(
-    req: &SignRequest<'_>,
+fn checked_yaml_signing_lower_bound<Ed25519: ?Sized, P256: ?Sized>(
+    req: &GenericSignRequest<'_, Ed25519, P256>,
     limits: &ArtifactResourceLimits,
 ) -> ArtifactResourceResult<usize> {
     let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Yaml);
@@ -257,8 +274,8 @@ fn checked_len_field_size(value_len: u64) -> Option<u64> {
         .and_then(|size| size.checked_add(value_len))
 }
 
-fn checked_proto_signing_size(
-    req: &SignRequest<'_>,
+fn checked_proto_signing_size<Ed25519: ?Sized, P256: ?Sized>(
+    req: &GenericSignRequest<'_, Ed25519, P256>,
     limits: &ArtifactResourceLimits,
 ) -> ArtifactResourceResult<Result<usize, EncodeError>> {
     let overflow = || limits.size_computation_overflow(ArtifactResourceForm::Protobuf);
@@ -299,8 +316,8 @@ fn checked_proto_signing_size_from_lengths(
     Ok(check_encoded_message_size(encoded_size))
 }
 
-fn preflight_signing_output(
-    req: &SignRequest<'_>,
+fn preflight_signing_output<Ed25519: ?Sized, P256: ?Sized>(
+    req: &GenericSignRequest<'_, Ed25519, P256>,
     limits: &ArtifactResourceLimits,
 ) -> ArtifactResourceResult<Result<usize, EncodeError>> {
     match req.output_form {
@@ -435,6 +452,67 @@ pub fn sign_with_unqualified_provider(req: &UnqualifiedProviderSignRequest<'_>) 
     .expect("the unbounded signing path cannot return a resource error")
 }
 
+/// Sign with qualified provider output checks and an explicit output policy.
+///
+/// Uses the request-shape, projected-size, and final exact-size checks of
+/// [`sign_with_resource_limits`]. A conclusive size rejection avoids signing.
+/// YAML's final check runs after signing but before complete-artifact allocation.
+#[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+pub fn sign_with_provider_and_resource_limits(
+    req: &ProviderSignRequest<'_>,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
+    if let Err(error) = validate_invocation_shape(req) {
+        return Ok(Ok(SignOutcome::Invocation(error)));
+    }
+    if !qualified_provider_key_matches_request(req) {
+        return Ok(Ok(SignOutcome::Invocation(
+            SignInvocationError::InvalidOrUnsupportedAlgorithm,
+        )));
+    }
+    if let Err(error) = preflight_signing_output(req, limits)? {
+        return Ok(Err(error));
+    }
+    if let Err(error) = validate_keyid_content(req) {
+        return Ok(Ok(SignOutcome::Invocation(error)));
+    }
+    Ok(Ok(sign_after_invocation_validation(
+        req,
+        Some(limits),
+        |payload| sign_with_qualified_provider_key(payload, req),
+    )?))
+}
+
+/// Sign without output self-verification, applying the existing output policy.
+///
+/// Retains key and signature-structure checks and the resource behavior of
+/// [`sign_with_provider_and_resource_limits`].
+#[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+pub fn sign_with_unqualified_provider_and_resource_limits(
+    req: &UnqualifiedProviderSignRequest<'_>,
+    limits: &ArtifactResourceLimits,
+) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
+    if let Err(error) = validate_invocation_shape(req) {
+        return Ok(Ok(SignOutcome::Invocation(error)));
+    }
+    if !unqualified_provider_key_matches_request(req) {
+        return Ok(Ok(SignOutcome::Invocation(
+            SignInvocationError::InvalidOrUnsupportedAlgorithm,
+        )));
+    }
+    if let Err(error) = preflight_signing_output(req, limits)? {
+        return Ok(Err(error));
+    }
+    if let Err(error) = validate_keyid_content(req) {
+        return Ok(Ok(SignOutcome::Invocation(error)));
+    }
+    Ok(Ok(sign_after_invocation_validation(
+        req,
+        Some(limits),
+        |payload| sign_with_unqualified_provider_key(payload, req),
+    )?))
+}
+
 fn sign_inner(req: &SignRequest<'_>) -> SignOutcome {
     if let Err(e) = validate_invocation(req) {
         return SignOutcome::Invocation(e);
@@ -450,18 +528,35 @@ fn sign_after_invocation_validation<Ed25519: ?Sized, P256: ?Sized>(
     limits: Option<&ArtifactResourceLimits>,
     sign_payload: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
 ) -> ArtifactResourceResult<SignOutcome> {
+    let prepared = match prepare_signing_payload(req) {
+        Ok(prepared) => prepared,
+        Err(error) => return Ok(SignOutcome::Signer(error)),
+    };
+    let signature = match sign_payload(&prepared.payload) {
+        Ok(signature) => signature,
+        Err(error) => return Ok(SignOutcome::Signer(error)),
+    };
+    finish_signing(req, prepared, &signature, limits)
+}
+
+struct PreparedSigningPayload {
+    payload: Vec<u8>,
+    modified_payload: Vec<u8>,
+}
+
+// Sync and async operations keep exactly the same prepared bytes through
+// signing and framing. An async caller owns this value across its await.
+fn prepare_signing_payload<Ed25519: ?Sized, P256: ?Sized>(
+    req: &GenericSignRequest<'_, Ed25519, P256>,
+) -> Result<PreparedSigningPayload, SignError> {
     // Only YAML output applies the YAML envelope rules: valid UTF-8, no BOM,
     // and a final line terminator. Protobuf payloads are opaque bytes and must
     // bypass both normalization and validation.
     let payload = match req.output_form {
         OutputForm::Yaml => {
-            let payload =
-                match normalize_yaml_payload(req.payload, req.append_missing_final_newline) {
-                    Ok(p) => p,
-                    Err(e) => return Ok(SignOutcome::Signer(e)),
-                };
+            let payload = normalize_yaml_payload(req.payload, req.append_missing_final_newline)?;
             if validate_payload_stream(&payload).is_err() {
-                return Ok(SignOutcome::Signer(SignError::InvalidPayloadBytes));
+                return Err(SignError::InvalidPayloadBytes);
             }
             payload
         }
@@ -474,24 +569,36 @@ fn sign_after_invocation_validation<Ed25519: ?Sized, P256: ?Sized>(
         payload.clone()
     };
 
-    let sig_bytes = match sign_payload(&payload) {
-        Ok(b) => b,
-        Err(e) => return Ok(SignOutcome::Signer(e)),
-    };
+    Ok(PreparedSigningPayload {
+        payload,
+        modified_payload,
+    })
+}
+
+fn finish_signing<Ed25519: ?Sized, P256: ?Sized>(
+    req: &GenericSignRequest<'_, Ed25519, P256>,
+    prepared: PreparedSigningPayload,
+    sig_bytes: &[u8; 64],
+    limits: Option<&ArtifactResourceLimits>,
+) -> ArtifactResourceResult<SignOutcome> {
+    let PreparedSigningPayload {
+        payload,
+        modified_payload,
+    } = prepared;
 
     let artifact = match req.output_form {
         OutputForm::Yaml => {
             let emitted = if let Some(limits) = limits {
-                emit_yaml_artifact_with_resource_limits(&payload, req, &sig_bytes, limits)?
+                emit_yaml_artifact_with_resource_limits(&payload, req, sig_bytes, limits)?
             } else {
-                emit_yaml_artifact(&payload, req, &sig_bytes)
+                emit_yaml_artifact(&payload, req, sig_bytes)
             };
             match emitted {
                 Ok(artifact) => artifact,
                 Err(error) => return Ok(SignOutcome::Signer(error)),
             }
         }
-        OutputForm::Protobuf => match emit_proto_artifact(&payload, req, &sig_bytes) {
+        OutputForm::Protobuf => match emit_proto_artifact(&payload, req, sig_bytes) {
             Ok(a) => a,
             Err(e) => return Ok(SignOutcome::Signer(e)),
         },
