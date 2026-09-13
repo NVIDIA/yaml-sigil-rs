@@ -333,7 +333,7 @@ original raw input.
 
 ## Local cryptographic provider boundaries
 
-The synchronous provider-aware operations reuse the same payload extraction,
+The sync and async provider-aware operations reuse the same payload extraction,
 signature-structure checks, public-key admissibility rules, artifact framing,
 and verifier-state mapping as the RustCrypto convenience operations. The
 provider receives final message bytes and a fixed 64-octet signature. The
@@ -342,7 +342,7 @@ boundary does not expose a prehash form.
 Qualified signing validates the canonical public key bound to the provider
 handle and self-verifies every real output before returning an artifact.
 Qualified verification runs a bounded, public-only fixed suite for each
-algorithm slot on one exact in-process adapter instance. Qualification is an
+algorithm slot on one exact configured adapter instance. Qualification is an
 implementation-local interoperability check, not a YamlSigil conformance
 result or a FIPS validation claim. Unqualified builders and operations make a
 deliberate bypass explicit while retaining structural checks.
@@ -354,13 +354,63 @@ failure for providers that reject a permitted cofactored-equation vector is
 recorded as a provider-slot result and does not change artifact
 classification or the advertised conformance profile.
 
-The P-256 qualification suite checks two live public-key bindings, including
-low-S and high-S acceptance and cross-key rejection. Regression tests reject
-factories that cache the first key, retarget or invalidate existing handles,
-or accept signatures for either bound key. Provider key types also have
+Both algorithm qualification suites check multiple live public-key bindings
+and cross-key rejection in both directions. The Ed25519 suite revisits the
+original handle after binding each mixed-order case, then rechecks the later
+handle after using the first. P-256 also checks low-S and high-S acceptance.
+Sync and async regression tests reject factories that cache the first key,
+retarget or invalidate existing handles, or accept signatures for another
+bound key. These checks reuse existing attributed inputs and exercise
+ordinary adapter mistakes; they do not defend against deliberate suite
+evasion by trusted adapter code. Provider key types also have
 compile-time `Send + Sync` checks and a test that signs and verifies across
 worker threads. These checks add no conformance fixture or change to artifact
 classification.
+
+`crates/yaml-sigil-verification/src/async_provider_tests.rs` exercises both
+algorithms and artifact forms through the public async provider functions and
+`AsyncSigner`/`AsyncVerifier` facades. Expected results preserve final YAML
+newlines, arbitrary protobuf payload bytes, metadata, and pre-verification
+reuse. Tests check qualified and unqualified behavior, malformed-input and
+key rejection before provider work, operational errors distinct from
+signature mismatch, borrowed `Send` futures, and pending/wake/drop behavior.
+Qualification status and call counts match the synchronous fixed suite,
+including mixed-order Ed25519 cases and faulty P-256 key bindings.
+
+`crates/yaml-sigil-conformance/tests/provider_async.rs` adds focused fixture
+coverage through the public provider-backed `AsyncVerifier` facades, with a
+borrowed factory and `Send` futures. Both qualified and unqualified paths
+expect `Verified` for existing `alg-ecdsa/{high-s,low-s}.{yaml,binpb}` fixtures.
+They expect `MalformedAttemptedSigned` without a provider verification call
+for `alg-ecdsa/invalid-r-zero.binpb`, `invalid-s-equals-n.binpb`, and
+`signature-{63,65}-bytes.binpb`. This extends fixture-to-API coverage without
+changing fixture bytes, expected classifications, or declared divergences.
+
+Bounded signing tests compare sync and async provider behavior for both
+algorithms and forms on qualified and unqualified paths. Oversized preflight
+requests invoke no signer. YAML serialization expansion can instead reject
+after signing, before complete artifact allocation; an exact fitting limit
+succeeds. Verification reuses the original-input admission helper or bounded
+pre-verification. These resource results remain operational policy, not
+conformance outcomes.
+
+The [`provider guide`](./crypto-providers.md) maintains the tested and untested
+checklist across qualified providers, unqualified providers, and direct
+`yaml-sigil-traits` implementations. Finite qualification and successful
+signature self-verification do not establish complete conformance, randomness
+quality, SDK scheduling safety, or deployment certification. The complete
+generic fixture harness still specializes its associated keys to RustCrypto;
+it does not automatically test every provider implementation.
+
+[`examples/ring_unqualified_provider.rs`](../examples/ring_unqualified_provider.rs)
+tests explicitly unqualified signing and verification with fresh P-256 and
+Ed25519 keys for default, file, and standard-input YAML. Each operation expects
+`Verified`; the tests independently verify its printed artifact using the
+printed public key through the RustCrypto convenience API. Neither the
+example nor its tests requires provider qualification. These generated samples
+test integration and output handling, not complete conformance. The pinned
+`ring` verifier's mixed-order Ed25519 acceptance difference remains. No fixture
+bytes or expected fixture outcomes change.
 
 ## Known Behaviors
 

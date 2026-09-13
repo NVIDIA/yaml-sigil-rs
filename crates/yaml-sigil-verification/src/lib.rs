@@ -79,11 +79,33 @@
 //! Provider results are authoritative and are not retried through RustCrypto.
 //! See [`provider`] for the public extension contracts and a complete adapter
 //! example.
+//!
+//! [`async_provider`] supplies awaitable binding, qualification, verification,
+//! and implementations of [`AsyncVerifier`] for borrowed provider handles.
+//! These retain the same qualified and explicitly unqualified choices. The
+//! [provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
+//! compares both paths with direct `yaml-sigil-traits` implementations and
+//! records their tested boundaries.
 
+pub mod async_provider;
 mod crypto;
 mod proto_verify;
 pub mod provider;
 mod yaml_verify;
+
+#[cfg(test)]
+mod async_provider_tests;
+
+pub use async_provider::{
+    AsyncProviderPublicKeys, AsyncProviderVerifier, AsyncProviderVerifierFactory,
+    AsyncProviderVerifyingKey, AsyncVerificationProviderBuilder, ProviderAsyncVerifier,
+    QualifiedAsyncVerificationProvider, UnqualifiedAsyncProviderPublicKeys,
+    UnqualifiedAsyncProviderVerifyingKey, UnqualifiedAsyncVerificationProvider,
+    UnqualifiedProviderAsyncVerifier, verify_from_pre_verify_with_async_provider,
+    verify_from_pre_verify_with_unqualified_async_provider, verify_with_async_provider,
+    verify_with_async_provider_and_metadata, verify_with_unqualified_async_provider,
+    verify_with_unqualified_async_provider_and_metadata,
+};
 
 use yaml_sigil_core::{
     AlgorithmId, ProtobufWireDecodeAdvertisement, YamlSignatureDocumentDuplicateKeyPolicy,
@@ -119,6 +141,26 @@ pub type PublicKeys<'a> =
 /// The input must use a canonical point encoding and identify a key accepted
 /// by this implementation.
 ///
+/// You can own an application key wrapper and implement `TryFrom` into this
+/// existing public type. This validates public bytes without exporting a
+/// private key or requiring a new library-owned key abstraction.
+///
+/// ```
+/// use yaml_sigil_verification::{InvocationError, resolve_ed25519_verifying_key};
+///
+/// struct ApplicationPublicKey([u8; 32]);
+/// impl TryFrom<ApplicationPublicKey> for ed25519_dalek::VerifyingKey {
+///     type Error = InvocationError;
+///     fn try_from(key: ApplicationPublicKey) -> Result<Self, Self::Error> {
+///         resolve_ed25519_verifying_key(&key.0)
+///     }
+/// }
+/// let public = ed25519_dalek::SigningKey::from_bytes(&[12; 32]).verifying_key();
+/// let resolved: ed25519_dalek::VerifyingKey = ApplicationPublicKey(public.to_bytes()).try_into()?;
+/// assert_eq!(resolved, public);
+/// # Ok::<(), InvocationError>(())
+/// ```
+///
 /// # Errors
 ///
 /// Returns [`InvocationError::KeyResolutionFailure`] when the input has the
@@ -136,6 +178,27 @@ pub fn resolve_ed25519_verifying_key(
 /// The SEC 1 encoding rule is third-party standards material, not material
 /// relicensed under this file's Apache-2.0 declaration. See the crate's
 /// `THIRD_PARTY_NOTICES.md` for the source notice and patent/IP caveat.
+///
+/// The same application-owned conversion works for P-256. Use `From` only
+/// when the wrapper already holds a validated key and conversion is infallible.
+///
+/// ```
+/// use yaml_sigil_verification::{InvocationError, resolve_p256_verifying_key};
+///
+/// struct ApplicationPublicKey(Vec<u8>);
+/// impl TryFrom<ApplicationPublicKey> for p256::ecdsa::VerifyingKey {
+///     type Error = InvocationError;
+///     fn try_from(key: ApplicationPublicKey) -> Result<Self, Self::Error> {
+///         resolve_p256_verifying_key(&key.0)
+///     }
+/// }
+/// let signing = p256::ecdsa::SigningKey::from_slice(&[12; 32]).unwrap();
+/// let public = signing.verifying_key().to_encoded_point(false);
+/// let resolved: p256::ecdsa::VerifyingKey =
+///     ApplicationPublicKey(public.as_bytes().to_vec()).try_into()?;
+/// assert_eq!(&resolved, signing.verifying_key());
+/// # Ok::<(), InvocationError>(())
+/// ```
 ///
 /// # Errors
 ///
@@ -511,21 +574,29 @@ enum KeyVerificationOutcome {
     ProviderFailure,
 }
 
-trait Ed25519VerificationKey {
+trait Ed25519KeyValidation {
     fn is_admissible(&self) -> bool;
+}
+
+trait Ed25519VerificationKey: Ed25519KeyValidation {
     fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome;
 }
 
-trait P256VerificationKey {
+trait P256KeyValidation {
     fn is_admissible(&self) -> bool;
+}
+
+trait P256VerificationKey: P256KeyValidation {
     fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome;
 }
 
-impl Ed25519VerificationKey for ed25519_dalek::VerifyingKey {
+impl Ed25519KeyValidation for ed25519_dalek::VerifyingKey {
     fn is_admissible(&self) -> bool {
         crypto::ed25519_verifying_key_is_admissible(self)
     }
+}
 
+impl Ed25519VerificationKey for ed25519_dalek::VerifyingKey {
     fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome {
         if crypto::verify_ed25519(self, payload, signature).is_ok() {
             KeyVerificationOutcome::Verified
@@ -535,11 +606,13 @@ impl Ed25519VerificationKey for ed25519_dalek::VerifyingKey {
     }
 }
 
-impl P256VerificationKey for p256::ecdsa::VerifyingKey {
+impl P256KeyValidation for p256::ecdsa::VerifyingKey {
     fn is_admissible(&self) -> bool {
         true
     }
+}
 
+impl P256VerificationKey for p256::ecdsa::VerifyingKey {
     fn verify_signature(&self, payload: &[u8], signature: &[u8; 64]) -> KeyVerificationOutcome {
         match crypto::verify_ecdsa_p256_sha256(self, payload, signature) {
             Ok(()) => KeyVerificationOutcome::Verified,
@@ -555,7 +628,7 @@ impl P256VerificationKey for p256::ecdsa::VerifyingKey {
 
 macro_rules! impl_provider_verification_key {
     ($key:ty) => {
-        impl Ed25519VerificationKey for $key {
+        impl Ed25519KeyValidation for $key {
             fn is_admissible(&self) -> bool {
                 self.algorithm() == AlgorithmId::Ed25519
                     && crypto::provider_public_key_is_admissible(
@@ -563,7 +636,9 @@ macro_rules! impl_provider_verification_key {
                         self.canonical_public_key(),
                     )
             }
+        }
 
+        impl Ed25519VerificationKey for $key {
             fn verify_signature(
                 &self,
                 payload: &[u8],
@@ -573,7 +648,7 @@ macro_rules! impl_provider_verification_key {
             }
         }
 
-        impl P256VerificationKey for $key {
+        impl P256KeyValidation for $key {
             fn is_admissible(&self) -> bool {
                 self.algorithm() == AlgorithmId::EcdsaP256Sha256
                     && crypto::provider_public_key_is_admissible(
@@ -581,7 +656,9 @@ macro_rules! impl_provider_verification_key {
                         self.canonical_public_key(),
                     )
             }
+        }
 
+        impl P256VerificationKey for $key {
             fn verify_signature(
                 &self,
                 payload: &[u8],
@@ -631,6 +708,40 @@ where
     Ed25519: Ed25519VerificationKey + ?Sized,
     P256: P256VerificationKey + ?Sized,
 {
+    let (outcome, algorithm) =
+        match prepare_signature_verification(wire_alg, sig_octets, keys, options)? {
+            PreparedVerification::Complete(state) => return Ok(state),
+            PreparedVerification::Ed25519(key, signature) => (
+                key.verify_signature(payload, signature),
+                AlgorithmId::Ed25519,
+            ),
+            PreparedVerification::P256(key, signature) => (
+                key.verify_signature(payload, signature),
+                AlgorithmId::EcdsaP256Sha256,
+            ),
+        };
+    verification_state_from_outcome(outcome, payload, algorithm)
+}
+
+// Only a validated work item can reach either a synchronous or an awaited
+// operation. Keep validation ordering here so both paths classify the same
+// combination of malformed bytes, disabled algorithms, and missing keys.
+enum PreparedVerification<'a, Ed25519: ?Sized, P256: ?Sized> {
+    Complete(VerifierState),
+    Ed25519(&'a Ed25519, &'a [u8; 64]),
+    P256(&'a P256, &'a [u8; 64]),
+}
+
+fn prepare_signature_verification<'a, Ed25519, P256>(
+    wire_alg: i32,
+    sig_octets: &'a [u8],
+    keys: &'a GenericPublicKeys<'_, Ed25519, P256>,
+    options: &VerifierOptions,
+) -> Result<PreparedVerification<'a, Ed25519, P256>, InvocationError>
+where
+    Ed25519: Ed25519KeyValidation + ?Sized,
+    P256: P256KeyValidation + ?Sized,
+{
     // Form-agnostic. YAML-envelope payload rules (UTF-8, no BOM, line-terminator)
     // are the responsibility of `yaml_verify::pre_verify_yaml` per the spec's
     // "Applies to: YAML form only" row in the metadata-extraction table.
@@ -638,16 +749,24 @@ where
     // docs/conformance-validation.md §3f.
 
     if wire_alg <= 0 {
-        return Ok(VerifierState::MalformedAttemptedSigned);
+        return Ok(PreparedVerification::Complete(
+            VerifierState::MalformedAttemptedSigned,
+        ));
     }
 
     let alg = match AlgorithmId::from_i32(wire_alg) {
         Some(a) => a,
-        None => return Ok(VerifierState::MalformedAttemptedSigned),
+        None => {
+            return Ok(PreparedVerification::Complete(
+                VerifierState::MalformedAttemptedSigned,
+            ));
+        }
     };
 
     if sig_octets.is_empty() {
-        return Ok(VerifierState::MalformedAttemptedSigned);
+        return Ok(PreparedVerification::Complete(
+            VerifierState::MalformedAttemptedSigned,
+        ));
     }
 
     // Both supported algorithms specify a fixed 64-octet `R || S` wire
@@ -656,19 +775,25 @@ where
     // before invoking the crypto library. See
     // covered by the wrong-size signature fixtures.
     if sig_octets.len() != 64 {
-        return Ok(VerifierState::MalformedAttemptedSigned);
+        return Ok(PreparedVerification::Complete(
+            VerifierState::MalformedAttemptedSigned,
+        ));
     }
 
     match alg {
         AlgorithmId::Ed25519 => {
             if !options.verify_ed25519 {
-                return Ok(VerifierState::SignedButAlgorithmUnsupported { algorithm: alg });
+                return Ok(PreparedVerification::Complete(
+                    VerifierState::SignedButAlgorithmUnsupported { algorithm: alg },
+                ));
             }
             // Apply the slot's canonical `R` point and `S` scalar requirements
             // before the cofactored equation so malformed signature octets keep
             // their specified verifier-state classification.
             if !crypto::ed25519_signature_is_canonical(sig_octets) {
-                return Ok(VerifierState::MalformedAttemptedSigned);
+                return Ok(PreparedVerification::Complete(
+                    VerifierState::MalformedAttemptedSigned,
+                ));
             }
             let vk = keys.ed25519.ok_or(InvocationError::KeyResolutionFailure)?;
             // `PublicKeys` accepts an already constructed verifying key, so
@@ -680,15 +805,19 @@ where
             let signature: &[u8; 64] = sig_octets
                 .try_into()
                 .expect("the fixed signature length was checked above");
-            verification_state_from_outcome(vk.verify_signature(payload, signature), payload, alg)
+            Ok(PreparedVerification::Ed25519(vk, signature))
         }
         AlgorithmId::EcdsaP256Sha256 => {
             if !options.verify_ecdsa_p256_sha256 {
-                return Ok(VerifierState::SignedButAlgorithmUnsupported { algorithm: alg });
+                return Ok(PreparedVerification::Complete(
+                    VerifierState::SignedButAlgorithmUnsupported { algorithm: alg },
+                ));
             }
             let vk = keys.p256.ok_or(InvocationError::KeyResolutionFailure)?;
             if !crypto::ecdsa_p256_signature_is_well_formed(sig_octets) {
-                return Ok(VerifierState::MalformedAttemptedSigned);
+                return Ok(PreparedVerification::Complete(
+                    VerifierState::MalformedAttemptedSigned,
+                ));
             }
             if !vk.is_admissible() {
                 return Err(InvocationError::KeyResolutionFailure);
@@ -696,7 +825,7 @@ where
             let signature: &[u8; 64] = sig_octets
                 .try_into()
                 .expect("the fixed signature length was checked above");
-            verification_state_from_outcome(vk.verify_signature(payload, signature), payload, alg)
+            Ok(PreparedVerification::P256(vk, signature))
         }
     }
 }
