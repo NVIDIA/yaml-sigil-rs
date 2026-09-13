@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "yaml-sigil-core-downstream-noyalib-0-0-35"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+noyalib = { version = "=0.0.35", default-features = false, features = ["std"] }
+yaml-sigil-core = { path = "../../../crates/yaml-sigil-core" }
