@@ -59,6 +59,10 @@ The builder receives only a synchronous `signature::Signer<[u8; 64]>` adapter
 and the corresponding public key. It does not request or expose private-key
 bytes.
 
+The shared signer must implement `Sync`. Both qualified and unqualified bound
+keys implement `Send + Sync`, so you can share them across worker threads.
+Adapters with mutable state synchronize that state internally.
+
 `build` is the preferred path. It validates the public key and self-verifies
 every signature produced for a real request before returning an artifact. It
 does not ask the signer to process a hidden qualification message.
