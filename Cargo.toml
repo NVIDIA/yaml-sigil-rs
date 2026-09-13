@@ -18,6 +18,7 @@ exclude = [
     "tests/downstream/buffa-0-5",
     "tests/downstream/core-only",
     "tests/downstream/noyalib-0-0-35",
+    "tests/downstream/resource-api",
 ]
 
 [workspace.package]
