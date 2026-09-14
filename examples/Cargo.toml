@@ -21,23 +21,41 @@ build = false
 workspace = true
 
 [dev-dependencies]
+# These groups describe usage, including shared modules and tests. Cargo makes
+# every entry available to every example target; the groups do not gate builds.
+
+# Every example: error handling and public document/artifact types.
 anyhow = "1.0"
-# These adapters demonstrate interoperability. The non-fips backend avoids
+yaml-sigil-core = { workspace = true }
+
+# ring-provider, aws-lc-provider, ring-unqualified-provider, and async-provider:
+# CLI arguments, public-key display, signing/verification traits, and facades.
+base64 = { workspace = true }
+clap = { version = "4.6", features = ["derive"] }
+signature = { workspace = true }
+yaml-sigil-signing = { workspace = true }
+yaml-sigil-verification = { workspace = true }
+
+# The four provider examples' file-input tests.
+tempfile = "3"
+
+# ring-provider and ring-unqualified-provider: shared native ring adapters.
+ring = "=0.17.14"
+
+# aws-lc-provider: native aws-lc-rs adapters. The non-fips backend avoids
 # FIPS-specific build-tool and platform requirements beyond this example.
 # Keep Windows x86-64 examples runnable when NASM is absent from the host.
 # The provider uses its bundled assembly objects only as a fallback there.
 aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips", "prebuilt-nasm"] }
-base64 = { workspace = true }
-clap = { version = "4.6", features = ["derive"] }
+
+# async-provider: P-256 and key generation in the simulated service worker,
+# plus its Tokio runtime, request/reply channels, and asynchronous tests.
 p256 = { workspace = true }
 rand_core = { workspace = true }
-ring = "=0.17.14"
-signature = { workspace = true }
-tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
-yaml-sigil-core = { workspace = true }
-yaml-sigil-signing = { workspace = true }
-yaml-sigil-verification = { workspace = true }
+
+# protobuf-facade: application-owned message types and both wire directions.
+prost = "=0.14.4"
 
 # Execute the parser and round-trip tests in cargo test --workspace.
 [[example]]
@@ -58,4 +76,14 @@ test = true
 [[example]]
 name = "async-provider"
 path = "async_provider.rs"
+test = true
+
+[[example]]
+name = "yaml-facade"
+path = "yaml_facade.rs"
+test = true
+
+[[example]]
+name = "protobuf-facade"
+path = "protobuf_facade.rs"
 test = true

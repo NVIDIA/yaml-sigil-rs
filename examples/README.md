@@ -11,6 +11,37 @@ below from the repository root.
 | [`aws_lc_provider.rs`](./aws_lc_provider.rs) | Native `aws-lc-rs` signing and verification adapters. |
 | [`ring_unqualified_provider.rs`](./ring_unqualified_provider.rs) | Explicitly unqualified `ring` signing and verification, with implementer-owned compatibility risk. |
 | [`async_provider.rs`](./async_provider.rs) | Awaitable P-256 signing, binding, qualification, and verification through a simulated service. |
+| [`yaml_facade.rs`](./yaml_facade.rs) | YAML signature-document parsing and serialization through the core facade. |
+| [`protobuf_facade.rs`](./protobuf_facade.rs) | Core protobuf encoding, owned and borrowed decoding, and wire interoperability with Prost. |
+
+## Serialization facades
+
+These commands use built-in data and take no arguments. `yaml-facade` prints
+a canonical YAML signature carrier after checking its semantic round trip.
+`protobuf-facade` checks core encoding and decoding, then exchanges protobuf
+bytes in both directions with Prost and prints each result. Signature values
+in both examples are illustrative; the examples perform no cryptography.
+
+```shell
+cargo run --package yaml-sigil-examples --example yaml-facade
+cargo run --package yaml-sigil-examples --example protobuf-facade
+```
+
+The YAML flow uses the core API without directly importing a YAML backend.
+The protobuf flow adds `prost` `0.14.4` as an example development dependency
+and uses annotated application types without adding a code generator.
+Neither example directly imports Buffa or Noyalib. The guides explain the
+[YAML data-model boundary](../docs/yaml-facade.md) and
+[protobuf wire boundary](../docs/protobuf-facade.md).
+
+Both targets have `test = true`, so workspace CI runs their round-trip tests.
+The tests cover optional `keyid`, YAML quoting, binary protobuf payloads, and
+both Prost interoperability directions. Run them with these commands.
+
+```shell
+cargo test --package yaml-sigil-examples --example yaml-facade
+cargo test --package yaml-sigil-examples --example protobuf-facade
+```
 
 ## Shared modules
 
@@ -18,7 +49,7 @@ The [`cli-common` module](./cli-common/mod.rs) contains shared CLI helpers.
 Currently it provides the local provider examples' `clap` interface, input
 handling, YamlSigil operations, output formatting, and test helpers.
 The [`yaml_io` helpers](./cli-common/yaml_io.rs) share YAML file, standard-input,
-and default-document handling and transcript output across the YAML examples.
+and default-document handling and transcript output across the provider examples.
 The [`key_type` module](./cli-common/key_type.rs) supplies key selection for
 examples offering both algorithms. The two `ring` examples share
 [native keys and adapters](./cli-common/ring.rs), while selecting their own
