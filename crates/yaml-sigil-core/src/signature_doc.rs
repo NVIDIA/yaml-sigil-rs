@@ -130,7 +130,9 @@ fn top_level_keys_flat_line_scan(text: &str) -> std::collections::BTreeSet<Strin
         };
         let key = key.trim();
         if !key.is_empty() {
-            keys.insert(key.to_string());
+            let semantic_key =
+                noyalib::from_str::<String>(key).unwrap_or_else(|_| key.to_string());
+            keys.insert(semantic_key);
         }
     }
     keys
@@ -279,6 +281,27 @@ mod tests {
         let oversized = vec![b'x'; super::SIGNATURE_DOCUMENT_MAX_BYTES + 1];
         let err = super::signature_document_top_level_keys(&oversized).unwrap_err();
         assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn top_level_key_scan_normalizes_quoted_known_keys() {
+        let carrier = br#""schema": YamlSigilSignature.v1alpha1
+'alg': ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+"keyid": "kid-1"
+"sign\u0061ture": Zm9v
+"#;
+
+        let doc = super::parse_signature_document(carrier)
+            .expect("quoted known mapping keys must parse as their semantic strings");
+        assert_eq!(doc.keyid.as_deref(), Some("kid-1"));
+
+        let keys = super::signature_document_top_level_keys(carrier).unwrap();
+        let expected = ["alg", "keyid", "schema", "signature"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(keys, expected);
+        assert!(!super::has_unknown_signature_document_fields(carrier).unwrap());
     }
 
     #[test]
