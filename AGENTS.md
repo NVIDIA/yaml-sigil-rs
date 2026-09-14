@@ -27,6 +27,11 @@ artifacts, or reconciling this Rust implementation after spec updates.
 Follow [`xtask/AGENTS.md`](xtask/AGENTS.md) when changing the developer task
 crate or its release-command boundaries.
 
+Follow [`docs/AGENTS.md`](docs/AGENTS.md) when changing documentation or
+implementation behavior covered by a guide. Follow
+[`examples/AGENTS.md`](examples/AGENTS.md) when changing runnable examples
+or their shared CLI modules.
+
 ## Agent Documentation Standards
 
 Project-local skills exist under `.agents/skills/` and should remain
