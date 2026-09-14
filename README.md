@@ -60,6 +60,12 @@ compatibility does not promise identical YAML acceptance, resource policy,
 presentation, or bytes. Use `serialize_signature_document` for canonical YAML,
 and retain the original carrier bytes when forwarding must be lossless.
 
+The [YAML facade guide](./docs/yaml-facade.md) demonstrates parsing and
+serialization through the core API. The
+[protobuf facade guide](./docs/protobuf-facade.md) demonstrates owned and
+borrowed decoding and exchanging wire bytes with Prost. Both include
+small runnable examples.
+
 The other released crates build on this layer. Signing uses it to apply the
 document rules and encode signature information. Transcription uses it to take
 artifacts apart and handle protobuf envelopes. Verification uses it to read
