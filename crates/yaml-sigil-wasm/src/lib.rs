@@ -3,8 +3,10 @@
 
 //! Typed JavaScript boundary for browser and Node.js WebAssembly runtimes.
 
+mod bytes;
 mod resource;
 
+use bytes::ByteInput;
 pub use resource::ArtifactResourceLimits;
 use resource::{Failure, flatten_encoding};
 
@@ -28,7 +30,6 @@ use yaml_sigil_verification::{
     resolve_ed25519_verifying_key, resolve_p256_verifying_key, verify as verify_runtime,
     verify_with_resource_limits,
 };
-use zeroize::Zeroizing;
 
 const ED25519_NAME: &str = "ED25519_PUREEDDSA_RAW_RS64_CANONICAL";
 const P256_NAME: &str = "ECDSA_SECP256R1_SHA256_RAW_RS64";
@@ -192,25 +193,34 @@ fn compose_impl(
             artifact: None,
         };
     };
-    let copy = || (payload.to_vec(), signature_carrier.to_vec());
-    let (payload, signature_carrier) = if let Some(limits) = limits {
+    let payload = match ByteInput::new(&payload) {
+        Ok(input) => input,
+        Err(error) => return ComposeResult::failure(error),
+    };
+    let signature_carrier = match ByteInput::new(&signature_carrier) {
+        Ok(input) => input,
+        Err(error) => return ComposeResult::failure(error),
+    };
+    if let Some(limits) = limits {
         let resource_form = match form {
             TranscriptionForm::Yaml => ArtifactResourceForm::Yaml,
             TranscriptionForm::Protobuf => ArtifactResourceForm::Protobuf,
         };
-        match limits.with_admitted_output(
+        if let Err(error) = limits.with_admitted_output(
             resource_form,
-            &[
-                payload.length() as usize,
-                signature_carrier.length() as usize,
-            ],
-            copy,
+            &[payload.len(), signature_carrier.len()],
+            || (),
         ) {
-            Ok(bytes) => bytes,
-            Err(error) => return ComposeResult::failure(error),
+            return ComposeResult::failure(error);
         }
-    } else {
-        copy()
+    }
+    let payload = match payload.to_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return ComposeResult::failure(error),
+    };
+    let signature_carrier = match signature_carrier.to_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return ComposeResult::failure(error),
     };
     let request = ComposeRequest {
         payload: &payload,
@@ -308,11 +318,7 @@ pub fn decompose_with_limits(
     outer: Option<String>,
     limits: &ArtifactResourceLimits,
 ) -> DecomposeResult {
-    limits
-        .with_admitted_input(artifact.length() as usize, || {
-            decompose_impl(artifact, form, outer, Some(limits))
-        })
-        .unwrap_or_else(DecomposeResult::failure)
+    decompose_impl(artifact, form, outer, Some(limits))
 }
 
 fn decompose_impl(
@@ -321,6 +327,15 @@ fn decompose_impl(
     outer: Option<String>,
     limits: Option<&ArtifactResourceLimits>,
 ) -> DecomposeResult {
+    let artifact = match ByteInput::new(&artifact) {
+        Ok(input) => input,
+        Err(error) => return DecomposeResult::failure(error),
+    };
+    if let Some(limits) = limits
+        && let Err(error) = limits.with_admitted_input(artifact.len(), || ())
+    {
+        return DecomposeResult::failure(error);
+    }
     let Some(form) = transcription_form(form) else {
         return DecomposeResult::invocation("invalid_or_unsupported_form");
     };
@@ -333,7 +348,10 @@ fn decompose_impl(
         },
         None => None,
     };
-    let artifact = artifact.to_vec();
+    let artifact = match artifact.to_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return DecomposeResult::failure(error),
+    };
     let request = DecomposeRequest {
         artifact: &artifact,
         form,
@@ -493,7 +511,11 @@ fn sign_impl(
         return SignResult::invocation("invalid_or_unsupported_output_form");
     };
 
-    if signing_key.length() != 32 {
+    let signing_key = match ByteInput::new(&signing_key) {
+        Ok(input) => input,
+        Err(error) => return SignResult::failure(error),
+    };
+    if signing_key.len() != 32 {
         return SignResult::invocation("invalid_signing_key");
     }
     if limits.is_some()
@@ -503,21 +525,27 @@ fn sign_impl(
     {
         return SignResult::invocation("invalid_keyid");
     }
-    let payload = if let Some(limits) = limits {
+    let payload = match ByteInput::new(&payload) {
+        Ok(input) => input,
+        Err(error) => return SignResult::failure(error),
+    };
+    if let Some(limits) = limits {
         let resource_form = match output_form {
             OutputForm::Yaml => ArtifactResourceForm::Yaml,
             OutputForm::Protobuf => ArtifactResourceForm::Protobuf,
         };
-        match limits.with_admitted_output(resource_form, &[payload.length() as usize], || {
-            payload.to_vec()
-        }) {
-            Ok(bytes) => bytes,
-            Err(error) => return SignResult::failure(error),
+        if let Err(error) = limits.with_admitted_output(resource_form, &[payload.len()], || ()) {
+            return SignResult::failure(error);
         }
-    } else {
-        payload.to_vec()
+    }
+    let payload = match payload.to_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return SignResult::failure(error),
     };
-    let key_bytes = Zeroizing::new(signing_key.to_vec());
+    let key_bytes = match signing_key.to_secret_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return SignResult::failure(error),
+    };
     match algorithm {
         AlgorithmId::Ed25519 => {
             let Ok(seed) = <&[u8; 32]>::try_from(key_bytes.as_slice()) else {
@@ -689,17 +717,13 @@ pub fn verify_with_limits(
     verifying_key: Uint8Array,
     limits: &ArtifactResourceLimits,
 ) -> VerifyResult {
-    limits
-        .with_admitted_input(artifact.length() as usize, || {
-            verify_impl(
-                artifact,
-                form_selector,
-                algorithm_selector,
-                verifying_key,
-                Some(limits),
-            )
-        })
-        .unwrap_or_else(VerifyResult::failure)
+    verify_impl(
+        artifact,
+        form_selector,
+        algorithm_selector,
+        verifying_key,
+        Some(limits),
+    )
 }
 
 fn verify_impl(
@@ -709,6 +733,15 @@ fn verify_impl(
     verifying_key: Uint8Array,
     limits: Option<&ArtifactResourceLimits>,
 ) -> VerifyResult {
+    let artifact = match ByteInput::new(&artifact) {
+        Ok(input) => input,
+        Err(error) => return VerifyResult::failure(error),
+    };
+    if let Some(limits) = limits
+        && let Err(error) = limits.with_admitted_input(artifact.len(), || ())
+    {
+        return VerifyResult::failure(error);
+    }
     let Some(form) = artifact_form(form_selector) else {
         return VerifyResult::invocation("invalid_or_unsupported_form");
     };
@@ -719,11 +752,21 @@ fn verify_impl(
         AlgorithmId::Ed25519 => 32,
         AlgorithmId::EcdsaP256Sha256 => 65,
     };
-    if verifying_key.length() != expected_key_length {
+    let verifying_key = match ByteInput::new(&verifying_key) {
+        Ok(input) => input,
+        Err(error) => return VerifyResult::failure(error),
+    };
+    if verifying_key.len() != expected_key_length {
         return VerifyResult::invocation("key_resolution_failure");
     }
-    let artifact = artifact.to_vec();
-    let key_bytes = verifying_key.to_vec();
+    let artifact = match artifact.to_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return VerifyResult::failure(error),
+    };
+    let key_bytes = match verifying_key.to_vec() {
+        Ok(bytes) => bytes,
+        Err(error) => return VerifyResult::failure(error),
+    };
     let key = match selected_algorithm {
         AlgorithmId::Ed25519 => match resolve_ed25519_verifying_key(&key_bytes) {
             Ok(key) => ResolvedVerifyingKey::Ed25519(key),

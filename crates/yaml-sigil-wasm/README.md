@@ -31,6 +31,20 @@ exception. Each result has a string `status` property and an optional stable
 snake-case `code` property. Each byte getter returns a fresh JavaScript-owned
 copy.
 
+The boundary measures byte inputs with intrinsic `Uint8Array` accessors and
+copies their actual contents through a fixed-length view. Overridden array
+properties and subclass hooks do not control admission or copying. Byte-input
+validation and copy failures return `invocation_error` with code
+`invalid_byte_input` and no output bytes. This includes detached buffers,
+out-of-bounds views, and values that are not `Uint8Array` instances. Resource
+policies remain reusable and can be freed after these failures.
+
+Resizable and shared buffers are supported. Buffer growth does not enlarge an
+admitted copy, and detachment or shrinking that invalidates the view returns a
+typed failure. Copying shared bytes does not provide an atomic snapshot.
+Synchronize workers that write existing input bytes when you need consistent
+contents.
+
 Use the corresponding presence property before reading an optional byte
 getter. `ComposeResult` and `SignResult` provide `hasArtifact`.
 `DecomposeResult` provides `hasPayload` and `hasSignatureCarrier`.
@@ -74,7 +88,7 @@ negative, and out-of-range values throw a configuration `RangeError` before
 integer conversion. This configuration exception is separate from operation
 results.
 
-Bounded decompose and verify compare the JavaScript input length with the
+Bounded decompose and verify compare the intrinsic byte-view length with the
 ceiling before copying artifact bytes, interpreting selectors, validating a
 schema, or resolving keys. Bounded compose and sign validate invocation shape
 and check component-length output lower bounds before copying large byte
@@ -164,3 +178,6 @@ headless Firefox, and exercises the generated Node.js bindings. It rejects any
 failures. Tests cover exact and exceeded limits, policy configuration, output
 overhead, admission precedence, unchanged unbounded behavior above 4 MiB, and
 typed failure results.
+Byte-copy regressions also cover overridden metadata, cross-realm arrays,
+detached and resized buffers, concurrent shared-buffer growth, and policy
+reuse and disposal after rejected inputs.
