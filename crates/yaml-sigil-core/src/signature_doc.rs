@@ -150,7 +150,7 @@ fn signature_key_decoder_config() -> noyalib::ParserConfig {
         .max_documents(1)
         .max_merge_keys(0)
         // In noyalib 0.0.36 these policies select the AST path; its node
-        // and cumulative scalar accounting is intentional for this probe.
+        // and cumulative scalar accounting is intentional for this decoder.
         .with_policy(noyalib::policy::DenyAnchors)
         .with_policy(noyalib::policy::DenyTags)
 }
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn proposed_key_decoder_accepts_scalar_spellings() {
+    fn key_decoder_accepts_scalar_spellings() {
         for (token, expected) in [
             ("keyid", "keyid"),
             ("'keyid'", "keyid"),
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn proposed_key_decoder_rejects_decorations_and_non_scalars() {
+    fn key_decoder_rejects_decorations_and_non_scalars() {
         for token in [
             "&anchor keyid",
             "*anchor",
@@ -356,15 +356,11 @@ mod tests {
             "\"unterminated",
         ] {
             assert!(decode_key(token).is_err(), "{token}");
-            // Characterize the proposed integration's raw-token fallback,
-            // without installing it in the production scanner.
-            let fallback = decode_key(token).unwrap_or_else(|_| token.to_owned());
-            assert_eq!(fallback, token);
         }
     }
 
     #[test]
-    fn proposed_key_decoder_bounds_decoded_token_bytes() {
+    fn key_decoder_bounds_decoded_token_bytes() {
         let exact = "x".repeat(super::SIGNATURE_KEY_MAX_SCALAR_BYTES);
         assert_eq!(decode_key(&format!("\"{exact}\"")).unwrap(), exact);
         let err = decode_key(&format!("\"{exact}x\"")).unwrap_err();
@@ -376,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn proposed_key_decoder_bounds_source_bytes() {
+    fn key_decoder_bounds_source_bytes() {
         let exact = format!(
             "keyid #{}",
             "x".repeat(super::SIGNATURE_DOCUMENT_MAX_BYTES - "keyid #".len())
@@ -492,6 +488,73 @@ mod tests {
             .collect();
         assert_eq!(keys, expected);
         assert!(!super::has_unknown_signature_document_fields(carrier).unwrap());
+    }
+
+    #[test]
+    fn top_level_key_scan_preserves_rejected_decorations() {
+        for (spelling, reason) in [
+            ("&anchor keyid", "DenyAnchors"),
+            ("!custom keyid", "DenyTags"),
+        ] {
+            let carrier = format!(
+                "schema: YamlSigilSignature.v1alpha1\n\
+                 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                 {spelling}: kid-1\n\
+                 signature: Zm9v\n"
+            );
+
+            // Exercise the scanner's raw-token fallback through its public API.
+            let keys = super::signature_document_top_level_keys(carrier.as_bytes()).unwrap();
+            assert!(keys.contains(spelling), "{spelling}: {keys:?}");
+            assert!(!keys.contains("keyid"), "{spelling}: {keys:?}");
+            assert!(super::has_unknown_signature_document_fields(carrier.as_bytes()).unwrap());
+
+            let err = super::parse_signature_document(carrier.as_bytes()).unwrap_err();
+            let CoreError::SignatureYaml(message) = err else {
+                panic!("expected YAML parser error for {spelling}");
+            };
+            assert!(message.contains(reason), "{spelling}: {message}");
+        }
+
+        // Built-in string tags remain valid; the policy rejects custom tags.
+        let carrier = b"schema: YamlSigilSignature.v1alpha1\n\
+                        alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                        !!str keyid: kid-1\n\
+                        signature: Zm9v\n";
+        let keys = super::signature_document_top_level_keys(carrier).unwrap();
+        assert!(keys.contains("keyid"));
+        assert!(!keys.contains("!!str keyid"));
+        assert!(!super::has_unknown_signature_document_fields(carrier).unwrap());
+        let doc = super::parse_signature_document(carrier).unwrap();
+        assert_eq!(doc.keyid.as_deref(), Some("kid-1"));
+    }
+
+    #[test]
+    fn top_level_key_scan_applies_decoded_key_byte_budget() {
+        for size in [
+            super::SIGNATURE_KEY_MAX_SCALAR_BYTES,
+            super::SIGNATURE_KEY_MAX_SCALAR_BYTES + 1,
+        ] {
+            let decoded = "x".repeat(size);
+            let spelling = format!("\"{decoded}\"");
+            let carrier = format!(
+                "schema: YamlSigilSignature.v1alpha1\n\
+                 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                 {spelling}: kid-1\n\
+                 signature: Zm9v\n"
+            );
+            assert!(carrier.len() < super::SIGNATURE_DOCUMENT_MAX_BYTES);
+
+            let keys = super::signature_document_top_level_keys(carrier.as_bytes()).unwrap();
+            if size == super::SIGNATURE_KEY_MAX_SCALAR_BYTES {
+                assert!(keys.contains(&decoded));
+                assert!(!keys.contains(&spelling));
+            } else {
+                assert!(keys.contains(&spelling));
+                assert!(!keys.contains(&decoded));
+            }
+            assert!(super::has_unknown_signature_document_fields(carrier.as_bytes()).unwrap());
+        }
     }
 
     #[test]
