@@ -64,6 +64,15 @@ Node.js and Firefox. Native admission tests in
 invoke the byte-copy or processing closure. Imported fixtures and expected
 conformance outcomes remain unchanged; this adds no deliberate divergence.
 
+Byte-input regressions in `crates/yaml-sigil-wasm/src/bytes.rs` and
+`crates/yaml-sigil-wasm/tests/byte_inputs.cjs` exercise intrinsic metadata,
+fixed-length copying, detached and out-of-bounds views, shared-buffer growth,
+and all byte parameters in the eight generated JavaScript operations. Valid
+views preserve their admitted bytes. Invalid views and copy exceptions return
+`invocation_error` with `invalid_byte_input`, no output bytes, and a reusable
+resource policy. These JavaScript invocation checks do not change imported
+fixtures, artifact classification, or protocol conformance outcomes.
+
 The current fixture and regression set covers:
 
 - YAML decomposition marker handling, unsigned artifacts, malformed carrier

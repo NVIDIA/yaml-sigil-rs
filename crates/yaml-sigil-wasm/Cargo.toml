@@ -47,4 +47,6 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 console_error_panic_hook = "0.1"
+# Only test fixtures construct JavaScript functions from source strings.
+js-sys = { workspace = true, features = ["unsafe-eval"] }
 wasm-bindgen-test = { workspace = true }

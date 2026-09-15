@@ -75,6 +75,7 @@ fn valid_maximum(value: f64) -> Option<NonZeroUsize> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Failure {
+    InvalidByteInput,
     Resource(&'static str),
     Encoding(&'static str),
 }
@@ -82,6 +83,7 @@ pub(super) enum Failure {
 impl Failure {
     pub(super) fn status(self) -> &'static str {
         match self {
+            Self::InvalidByteInput => "invocation_error",
             Self::Resource(_) => "resource_error",
             Self::Encoding(_) => "encode_error",
         }
@@ -89,6 +91,7 @@ impl Failure {
 
     pub(super) fn code(self) -> &'static str {
         match self {
+            Self::InvalidByteInput => "invalid_byte_input",
             Self::Resource(code) | Self::Encoding(code) => code,
         }
     }
