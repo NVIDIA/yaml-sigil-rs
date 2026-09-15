@@ -72,6 +72,10 @@ and lets the normal CI suite resolve its ignored lockfile afterward.
 Release qualification applies the same cleanup before validating nonempty
 release source.
 
+Release preparation can advance an unchanged `rc.N` to its immediate successor
+on the same version core. Pinned release-plz applies that explicit selection
+after `update`; follow `RELEASING.md` for the normal source checks and approvals.
+
 ### Diagnose copied-ref binding failures
 
 The anonymous binder reports the failed endpoint, HTTP status, request ID,

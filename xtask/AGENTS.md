@@ -22,8 +22,9 @@ Release commands have these boundaries:
   leaves only the root `Cargo.toml` changed, and never updates a remote ref.
 - `cargo xtask release prepare --version <SEMVER>` runs pinned release-plz
   update locally and may change only expected manifests and changelogs. When
-  starting its derived version as a prerelease or promoting the current
-  same-version prerelease to stable, its bounded fallback uses pinned
+  selecting the first release from an `rc.0` stub, starting its derived version
+  as a prerelease, advancing an unchanged `rc.N` to its next ordinal, or promoting
+  the current same-version prerelease to stable, its bounded fallback uses pinned
   release-plz set-version after update, restores member version inheritance,
   and verifies release-plz's internal dependency synchronization. It rejects
   every other derived-version mismatch, refuses a pre-existing root lockfile,
