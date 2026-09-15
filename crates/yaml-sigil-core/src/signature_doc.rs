@@ -9,6 +9,7 @@ use crate::algorithm::{AlgorithmId, SCHEMA_V1ALPHA1};
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
 
+// Complete carrier input, including comments and scalar source spellings.
 const SIGNATURE_DOCUMENT_MAX_BYTES: usize = 16 * 1024;
 const SIGNATURE_DOCUMENT_MAX_DEPTH: usize = 16;
 const SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS: usize = 0;
@@ -16,9 +17,14 @@ const SIGNATURE_DOCUMENT_MAX_MAPPING_KEYS: usize = 8;
 const SIGNATURE_DOCUMENT_MAX_SEQUENCE_LENGTH: usize = 16;
 const SIGNATURE_DOCUMENT_MAX_EVENTS: usize = 128;
 const SIGNATURE_DOCUMENT_MAX_NODES: usize = 64;
+// Cumulative decoded scalar payload across one document parser invocation.
+// This is not a per-key allowance.
 const SIGNATURE_DOCUMENT_MAX_TOTAL_SCALAR_BYTES: usize = 8 * 1024;
 const SIGNATURE_DOCUMENT_MAX_DOCUMENTS: usize = 1;
 const SIGNATURE_DOCUMENT_MAX_MERGE_KEYS: usize = 8;
+// Preserve the emission probe's existing 64 MiB input ceiling independently
+// of document validation. Exceeding this budget selects quoting, not rejection.
+const SIGNATURE_EMISSION_PROBE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 /// Top-level keys allowed in a Tier A signature document mapping.
 pub const TIER_A_TOP_LEVEL_KEYS: &[&str] = &["schema", "alg", "keyid", "signature"];
@@ -66,6 +72,8 @@ pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreE
         .map_err(|e| CoreError::SignatureYaml(e.to_string()))
 }
 
+/// Complete-carrier policy, including duplicate rejection and cumulative work.
+/// Keep its collection and scalar budgets independent of isolated scalar probes.
 fn signature_document_parser_config() -> noyalib::ParserConfig {
     noyalib::ParserConfig::new()
         .max_document_length(SIGNATURE_DOCUMENT_MAX_BYTES)
@@ -98,6 +106,11 @@ fn ensure_signature_document_byte_budget(bytes: &[u8]) -> Result<(), CoreError> 
 ///
 /// The scan is bounded by the same byte budget as the default parser. The
 /// default parser also rejects unknown fields through [`SignatureDocument`].
+///
+/// This flat-line scan skips indented lines and splits at the first colon,
+/// including colons inside quotes. It does not parse flow mappings. Its set
+/// cannot detect duplicate keys; use [`parse_signature_document`] to validate
+/// the complete carrier.
 pub fn signature_document_top_level_keys(
     bytes: &[u8],
 ) -> Result<std::collections::BTreeSet<String>, CoreError> {
@@ -167,14 +180,44 @@ fn quote_yaml_string(value: &str) -> String {
     out
 }
 
+/// Check whether a validated base64url signature can be emitted as a plain string.
+/// A parse error, including a resource-limit error, selects quoted emission.
 fn plain_yaml_scalar_round_trips_as_string(value: &str) -> bool {
-    noyalib::from_str::<String>(value).is_ok_and(|parsed| parsed == value)
+    noyalib::from_str_with_config::<String>(value, &signature_emission_probe_config())
+        .is_ok_and(|parsed| parsed == value)
+}
+
+fn signature_emission_probe_config() -> noyalib::ParserConfig {
+    // The caller has validated base64url, so anchors, tags, collections, and
+    // escapes cannot occur. Keep streaming eligibility instead of paying for
+    // an AST policy walk. Prefer emitting signature values without quotes.
+    // Quote values that YAML would interpret as another type, or when the
+    // probe cannot confirm string interpretation. The serializer always emits
+    // the fixed mapping keys without quotes; this probe applies only to values.
+    noyalib::ParserConfig::new()
+        .version(noyalib::YamlVersion::V1_2)
+        .no_schema(false)
+        .plain_scalar_strings(false)
+        // With no escapes, input and decoded scalar bytes share one ceiling.
+        // This emission allowance is independent of the document parser's limit.
+        .max_document_length(SIGNATURE_EMISSION_PROBE_MAX_BYTES)
+        .max_total_scalar_bytes(SIGNATURE_EMISSION_PROBE_MAX_BYTES)
+        .max_depth(1)
+        .max_events(8)
+        .max_nodes(1)
+        .max_documents(1)
+        .max_alias_expansions(0)
+        .max_mapping_keys(0)
+        .max_sequence_length(0)
+        .max_merge_keys(0)
 }
 
 /// Serialize a canonical YAML signature carrier.
 ///
 /// Rejects noncanonical fixed identifiers and invalid base64url signatures.
-/// Base64url values that YAML would reinterpret use double-quoted scalar form.
+/// Always emits the fixed mapping keys without quotes. Emits signature values
+/// without quotes when the scalar probe confirms string interpretation, and
+/// uses double quotes otherwise. The optional `keyid` value is always quoted.
 pub fn serialize_signature_document(doc: &SignatureDocument) -> Result<String, CoreError> {
     // Keep the reference emitter fail-closed for noncanonical identifiers and
     // invalid signature encodings. If a concrete lossless parse/re-emit use
@@ -211,6 +254,154 @@ mod tests {
     use crate::error::CoreError;
 
     use super::SignatureDocument;
+
+    // Test-only key-decoding policy, independent of the production flat scanner.
+    // A single decoded token has its own allowance, distinct from the complete
+    // document's cumulative scalar budget even though both currently use 8 KiB.
+    const SIGNATURE_KEY_MAX_SCALAR_BYTES: usize = 8 * 1024;
+
+    /// Isolated string-token policy, exercised only by tests.
+    /// It does not validate mapping membership or duplicate keys. Integration
+    /// into the scanner must preserve raw-token fallback and the carrier byte
+    /// guard, with duplicate rejection checked through the document parser.
+    fn signature_key_decoder_config() -> noyalib::ParserConfig {
+        noyalib::ParserConfig::new()
+            // A token cannot exceed its containing carrier's input ceiling.
+            .max_document_length(super::SIGNATURE_DOCUMENT_MAX_BYTES)
+            .max_depth(1)
+            .max_alias_expansions(super::SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS)
+            // Only a scalar is useful here. Bound work on rejected collections,
+            // rather than inheriting document mapping/duplicate/merge policy.
+            .max_mapping_keys(0)
+            .max_sequence_length(0)
+            .max_events(8)
+            .max_nodes(1)
+            .max_total_scalar_bytes(SIGNATURE_KEY_MAX_SCALAR_BYTES)
+            .max_documents(1)
+            .max_merge_keys(0)
+            // In noyalib 0.0.36 these policies select the AST path; its node
+            // and cumulative scalar accounting is intentional for this probe.
+            .with_policy(noyalib::policy::DenyAnchors)
+            .with_policy(noyalib::policy::DenyTags)
+    }
+
+    fn decode_key(token: &str) -> Result<String, noyalib::Error> {
+        noyalib::from_str_with_config(token, &signature_key_decoder_config())
+    }
+
+    #[test]
+    fn emission_probe_preserves_base64url_quoting_decisions() {
+        use base64::Engine;
+
+        for (value, plain) in [
+            ("", false),
+            ("true", false),
+            ("null", false),
+            ("NULL", false),
+            ("1234", false),
+            ("1e10", false),
+            ("0x00", false),
+            ("Zm9v", true),
+            ("----", true),
+        ] {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(value)
+                .expect("probe input must be valid base64url");
+            assert_eq!(
+                super::plain_yaml_scalar_round_trips_as_string(value),
+                plain,
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn emission_probe_does_not_inherit_document_byte_budgets() {
+        let signature = "x".repeat(super::SIGNATURE_DOCUMENT_MAX_BYTES + 4);
+        assert!(super::plain_yaml_scalar_round_trips_as_string(&signature));
+        let doc = SignatureDocument {
+            schema: crate::SCHEMA_V1ALPHA1.into(),
+            alg: "ED25519_PUREEDDSA_RAW_RS64_CANONICAL".into(),
+            keyid: None,
+            signature,
+        };
+        let carrier = super::serialize_signature_document(&doc).unwrap();
+        assert!(carrier.ends_with(&format!("signature: {}\n", doc.signature)));
+        assert!(super::parse_signature_document(carrier.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn proposed_key_decoder_accepts_scalar_spellings() {
+        for (token, expected) in [
+            ("keyid", "keyid"),
+            ("'keyid'", "keyid"),
+            (r#""keyid""#, "keyid"),
+            (r#""key\u0069d""#, "keyid"),
+            ("'extra'", "extra"),
+            (r#""ex\u0074ra""#, "extra"),
+            ("!!str keyid", "keyid"),
+        ] {
+            assert_eq!(decode_key(token).unwrap(), expected, "{token}");
+        }
+    }
+
+    #[test]
+    fn proposed_key_decoder_rejects_decorations_and_non_scalars() {
+        for token in [
+            "&anchor keyid",
+            "*anchor",
+            "!custom keyid",
+            "[keyid]",
+            "{keyid: value}",
+            "---\nkeyid\n---\nschema",
+            "\"unterminated",
+        ] {
+            assert!(decode_key(token).is_err(), "{token}");
+            // Characterize the proposed integration's raw-token fallback,
+            // without installing it in the production scanner.
+            let fallback = decode_key(token).unwrap_or_else(|_| token.to_owned());
+            assert_eq!(fallback, token);
+        }
+    }
+
+    #[test]
+    fn proposed_key_decoder_bounds_decoded_token_bytes() {
+        let exact = "x".repeat(SIGNATURE_KEY_MAX_SCALAR_BYTES);
+        assert_eq!(decode_key(&format!("\"{exact}\"")).unwrap(), exact);
+        let err = decode_key(&format!("\"{exact}x\"")).unwrap_err();
+        assert!(err.to_string().contains("max_total_scalar_bytes"), "{err}");
+
+        // Escapes consume source bytes separately from decoded scalar bytes.
+        let escaped = format!("\"{}\"", "\\u0078".repeat(1024));
+        assert_eq!(decode_key(&escaped).unwrap(), "x".repeat(1024));
+    }
+
+    #[test]
+    fn proposed_key_decoder_bounds_source_bytes() {
+        let exact = format!(
+            "keyid #{}",
+            "x".repeat(super::SIGNATURE_DOCUMENT_MAX_BYTES - "keyid #".len())
+        );
+        assert_eq!(decode_key(&exact).unwrap(), "keyid");
+        let err = decode_key(&format!("{exact}x")).unwrap_err();
+        assert!(err.to_string().contains("maximum length"), "{err}");
+    }
+
+    #[test]
+    fn flat_scanner_syntax_boundaries_remain_visible() {
+        for (source, expected) in [
+            ("  keyid: value\n", vec![]),
+            ("\tkeyid: value\n", vec![]),
+            ("{keyid: value, schema: value}\n", vec!["{keyid"]),
+            ("\"key:id\": value\n", vec!["\"key"]),
+        ] {
+            assert_eq!(
+                super::signature_document_top_level_keys(source.as_bytes()).unwrap(),
+                expected.into_iter().map(str::to_owned).collect(),
+                "{source:?}"
+            );
+        }
+    }
 
     #[test]
     fn validate_schema_rejects_wrong_schema() {
