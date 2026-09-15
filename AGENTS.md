@@ -470,10 +470,12 @@ the root manifest without invoking release-plz or editing changelogs. Follow
 `MAINTAINERS.md` for the separately authorized protected-ref transaction.
 
 Release preparation always lets pinned release-plz update derive the
-transaction first. Only starting its derived version as a prerelease or
+transaction first. The first release from an `rc.0` stub, starting its derived
+version as a prerelease, advancing an unchanged `rc.N` to its next ordinal, or
 promoting the current same-core prerelease to stable may invoke pinned
-release-plz set-version afterward. The xtask restores member workspace
-inheritance and verifies that release-plz synchronized every internal
+release-plz set-version afterward. These selections preserve the derived version
+core. The xtask restores member workspace inheritance and verifies that
+release-plz synchronized every internal
 requirement. It rejects a pre-existing root `Cargo.lock` and removes only a
 lockfile generated during its bounded release operations. Land any external
 `yaml-sigil-traits` dependency change before creating the release branch. Run

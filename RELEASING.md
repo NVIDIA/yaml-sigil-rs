@@ -49,7 +49,8 @@ Prepare the exact version. The command requires exact `origin/main` and runs
 `release-plz update` first. If current `main` carries an unpublished
 `MAJOR.MINOR.PATCH-rc.0` coordination stub, select either its first real RC or
 the stable `MAJOR.MINOR.PATCH`; never release `rc.0` itself. For that bounded
-selection, when starting a derived version as a prerelease, or when promoting
+selection, when starting a derived version as a prerelease, when advancing an
+unchanged `rc.N` to the next ordinal on the same version core, or when promoting
 the current same-version RC to stable, the command then uses
 `release-plz set-version`, restores workspace version inheritance, and verifies
 release-plz's internal dependency updates. Every other mismatch fails. Changes
@@ -65,8 +66,10 @@ git diff --stat
 git diff
 ```
 
-Review every generated changelog entry and version change. Then run the full
-provider-neutral validation sequence.
+Review every generated changelog entry and version change. For an unchanged
+RC, pinned `set-version` relabels the latest changelog entry. Retain the generated
+new entry and restore the previous published entry from `HEAD` alongside it.
+Then run the full provider-neutral validation sequence.
 
 ```shell
 cargo xtask ci
