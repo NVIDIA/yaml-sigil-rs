@@ -25,6 +25,9 @@ const SIGNATURE_DOCUMENT_MAX_MERGE_KEYS: usize = 8;
 // Preserve the emission probe's existing 64 MiB input ceiling independently
 // of document validation. Exceeding this budget selects quoting, not rejection.
 const SIGNATURE_EMISSION_PROBE_MAX_BYTES: usize = 64 * 1024 * 1024;
+// A single decoded token has its own allowance, distinct from the complete
+// document's cumulative scalar budget even though both currently use 8 KiB.
+const SIGNATURE_KEY_MAX_SCALAR_BYTES: usize = 8 * 1024;
 
 /// Top-level keys allowed in a Tier A signature document mapping.
 pub const TIER_A_TOP_LEVEL_KEYS: &[&str] = &["schema", "alg", "keyid", "signature"];
@@ -127,6 +130,31 @@ pub fn has_unknown_signature_document_fields(bytes: &[u8]) -> Result<bool, CoreE
         .any(|k| !TIER_A_TOP_LEVEL_KEYS.contains(&k.as_str())))
 }
 
+/// Isolated string-token policy for decoding one flat-scanned key spelling.
+/// It does not validate mapping membership or duplicate keys. Its raw-token
+/// fallback and the carrier byte guard live in the caller; duplicate rejection
+/// is checked through the document parser, not this decoder.
+fn signature_key_decoder_config() -> noyalib::ParserConfig {
+    noyalib::ParserConfig::new()
+        // A token cannot exceed its containing carrier's input ceiling.
+        .max_document_length(SIGNATURE_DOCUMENT_MAX_BYTES)
+        .max_depth(1)
+        .max_alias_expansions(SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS)
+        // Only a scalar is useful here. Bound work on rejected collections,
+        // rather than inheriting document mapping/duplicate/merge policy.
+        .max_mapping_keys(0)
+        .max_sequence_length(0)
+        .max_events(8)
+        .max_nodes(1)
+        .max_total_scalar_bytes(SIGNATURE_KEY_MAX_SCALAR_BYTES)
+        .max_documents(1)
+        .max_merge_keys(0)
+        // In noyalib 0.0.36 these policies select the AST path; its node
+        // and cumulative scalar accounting is intentional for this decoder.
+        .with_policy(noyalib::policy::DenyAnchors)
+        .with_policy(noyalib::policy::DenyTags)
+}
+
 /// Top-level keys from a flat YAML mapping (Tier A signature-document shape).
 fn top_level_keys_flat_line_scan(text: &str) -> std::collections::BTreeSet<String> {
     let mut keys = std::collections::BTreeSet::new();
@@ -143,7 +171,10 @@ fn top_level_keys_flat_line_scan(text: &str) -> std::collections::BTreeSet<Strin
         };
         let key = key.trim();
         if !key.is_empty() {
-            keys.insert(key.to_string());
+            let semantic_key =
+                noyalib::from_str_with_config::<String>(key, &signature_key_decoder_config())
+                    .unwrap_or_else(|_| key.to_string());
+            keys.insert(semantic_key);
         }
     }
     keys
@@ -253,38 +284,8 @@ mod tests {
 
     use super::SignatureDocument;
 
-    // Test-only key-decoding policy, independent of the production flat scanner.
-    // A single decoded token has its own allowance, distinct from the complete
-    // document's cumulative scalar budget even though both currently use 8 KiB.
-    const SIGNATURE_KEY_MAX_SCALAR_BYTES: usize = 8 * 1024;
-
-    /// Isolated string-token policy, exercised only by tests.
-    /// It does not validate mapping membership or duplicate keys. Integration
-    /// into the scanner must preserve raw-token fallback and the carrier byte
-    /// guard, with duplicate rejection checked through the document parser.
-    fn signature_key_decoder_config() -> noyalib::ParserConfig {
-        noyalib::ParserConfig::new()
-            // A token cannot exceed its containing carrier's input ceiling.
-            .max_document_length(super::SIGNATURE_DOCUMENT_MAX_BYTES)
-            .max_depth(1)
-            .max_alias_expansions(super::SIGNATURE_DOCUMENT_MAX_ALIAS_EXPANSIONS)
-            // Only a scalar is useful here. Bound work on rejected collections,
-            // rather than inheriting document mapping/duplicate/merge policy.
-            .max_mapping_keys(0)
-            .max_sequence_length(0)
-            .max_events(8)
-            .max_nodes(1)
-            .max_total_scalar_bytes(SIGNATURE_KEY_MAX_SCALAR_BYTES)
-            .max_documents(1)
-            .max_merge_keys(0)
-            // In noyalib 0.0.36 these policies select the AST path; its node
-            // and cumulative scalar accounting is intentional for this probe.
-            .with_policy(noyalib::policy::DenyAnchors)
-            .with_policy(noyalib::policy::DenyTags)
-    }
-
     fn decode_key(token: &str) -> Result<String, noyalib::Error> {
-        noyalib::from_str_with_config(token, &signature_key_decoder_config())
+        noyalib::from_str_with_config(token, &super::signature_key_decoder_config())
     }
 
     #[test]
@@ -329,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn proposed_key_decoder_accepts_scalar_spellings() {
+    fn key_decoder_accepts_scalar_spellings() {
         for (token, expected) in [
             ("keyid", "keyid"),
             ("'keyid'", "keyid"),
@@ -344,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn proposed_key_decoder_rejects_decorations_and_non_scalars() {
+    fn key_decoder_rejects_decorations_and_non_scalars() {
         for token in [
             "&anchor keyid",
             "*anchor",
@@ -355,16 +356,12 @@ mod tests {
             "\"unterminated",
         ] {
             assert!(decode_key(token).is_err(), "{token}");
-            // Characterize the proposed integration's raw-token fallback,
-            // without installing it in the production scanner.
-            let fallback = decode_key(token).unwrap_or_else(|_| token.to_owned());
-            assert_eq!(fallback, token);
         }
     }
 
     #[test]
-    fn proposed_key_decoder_bounds_decoded_token_bytes() {
-        let exact = "x".repeat(SIGNATURE_KEY_MAX_SCALAR_BYTES);
+    fn key_decoder_bounds_decoded_token_bytes() {
+        let exact = "x".repeat(super::SIGNATURE_KEY_MAX_SCALAR_BYTES);
         assert_eq!(decode_key(&format!("\"{exact}\"")).unwrap(), exact);
         let err = decode_key(&format!("\"{exact}x\"")).unwrap_err();
         assert!(err.to_string().contains("max_total_scalar_bytes"), "{err}");
@@ -375,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn proposed_key_decoder_bounds_source_bytes() {
+    fn key_decoder_bounds_source_bytes() {
         let exact = format!(
             "keyid #{}",
             "x".repeat(super::SIGNATURE_DOCUMENT_MAX_BYTES - "keyid #".len())
@@ -470,6 +467,159 @@ mod tests {
         let oversized = vec![b'x'; super::SIGNATURE_DOCUMENT_MAX_BYTES + 1];
         let err = super::signature_document_top_level_keys(&oversized).unwrap_err();
         assert!(matches!(err, CoreError::SignatureYaml(_)));
+    }
+
+    #[test]
+    fn top_level_key_scan_normalizes_quoted_known_keys() {
+        let carrier = br#""schema": YamlSigilSignature.v1alpha1
+'alg': ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+"keyid": "kid-1"
+"sign\u0061ture": Zm9v
+"#;
+
+        let doc = super::parse_signature_document(carrier)
+            .expect("quoted known mapping keys must parse as their semantic strings");
+        assert_eq!(doc.keyid.as_deref(), Some("kid-1"));
+
+        let keys = super::signature_document_top_level_keys(carrier).unwrap();
+        let expected = ["alg", "keyid", "schema", "signature"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(keys, expected);
+        assert!(!super::has_unknown_signature_document_fields(carrier).unwrap());
+    }
+
+    #[test]
+    fn top_level_key_scan_preserves_rejected_decorations() {
+        for (spelling, reason) in [
+            ("&anchor keyid", "DenyAnchors"),
+            ("!custom keyid", "DenyTags"),
+        ] {
+            let carrier = format!(
+                "schema: YamlSigilSignature.v1alpha1\n\
+                 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                 {spelling}: kid-1\n\
+                 signature: Zm9v\n"
+            );
+
+            // Exercise the scanner's raw-token fallback through its public API.
+            let keys = super::signature_document_top_level_keys(carrier.as_bytes()).unwrap();
+            assert!(keys.contains(spelling), "{spelling}: {keys:?}");
+            assert!(!keys.contains("keyid"), "{spelling}: {keys:?}");
+            assert!(super::has_unknown_signature_document_fields(carrier.as_bytes()).unwrap());
+
+            let err = super::parse_signature_document(carrier.as_bytes()).unwrap_err();
+            let CoreError::SignatureYaml(message) = err else {
+                panic!("expected YAML parser error for {spelling}");
+            };
+            assert!(message.contains(reason), "{spelling}: {message}");
+        }
+
+        // Built-in string tags remain valid; the policy rejects custom tags.
+        let carrier = b"schema: YamlSigilSignature.v1alpha1\n\
+                        alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                        !!str keyid: kid-1\n\
+                        signature: Zm9v\n";
+        let keys = super::signature_document_top_level_keys(carrier).unwrap();
+        assert!(keys.contains("keyid"));
+        assert!(!keys.contains("!!str keyid"));
+        assert!(!super::has_unknown_signature_document_fields(carrier).unwrap());
+        let doc = super::parse_signature_document(carrier).unwrap();
+        assert_eq!(doc.keyid.as_deref(), Some("kid-1"));
+    }
+
+    #[test]
+    fn top_level_key_scan_applies_decoded_key_byte_budget() {
+        for size in [
+            super::SIGNATURE_KEY_MAX_SCALAR_BYTES,
+            super::SIGNATURE_KEY_MAX_SCALAR_BYTES + 1,
+        ] {
+            let decoded = "x".repeat(size);
+            let spelling = format!("\"{decoded}\"");
+            let carrier = format!(
+                "schema: YamlSigilSignature.v1alpha1\n\
+                 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                 {spelling}: kid-1\n\
+                 signature: Zm9v\n"
+            );
+            assert!(carrier.len() < super::SIGNATURE_DOCUMENT_MAX_BYTES);
+
+            let keys = super::signature_document_top_level_keys(carrier.as_bytes()).unwrap();
+            if size == super::SIGNATURE_KEY_MAX_SCALAR_BYTES {
+                assert!(keys.contains(&decoded));
+                assert!(!keys.contains(&spelling));
+            } else {
+                assert!(keys.contains(&spelling));
+                assert!(!keys.contains(&decoded));
+            }
+            assert!(super::has_unknown_signature_document_fields(carrier.as_bytes()).unwrap());
+        }
+    }
+
+    #[test]
+    fn top_level_key_scan_flags_unknown_key_spellings() {
+        for spelling in ["extra", "'extra'", "\"extra\"", "\"ex\\u0074ra\""] {
+            let carrier = format!(
+                "schema: YamlSigilSignature.v1alpha1\n\
+                 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                 signature: Zm9v\n\
+                 {spelling}: value\n"
+            );
+
+            let keys = super::signature_document_top_level_keys(carrier.as_bytes()).unwrap();
+            assert!(keys.contains("extra"), "{spelling}: {keys:?}");
+            assert!(
+                super::has_unknown_signature_document_fields(carrier.as_bytes()).unwrap(),
+                "{spelling}"
+            );
+
+            let err = super::parse_signature_document(carrier.as_bytes()).unwrap_err();
+            let CoreError::SignatureYaml(message) = err else {
+                panic!("expected YAML parser error for {spelling}");
+            };
+            assert!(
+                message.contains("extra") && message.contains("unknown field"),
+                "{spelling}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_rejects_semantic_duplicate_keyid_spellings() {
+        const KEYID_SPELLINGS: [&str; 4] = ["keyid", "'keyid'", "\"keyid\"", "\"key\\u0069d\""];
+
+        for spelling in KEYID_SPELLINGS {
+            let carrier = format!(
+                "schema: YamlSigilSignature.v1alpha1\n\
+                 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                 {spelling}: kid-1\n\
+                 signature: Zm9v\n"
+            );
+            let doc = super::parse_signature_document(carrier.as_bytes())
+                .unwrap_or_else(|e| panic!("{spelling} must parse individually: {e:?}"));
+            assert_eq!(doc.keyid.as_deref(), Some("kid-1"));
+        }
+
+        for first in KEYID_SPELLINGS {
+            for second in KEYID_SPELLINGS {
+                let carrier = format!(
+                    "schema: YamlSigilSignature.v1alpha1\n\
+                     alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                     {first}: kid-1\n\
+                     {second}: kid-2\n\
+                     signature: Zm9v\n"
+                );
+                let err = super::parse_signature_document(carrier.as_bytes()).unwrap_err();
+                let CoreError::SignatureYaml(message) = err else {
+                    panic!("expected YAML parser error for {first}/{second}");
+                };
+                assert!(
+                    message.contains("duplicate key"),
+                    "{first}/{second}: {message}"
+                );
+            }
+        }
     }
 
     #[test]
