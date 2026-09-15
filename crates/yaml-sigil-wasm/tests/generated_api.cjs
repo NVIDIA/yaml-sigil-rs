@@ -143,3 +143,8 @@ assert.equal(api.verifyWithResourceLimits(
 assert.equal(api.decomposeWithResourceLimits(
   new Uint8Array(2), "invalid", undefined, tiny,
 ).status, "resource_error");
+
+require("./byte_inputs.cjs")(api).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
