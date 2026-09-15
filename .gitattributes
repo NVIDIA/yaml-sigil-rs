@@ -1,6 +1,9 @@
 # Conformance artifacts are byte-exact test inputs.
 crates/yaml-sigil-conformance/fixtures/** -text
 
+# Example signatures cover exact payload bytes, including line endings.
+examples/github-keys/fixtures/*.yaml -text
+
 # Package-content inventories are canonical data consumed byte-for-byte by
 # xtask.
 xtask/package-contents/*.txt text eol=lf

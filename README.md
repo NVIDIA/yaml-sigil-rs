@@ -129,6 +129,12 @@ file extension.
 YAML decompose and verify operations require complete artifacts because
 boundary selection uses the last constrained marker.
 
+## Runnable examples
+
+The [example index](./examples/README.md) links to runnable demonstrations and
+their tests. The [GitHub key example](./examples/github-keys/README.md) signs
+YAML and verifies it against public GitHub account keys or a supplied public key.
+
 ## Build
 
 The development toolchain follows Rust `stable` through

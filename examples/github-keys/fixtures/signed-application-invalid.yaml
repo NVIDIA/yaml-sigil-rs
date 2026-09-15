@@ -1,0 +1,8 @@
+example: github-keys
+message: A signature does not validate application values.
+port: not-an-integer
+---
+schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+keyid: "https://api.github.com/users/ddurst-nvidia/ssh_signing_keys"
+signature: 4blKxGNTL96Nu1qqHStSMvSceRkcpBCVvEnTDJPcKexreMGnecAG1RHRNTdNa3gVv5RHqQGuErWSXyAjgCNyBQ

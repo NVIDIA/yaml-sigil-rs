@@ -1,0 +1,3 @@
+example: github-keys
+message: A signature does not validate application values.
+port: not-an-integer

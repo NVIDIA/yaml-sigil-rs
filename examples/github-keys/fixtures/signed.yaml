@@ -1,0 +1,8 @@
+example: github-keys
+message: This document demonstrates a signature match.
+port: 8080
+---
+schema: YamlSigilSignature.v1alpha1
+alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
+keyid: "https://api.github.com/users/ddurst-nvidia/ssh_signing_keys"
+signature: s7aa-F4wDvQgfFNW0wNB5iZQsFuMqlNVDDILmRKbWdPDJloE9lODzQIQD52IhMHu9bwytwvDMFFzvxfAw8cqDQ
