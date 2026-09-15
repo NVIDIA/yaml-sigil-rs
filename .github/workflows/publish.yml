@@ -148,6 +148,12 @@ jobs:
                 steps.validate.outputs.version ||
                 steps.recover.outputs.version }}
         run: |
+          # Qualification generated this ignored root lockfile. Remove only
+          # that regular, untracked file before release-source validation.
+          test -f Cargo.lock
+          test ! -L Cargo.lock
+          test -z "$(git ls-files -- Cargo.lock)"
+          rm -- Cargo.lock
           # Content policy proves the exact four source crates are coherent.
           cargo xtask release check --version "${RELEASE_VERSION}"
         working-directory: release-source
