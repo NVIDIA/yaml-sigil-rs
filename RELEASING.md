@@ -321,21 +321,21 @@ check_live_bindings() {
   ' <<< "${run_json}")" = true
   jobs_json="$(gh api \
     "${run_path}/jobs?per_page=100")"
-  test "$(jq '[.jobs[] \
-    | select(.name == "Confirm exact published sources" \
-      and .status == "completed" and .conclusion == "success")] \
+  test "$(jq '[.jobs[]
+    | select(.name == "Confirm exact published sources"
+      and .status == "completed" and .conclusion == "success")]
     | length' <<< "${jobs_json}")" = 1
-  test "$(jq '[.jobs[] \
-    | select(.name == "Approve source-only GitHub Releases" \
-      and .status == "waiting" and .conclusion == null)] \
+  test "$(jq '[.jobs[]
+    | select(.name == "Approve source-only GitHub Releases"
+      and .status == "waiting" and .conclusion == null)]
     | length' <<< "${jobs_json}")" = 1
-  test "$(jq '[.jobs[] \
-    | select(.name == "Finalize source-only GitHub Releases")] \
+  test "$(jq '[.jobs[]
+    | select(.name == "Finalize source-only GitHub Releases")]
     | length <= 1' <<< "${jobs_json}")" = true
-  test "$(jq '[.jobs[] \
-    | select(.name == "Finalize source-only GitHub Releases" \
-      and (.status == "in_progress" or .status == "completed" \
-        or .conclusion != null))] \
+  test "$(jq '[.jobs[]
+    | select(.name == "Finalize source-only GitHub Releases"
+      and (.status == "in_progress" or .status == "completed"
+        or .conclusion != null))]
     | length' <<< "${jobs_json}")" = 0
   pending_json="$(gh api \
     "repos/${repository}/actions/runs/${run_id}/pending_deployments")"
@@ -376,23 +376,23 @@ test "$(jq -r .deployment_branch_policy.custom_branch_policies \
   <<< "${approval_environment_json}")" = true
 test "$(jq '.protection_rules | length' \
   <<< "${approval_environment_json}")" = 2
-test "$(jq '[.protection_rules[] | select(.type == "required_reviewers")] \
+test "$(jq '[.protection_rules[] | select(.type == "required_reviewers")]
   | length' <<< "${approval_environment_json}")" = 1
-test "$(jq -r '.protection_rules[] \
-  | select(.type == "required_reviewers") \
+test "$(jq -r '.protection_rules[]
+  | select(.type == "required_reviewers")
   | .prevent_self_review' <<< "${approval_environment_json}")" = false
-test "$(jq '[.protection_rules[] \
-  | select(.type == "required_reviewers") \
+test "$(jq '[.protection_rules[]
+  | select(.type == "required_reviewers")
   | .reviewers[]] | length' <<< "${approval_environment_json}")" = 1
-test "$(jq -r '.protection_rules[] \
-  | select(.type == "required_reviewers") \
+test "$(jq -r '.protection_rules[]
+  | select(.type == "required_reviewers")
   | .reviewers[0].type' <<< "${approval_environment_json}")" = User
-test "$(jq -r '.protection_rules[] \
-  | select(.type == "required_reviewers") \
+test "$(jq -r '.protection_rules[]
+  | select(.type == "required_reviewers")
   | .reviewers[0].reviewer.login' <<< "${approval_environment_json}")" = \
   ddurst-nvidia
-test "$(jq -r '.protection_rules[] \
-  | select(.type == "required_reviewers") \
+test "$(jq -r '.protection_rules[]
+  | select(.type == "required_reviewers")
   | .reviewers[0].reviewer.id' <<< "${approval_environment_json}")" = \
   267424412
 approval_branch_policy_json="$(gh api \
@@ -425,9 +425,9 @@ test "$(jq -r .deployment_branch_policy.custom_branch_policies \
   <<< "${automation_environment_json}")" = true
 test "$(jq '.protection_rules | length' \
   <<< "${automation_environment_json}")" = 1
-test "$(jq '[.protection_rules[] | select(.type == "branch_policy")] \
+test "$(jq '[.protection_rules[] | select(.type == "branch_policy")]
   | length' <<< "${automation_environment_json}")" = 1
-test "$(jq '[.protection_rules[] | select(.type == "required_reviewers")] \
+test "$(jq '[.protection_rules[] | select(.type == "required_reviewers")]
   | length' <<< "${automation_environment_json}")" = 0
 automation_branch_policy_json="$(gh api \
   "repos/${repository}/environments/${automation_environment}/deployment-branch-policies?per_page=100")"
