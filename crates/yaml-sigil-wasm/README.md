@@ -1,5 +1,8 @@
 # yaml-sigil-wasm
 
+> [!IMPORTANT]
+> WebAssembly support is currently experimental.
+
 `yaml-sigil-wasm` exposes YAML Sigil compose, decompose, sign, and verify
 operations to browser and Node.js JavaScript through
 `wasm32-unknown-unknown`. It delegates protocol processing to the Rust
