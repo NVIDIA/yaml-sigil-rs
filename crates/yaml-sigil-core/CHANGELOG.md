@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.5.0...yaml-sigil-core-v0.5.1-rc.1) - 2026-09-15
+
+### Fixed
+
+- *(core)* normalize quoted signature keys with bounded decoding ([#131](https://github.com/NVIDIA/yaml-sigil-rs/pull/131))
+
+### Other
+
+- *(core)* make signature scalar parsing policies explicit ([#129](https://github.com/NVIDIA/yaml-sigil-rs/pull/129))
+
 ## [0.5.0](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.5.0-rc.2...yaml-sigil-core-v0.5.0) - 2026-09-06
 
 ### Other
