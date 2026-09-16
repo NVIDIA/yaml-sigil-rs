@@ -55,7 +55,7 @@ byte identity. Treat the text inside `CoreError::SignatureYaml` as an unstable
 human diagnostic, not a machine-readable interface.
 
 The exact-pinned downstream fixture characterizes interoperability between
-`noyalib` releases `0.0.35` and `0.0.36`. This same-library, cross-version test
+`noyalib` releases `0.0.35` and `0.0.43`. This same-library, cross-version test
 does not establish cross-backend YAML portability or a permanent support
 guarantee for either release.
 

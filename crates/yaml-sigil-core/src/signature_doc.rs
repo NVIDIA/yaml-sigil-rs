@@ -169,7 +169,7 @@ fn signature_key_decoder_config() -> noyalib::ParserConfig {
         .max_total_scalar_bytes(SIGNATURE_KEY_MAX_SCALAR_BYTES)
         .max_documents(1)
         .max_merge_keys(0)
-        // In noyalib 0.0.36 these policies select the AST path; its node
+        // These policies select the AST path in noyalib 0.0.43; its node
         // and cumulative scalar accounting is intentional for this decoder.
         .with_policy(noyalib::policy::DenyAnchors)
         .with_policy(noyalib::policy::DenyTags)
