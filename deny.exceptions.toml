@@ -12,7 +12,7 @@ exceptions = [
     { allow = ["Unicode-3.0"], crate = "litemap@0.8.3" },
     { allow = ["Unicode-3.0"], crate = "potential_utf@0.1.6" },
     { allow = ["Unicode-3.0"], crate = "tinystr@0.8.4" },
-    { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.24" },
+    { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.25" },
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots@1.0.9" },
     { allow = ["Unicode-3.0"], crate = "writeable@0.6.4" },
     { allow = ["Unicode-3.0"], crate = "yoke@0.8.3" },
