@@ -76,6 +76,9 @@ Release preparation can advance an unchanged `rc.N` to its immediate successor
 on the same version core. Pinned release-plz applies that explicit selection
 after `update`; follow `RELEASING.md` for the normal source checks and approvals.
 
+During finalization, prereleases remain excluded from GitHub Latest. Stable
+releases use GitHub's selection based on creation date and semantic version.
+
 ### Diagnose copied-ref binding failures
 
 The anonymous binder reports the failed endpoint, HTTP status, request ID,
