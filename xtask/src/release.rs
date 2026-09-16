@@ -15,6 +15,9 @@ use clap::{Args, Subcommand};
 use semver::Version;
 use toml_edit::{DocumentMut, Item};
 
+use crate::release_base;
+use crate::release_policy::ReleaseLine;
+
 use crate::bounded_process::{self, OutputLimits, VALIDATION_OUTPUT_LIMITS};
 use crate::release_policy::{RELEASE_PLZ_VERSION, RUST_POLICY};
 use crate::{safe_file, versions};
@@ -76,12 +79,18 @@ enum ReleaseCommand {
     },
     /// Run release-plz update and require one maintainer-selected version.
     Prepare {
+        /// Canonical source base; mandatory for detached checkouts.
+        #[arg(long)]
+        base_ref: Option<String>,
         /// Exact stable or prerelease version for all four source crates.
         #[arg(long)]
         version: Version,
     },
     /// Validate exact prepared release source without credentials or publishing.
     Check {
+        /// Canonical source base; mandatory for detached checkouts.
+        #[arg(long)]
+        base_ref: Option<String>,
         /// Exact expected version for all four source crates.
         #[arg(long)]
         version: Version,
@@ -91,8 +100,16 @@ enum ReleaseCommand {
 pub(crate) fn run(root: &Path, args: ReleaseArgs) -> Result<()> {
     match args.command {
         ReleaseCommand::Activate { version } => activate(root, &version),
-        ReleaseCommand::Prepare { version } => prepare(root, &version),
-        ReleaseCommand::Check { version } => check(root, &version),
+        ReleaseCommand::Prepare { version, base_ref } => {
+            let line =
+                release_base::resolve(root, base_ref.as_deref()).map_err(anyhow::Error::msg)?;
+            prepare(root, &version, line)
+        }
+        ReleaseCommand::Check { version, base_ref } => {
+            let line =
+                release_base::resolve(root, base_ref.as_deref()).map_err(anyhow::Error::msg)?;
+            check(root, &version, line)
+        }
     }
 }
 
@@ -101,7 +118,7 @@ fn activate(root: &Path, target: &Version) -> Result<()> {
     let selected = activation_version(&current, target)?;
     require_root_lock_absent(root)?;
     require_clean(root)?;
-    require_origin_main_base(root)?;
+    require_release_base(root, ReleaseLine::Main)?;
     require_activation_branch(root, target)?;
 
     // rc.0 is a non-release safety stub for the coordination line. Keep
@@ -140,13 +157,15 @@ fn activation_version(current: &Version, target: &Version) -> Result<Version> {
     Ok(selected)
 }
 
-fn prepare(root: &Path, selected: &Version) -> Result<()> {
+fn prepare(root: &Path, selected: &Version, line: ReleaseLine) -> Result<()> {
+    release_base::validate_version(root, line, selected, "yaml-sigil-core-v")
+        .map_err(anyhow::Error::msg)?;
     require_real_release_version(selected)?;
     validate_policy(root)?;
     require_release_plz(root)?;
     require_root_lock_absent(root)?;
     require_clean(root)?;
-    require_origin_main_base(root)?;
+    require_release_base(root, line)?;
     let current = versions::current(root)?;
     if selected <= &current {
         bail!("selected release version {selected} must advance {current}");
@@ -339,7 +358,8 @@ fn expected_literal_manifest(body: &str, selected: &Version) -> Result<String> {
     Ok(document.to_string())
 }
 
-pub(crate) fn check(root: &Path, expected: &Version) -> Result<()> {
+pub(crate) fn check(root: &Path, expected: &Version, line: ReleaseLine) -> Result<()> {
+    line.require_version(expected).map_err(anyhow::Error::msg)?;
     require_real_release_version(expected)?;
     validate_policy(root)?;
     require_root_lock_absent(root)?;
@@ -604,10 +624,10 @@ fn require_clean(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn require_origin_main_base(root: &Path) -> Result<()> {
+fn require_release_base(root: &Path, line: ReleaseLine) -> Result<()> {
     let head = git_line(root, &["rev-parse", "HEAD"])?;
-    let origin_main = git_line(root, &["rev-parse", "refs/remotes/origin/main"])?;
-    validate_origin_main_base(&head, &origin_main)
+    let base = git_line(root, &["rev-parse", &line.tracking_ref()])?;
+    validate_release_base(&head, &base)
 }
 
 fn require_activation_branch(root: &Path, target: &Version) -> Result<()> {
@@ -619,7 +639,7 @@ fn require_activation_branch(root: &Path, target: &Version) -> Result<()> {
     Ok(())
 }
 
-fn validate_origin_main_base(head: &str, origin_main: &str) -> Result<()> {
+fn validate_release_base(head: &str, origin_main: &str) -> Result<()> {
     if head.len() != 40
         || origin_main.len() != 40
         || !head.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -628,7 +648,7 @@ fn validate_origin_main_base(head: &str, origin_main: &str) -> Result<()> {
         bail!("release base is not an exact full commit SHA");
     }
     if head != origin_main {
-        bail!("release preparation must start at exact origin/main");
+        bail!("release preparation must start at the exact selected origin base");
     }
     Ok(())
 }
@@ -983,11 +1003,9 @@ mod tests {
     #[test]
     fn release_preparation_requires_exact_origin_main_base() {
         let head = "0123456789abcdef0123456789abcdef01234567";
-        assert!(validate_origin_main_base(head, head).is_ok());
-        assert!(
-            validate_origin_main_base(head, "1123456789abcdef0123456789abcdef01234567").is_err()
-        );
-        assert!(validate_origin_main_base("short", "short").is_err());
+        assert!(validate_release_base(head, head).is_ok());
+        assert!(validate_release_base(head, "1123456789abcdef0123456789abcdef01234567").is_err());
+        assert!(validate_release_base("short", "short").is_err());
     }
 
     #[test]

@@ -512,7 +512,7 @@ jobs:
             rm -- Cargo.lock
             release_version="${RELEASE_BRANCH#release-plz-manual-}"
             "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- \
-              release check --version "${release_version}"
+              release check --base-ref refs/heads/main --version "${release_version}"
           fi
           "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- ci
         working-directory: ${{ runner.temp }}/candidate-source

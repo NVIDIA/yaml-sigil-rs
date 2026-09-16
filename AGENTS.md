@@ -236,8 +236,8 @@ cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
 cargo xtask sync-workspace-versions
 cargo xtask release activate --version MAJOR.MINOR.PATCH
-cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE]
-cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
+cargo xtask release prepare --base-ref refs/heads/main --version MAJOR.MINOR.PATCH[-PRERELEASE]
+cargo xtask release check --base-ref refs/heads/main --version MAJOR.MINOR.PATCH[-PRERELEASE]
 cargo xtask coverage
 cargo xtask coverage --open
 cargo xtask coverage-open

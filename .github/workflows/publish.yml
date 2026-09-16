@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${GITHUB_SHA}"
           --operation auto
@@ -112,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --operation validate
@@ -129,7 +129,7 @@ jobs:
           ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --operation recover
@@ -155,7 +155,7 @@ jobs:
           test -z "$(git ls-files -- Cargo.lock)"
           rm -- Cargo.lock
           # Content policy proves the exact four source crates are coherent.
-          cargo xtask release check --version "${RELEASE_VERSION}"
+          cargo xtask release check --base-ref refs/heads/main --version "${RELEASE_VERSION}"
         working-directory: release-source
 
   publish:
@@ -214,7 +214,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --operation auto
@@ -229,7 +229,7 @@ jobs:
           ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --operation recover
@@ -314,7 +314,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --operation auto
@@ -329,7 +329,7 @@ jobs:
           ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
         run: >-
-          cargo xtask github release qualify
+          cargo xtask github release qualify --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --operation recover
@@ -444,7 +444,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.qualify.outputs.version }}
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
         run: >-
-          cargo xtask github release finalize
+          cargo xtask github release finalize --base-ref refs/heads/main
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --version "${RELEASE_VERSION}"

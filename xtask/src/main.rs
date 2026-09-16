@@ -10,6 +10,7 @@ mod github;
 mod package_content;
 mod package_content_policy;
 mod release;
+mod release_base;
 mod release_policy;
 mod safe_file;
 mod spec_update;
