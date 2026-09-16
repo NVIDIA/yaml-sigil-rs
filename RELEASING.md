@@ -255,8 +255,9 @@ publisher.
 After all four source packages are visible with matching checksums and
 `.cargo_vcs_info.json`, the repository-scoped GitHub App creates or verifies
 the four deterministic annotated tags and immutable, zero-asset Releases.
-Prereleases stay excluded from GitHub Latest; stable releases use GitHub's
-selection based on creation date and semantic version.
+The finalizer explicitly selects Latest for stable main releases and verifies
+the outcome. Prereleases, support releases, and older-main recovery preserve
+the current Latest selection.
 
 ### Approve crates.io publication
 
@@ -569,3 +570,22 @@ Preparation continues to use release-plz 0.3.160 for version and changelog
 changes. These command options alone do not enable support publication. Read
 [the maintainer procedure](MAINTAINERS.md#support-readiness-commands) for the
 read-only activation proposal and remaining activation boundary.
+
+## Latest selection during finalization
+
+The finalizer reads GitHub's current Latest release before creating a Release
+and sends `make_latest` explicitly. Stable main releases advance Latest;
+prereleases and support releases preserve it. Recovery of an older main
+version also preserves it, while recovery of a newer stable main version
+advances it. The decision precedes the write and is verified through the
+`releases/latest` endpoint afterward. Existing immutable Releases are retained.
+
+If Latest moves between qualification and creation, stop and requalify. If
+readback differs from the intended outcome, inspect the exact existing tags,
+Releases, and Latest selection before retrying. Never recreate an immutable
+Release to change its Latest status. Publication remains serialized across
+the repository.
+
+Within one version, the compiled package order remains core, transcription,
+signing, verification. A retry cannot move Latest from a later package back
+to an earlier package of that same version.

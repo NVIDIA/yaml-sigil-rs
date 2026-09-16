@@ -76,8 +76,9 @@ Release preparation can advance an unchanged `rc.N` to its immediate successor
 on the same version core. Pinned release-plz applies that explicit selection
 after `update`; follow `RELEASING.md` for the normal source checks and approvals.
 
-During finalization, prereleases remain excluded from GitHub Latest. Stable
-releases use GitHub's selection based on creation date and semantic version.
+Finalization uses [explicit guarded Latest selection](#latest-selection-during-finalization).
+Main stable releases advance Latest; prereleases, support releases, and older
+main recovery preserve it.
 
 ### Diagnose copied-ref binding failures
 
@@ -643,3 +644,22 @@ This readiness command applies no settings, creates no refs, and publishes
 nothing. Opening a line still requires the separately reviewed protection and
 activation transaction. Support qualification and publication remain disabled
 until the provenance checks and main-dispatched release procedure are deployed.
+
+## Latest selection during finalization
+
+The finalizer reads GitHub's current Latest release before creating a Release
+and sends `make_latest` explicitly. Stable main releases advance Latest;
+prereleases and support releases preserve it. Recovery of an older main
+version also preserves it, while recovery of a newer stable main version
+advances it. The decision precedes the write and is verified through the
+`releases/latest` endpoint afterward. Existing immutable Releases are retained.
+
+If Latest moves between qualification and creation, stop and requalify. If
+readback differs from the intended outcome, inspect the exact existing tags,
+Releases, and Latest selection before retrying. Never recreate an immutable
+Release to change its Latest status. Publication remains serialized across
+the repository.
+
+Within one version, the compiled package order remains core, transcription,
+signing, verification. A retry cannot move Latest from a later package back
+to an earlier package of that same version.
