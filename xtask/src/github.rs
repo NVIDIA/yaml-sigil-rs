@@ -1327,7 +1327,8 @@ fn create_release(
         "draft": false,
         "prerelease": spec.prerelease,
         "generate_release_notes": false,
-        "make_latest": "false",
+        // Keep prereleases excluded; let GitHub select stable Latest by date and version.
+        "make_latest": if spec.prerelease { "false" } else { "legacy" },
     });
     require_current_mutation_policy(github, source_sha, policy_main_sha)?;
     require_exact_tag_object(github, spec, source_sha, tagger_date, tag_object_sha)?;
@@ -1789,6 +1790,7 @@ mod tests {
         release_created: bool,
         release_posted: bool,
         release_read_back: bool,
+        release_payload: Option<serde_json::Value>,
         tag_change_after_release_boundary: Option<TagChange>,
         events: Vec<String>,
     }
@@ -1809,6 +1811,7 @@ mod tests {
                 release_created: false,
                 release_posted: false,
                 release_read_back: false,
+                release_payload: None,
                 tag_change_after_release_boundary: None,
                 events: Vec::new(),
             }
@@ -2004,7 +2007,7 @@ mod tests {
         fn post<T: serde::de::DeserializeOwned, P: serde::Serialize>(
             &mut self,
             path: &str,
-            _payload: &P,
+            payload: &P,
         ) -> Result<T, String> {
             self.events.push(format!("POST {path}"));
             if path == format!("repos/{REPOSITORY}/git/tags") {
@@ -2014,6 +2017,8 @@ mod tests {
                 self.tag_ref_created = true;
                 Self::decode(self.tag_ref())
             } else if path == format!("repos/{REPOSITORY}/releases") {
+                self.release_payload =
+                    Some(serde_json::to_value(payload).map_err(|error| error.to_string())?);
                 self.release_created = true;
                 self.release_posted = true;
                 Self::decode(self.release())
@@ -2498,23 +2503,28 @@ mod tests {
     }
 
     #[test]
-    fn release_specs_distinguish_prereleases() {
+    fn finalizer_selects_latest_only_for_stable_releases() {
         let package = &RUST_POLICY.packages[0];
-        let prerelease = ReleaseSpec::new(
-            package,
-            &Version::parse("0.6.0-rc.1").unwrap(),
-            "0123456789abcdef0123456789abcdef01234567",
-        )
-        .unwrap();
-        assert!(prerelease.prerelease);
-        assert!(prerelease.body.contains("no attached assets"));
-        let stable = ReleaseSpec::new(
-            package,
-            &Version::parse("0.6.0").unwrap(),
-            "0123456789abcdef0123456789abcdef01234567",
-        )
-        .unwrap();
-        assert!(!stable.prerelease);
+        let date = "2026-09-04T12:00:00Z";
+        for (version, prerelease, latest) in
+            [("0.6.0-rc.1", true, "false"), ("0.6.0", false, "legacy")]
+        {
+            let version = Version::parse(version).unwrap();
+            let spec = ReleaseSpec::new(package, &version, TEST_SOURCE_SHA).unwrap();
+            let mut github = MutationTransport::new(&spec, date, false);
+            finalize_package(
+                &mut github,
+                package,
+                &version,
+                TEST_SOURCE_SHA,
+                TEST_POLICY_SHA,
+                date,
+            )
+            .unwrap();
+            let payload = github.release_payload.unwrap();
+            assert_eq!(payload["prerelease"], prerelease);
+            assert_eq!(payload["make_latest"], latest);
+        }
     }
 
     #[test]

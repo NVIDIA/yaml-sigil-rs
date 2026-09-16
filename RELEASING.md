@@ -66,9 +66,10 @@ git diff --stat
 git diff
 ```
 
-Review every generated changelog entry and version change. For an unchanged
-RC, pinned `set-version` relabels the latest changelog entry. Retain the generated
-new entry and restore the previous published entry from `HEAD` alongside it.
+Review every generated changelog entry and version change. When advancing an
+unchanged RC or promoting it to stable, pinned `set-version` can relabel the
+latest published RC entry. Retain the generated new entry and restore the
+previous published entry from `HEAD` alongside it.
 Then run the full provider-neutral validation sequence.
 
 ```shell
@@ -254,6 +255,8 @@ publisher.
 After all four source packages are visible with matching checksums and
 `.cargo_vcs_info.json`, the repository-scoped GitHub App creates or verifies
 the four deterministic annotated tags and immutable, zero-asset Releases.
+Prereleases stay excluded from GitHub Latest; stable releases use GitHub's
+selection based on creation date and semantic version.
 
 ### Approve crates.io publication
 
