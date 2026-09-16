@@ -28,7 +28,8 @@ workspace = true
 anyhow = "1.0"
 yaml-sigil-core = { workspace = true }
 
-# ring-provider, aws-lc-provider, ring-unqualified-provider, and async-provider:
+# ring-provider, aws-lc-provider, ring-unqualified-provider, async-provider,
+# and github-keys:
 # CLI arguments, public-key display, signing/verification traits, and facades.
 base64 = { workspace = true }
 clap = { version = "4.6", features = ["derive"] }
@@ -36,7 +37,7 @@ signature = { workspace = true }
 yaml-sigil-signing = { workspace = true }
 yaml-sigil-verification = { workspace = true }
 
-# The four provider examples' file-input tests.
+# Provider and github-keys file-input tests.
 tempfile = "3"
 
 # ring-provider and ring-unqualified-provider: shared native ring adapters.
@@ -48,26 +49,23 @@ ring = "=0.17.14"
 # The provider uses its bundled assembly objects only as a fallback there.
 aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips", "prebuilt-nasm"] }
 
-# async-provider: P-256 and key generation in the simulated service worker,
-# plus its Tokio runtime, request/reply channels, and asynchronous tests.
+# async-provider and github-keys: P-256 worker keys and the adaptation recipe test.
 p256 = { workspace = true }
+# async-provider: key generation in the simulated service worker.
 rand = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+# async-provider and github-keys: runtime, channels, agent I/O, and timed tests.
+tokio = { workspace = true, features = ["macros", "rt", "sync", "net", "time", "io-util", "test-util"] }
+
+# github-keys: SSH-agent transport and OpenSSH public-key decoding. The agent
+# owns private keys; RSA and SSH compression are not needed by this example.
+russh = { version = "=0.63.3", default-features = false, features = ["ring"] }
+# github-keys: anonymous HTTPS discovery, JSON responses, and local verification.
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+serde_json = { workspace = true }
+ed25519-dalek = { workspace = true }
 
 # protobuf-facade: application-owned message types and both wire directions.
 prost = "=0.14.4"
-
-# github-keys: OpenSSH key decoding/decryption, native Ed25519 signing,
-# hidden passphrase input, secret-buffer cleanup, and anonymous HTTPS.
-# Its std feature pulls optional crypto backends into Cargo.lock. Keep file I/O
-# here so inactive RSA operations do not add an unrelated advisory to the graph.
-ssh-key = { version = "=0.6.7", default-features = false, features = ["alloc", "ecdsa", "ed25519", "encryption"] }
-ed25519-dalek = { workspace = true, features = ["zeroize"] }
-rpassword = "7.5"
-zeroize = "1.9"
-ureq = { version = "3.4", default-features = false, features = ["rustls"] }
-# github-keys: both anonymous GitHub account-key APIs return paginated JSON.
-serde_json = { workspace = true }
 
 # Execute the parser and round-trip tests in cargo test --workspace.
 [[example]]

@@ -31,7 +31,9 @@ skip = [
     { crate = "getrandom@0.2.17", reason = "ring retains getrandom 0.2 while RustCrypto uses 0.4." },
     { crate = "getrandom@0.3.4", reason = "The JSON Schema stack currently uses ahash with getrandom 0.3." },
     { crate = "hashbrown@0.15.5", reason = "Buffa and the parser stack use different hashbrown dependency lines." },
+    { crate = "num-bigint@0.4.8", reason = "The JSON Schema stack requires num-bigint 0.4 while the SSH-agent example uses 0.5." },
     { crate = "r-efi@5.3.0", reason = "getrandom 0.3 retains the earlier WASI ABI support line." },
+    { crate = "sha3@0.11.0", reason = "The SSH-agent example uses sha3 0.12 through russh, whose ml-kem dependency still requires 0.11." },
     { crate = "syn@2.0.119", reason = "Buffa and cryptographic macros retain syn 2 while newer derives use syn 3." },
     { crate = "windows-sys@0.52.0", reason = "ring retains windows-sys 0.52 while current tooling uses 0.61." },
 ]

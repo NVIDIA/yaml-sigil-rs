@@ -114,8 +114,8 @@ fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()> {
 
     // WARNING: This factory never runs the fixed qualification suite. The
     // implementer owns evidence for its verification behavior, including
-    // ring's known mixed-order Ed25519 difference. This is a deliberate choice
-    // for both algorithms, never a fallback after qualification failure.
+    // ring's known mixed-order Ed25519 difference. Both algorithms use this
+    // path explicitly. Neither retries after a qualification failure.
     let provider = VerificationProviderBuilder::new(RingFactory).build_unqualified();
     let bound_key = match algorithm {
         AlgorithmId::Ed25519 => provider.bind_ed25519(public_key)?,
