@@ -922,7 +922,7 @@ fn verify_published_archive(
     archive: &[u8],
 ) -> Result<(), String> {
     require_sha(source_sha, "published source SHA")?;
-    let actual = format!("{:x}", Sha256::digest(archive));
+    let actual = hex::encode(Sha256::digest(archive));
     if actual != record.checksum {
         return Err(format!(
             "published checksum differs for {} {version}",
@@ -2955,7 +2955,7 @@ mod tests {
 
     fn registry_fixture(version: &Version, archive: &[u8]) -> RegistryRecord {
         RegistryRecord {
-            checksum: format!("{:x}", Sha256::digest(archive)),
+            checksum: hex::encode(Sha256::digest(archive)),
             num: version.to_string(),
             yanked: false,
         }

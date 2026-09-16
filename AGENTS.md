@@ -678,7 +678,7 @@ documented.
 
 ## Local cryptographic providers
 
-Keep synchronous provider interoperability on the `signature` 2.2 message
+Keep synchronous provider interoperability on the `signature` 3.0 message
 operation traits. Do not add a prehash provider entry point. Ed25519 provider
 signatures use canonical 64-octet `R || S`; P-256 provider signatures use
 64-octet big-endian `r || s`, never DER. P-256 providers apply SHA-256 exactly

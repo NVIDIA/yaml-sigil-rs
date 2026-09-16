@@ -125,11 +125,7 @@ impl<'a> TestSigner<'a> {
     fn public_key(&self) -> Vec<u8> {
         match &self.key {
             SecretKey::Ed25519(key) => key.verifying_key().to_bytes().to_vec(),
-            SecretKey::P256(key) => key
-                .verifying_key()
-                .to_encoded_point(false)
-                .as_bytes()
-                .to_vec(),
+            SecretKey::P256(key) => key.verifying_key().to_sec1_point(false).as_bytes().to_vec(),
         }
     }
     fn sign_message(&self, message: &[u8]) -> Result<[u8; 64], signature::Error> {

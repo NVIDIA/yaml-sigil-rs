@@ -62,7 +62,7 @@ signature document inside those bytes remains payload content.
 ## Local provider verification
 
 Add a direct dependency on
-[`signature`](https://crates.io/crates/signature) 2.2. Implement
+[`signature`](https://crates.io/crates/signature) 3.0. Implement
 `signature::Verifier<[u8; 64]>` and `ProviderVerifier` for your bound provider
 handle, then implement `ProviderVerifierFactory` for the type that creates
 those handles. All three traits are public extension contracts. Keep each

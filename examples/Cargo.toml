@@ -51,7 +51,7 @@ aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc"
 # async-provider: P-256 and key generation in the simulated service worker,
 # plus its Tokio runtime, request/reply channels, and asynchronous tests.
 p256 = { workspace = true }
-rand_core = { workspace = true }
+rand = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 
 # protobuf-facade: application-owned message types and both wire directions.

@@ -361,13 +361,18 @@ build, or deployment as FIPS validated.
 
 ## Existing RustCrypto types
 
-The convenience APIs continue to expose the supported `ed25519-dalek` 2.x
-and `p256` 0.13 key types. This is a deliberate public dependency for now.
-Keeping them avoids another conversion layer for existing RustCrypto users.
-It also means a future incompatible dependency version can require public API
-migration; Cargo can treat types from incompatible versions as distinct.
-See Cargo's
+The `0.6` convenience APIs expose `ed25519-dalek` 3.x and `p256` 0.14
+key types. Synchronous provider adapters implement `signature` 3.x traits.
+Update your direct dependencies together; Cargo treats types and traits from
+incompatible versions as distinct. See Cargo's
 [version incompatibility guidance](https://doc.rust-lang.org/cargo/reference/resolver.html#version-incompatibility-hazards).
+
+For P-256, replace `to_encoded_point` with `to_sec1_point` and `SigningKey::random`
+with the `p256::elliptic_curve::Generate` trait. The
+[`async-provider` example](../examples/async_provider.rs) uses
+`try_generate_from_rng` with `rand` 0.10's fallible `SysRng`.
+Public-key bytes, signature encodings, and the external `yaml-sigil-traits`
+contracts retain their existing formats and behavior.
 
 You can own an application wrapper and implement `TryFrom` into these existing
 public types when conversion validates public bytes, or `From` when it is

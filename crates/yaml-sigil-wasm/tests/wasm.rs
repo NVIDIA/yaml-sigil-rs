@@ -332,7 +332,7 @@ fn p256_keys(scalar: u8) -> (Vec<u8>, Vec<u8>) {
     // (SEC 1)*. That standards material is not relicensed under this file's
     // Apache-2.0 declaration.
     let signing = P256SigningKey::from_slice(&[scalar; 32]).expect("valid test scalar");
-    let verifying = signing.verifying_key().to_encoded_point(false);
+    let verifying = signing.verifying_key().to_sec1_point(false);
     (signing.to_bytes().to_vec(), verifying.as_bytes().to_vec())
 }
 
@@ -539,7 +539,7 @@ fn invalid_keyids_and_p256_encodings_have_stable_codes() {
     let compressed_point = P256SigningKey::from_slice(&[16; 32])
         .expect("valid test scalar")
         .verifying_key()
-        .to_encoded_point(true);
+        .to_sec1_point(true);
     let compressed = verify(
         bytes(PAYLOAD),
         "yaml",

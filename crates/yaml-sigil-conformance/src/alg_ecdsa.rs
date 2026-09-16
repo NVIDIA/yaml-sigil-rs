@@ -220,7 +220,7 @@ fn bad_keys() {
     let uncompressed = require_hex_field(&valid_body, "public key Q (uncompressed)");
     let valid_key =
         resolve_p256_verifying_key(&uncompressed).expect("uncompressed fixture key must resolve");
-    let compressed = valid_key.to_encoded_point(true);
+    let compressed = valid_key.to_sec1_point(true);
     let mut hybrid = uncompressed;
     hybrid[0] = 0x06 | (hybrid[64] & 1);
     for (case, bytes) in [

@@ -141,7 +141,7 @@ reusable policy. Existing calls retain their unbounded whole-artifact behavior.
 
 The signing and verification crates retain their RustCrypto convenience APIs
 and also accept synchronous provider adapters through the
-[`signature`](https://crates.io/crates/signature) 2.2 operation traits and
+[`signature`](https://crates.io/crates/signature) 3.0 operation traits and
 awaitable adapters through native async provider traits. This
 lets an adapter keep its private key or opaque key handle inside `ring`,
 `aws-lc-rs`, an HSM integration, or another local provider while YamlSigil
