@@ -270,9 +270,10 @@ YAML and verifies it against public GitHub account keys or a supplied public key
 The development toolchain follows Rust `stable` through
 `rust-toolchain.toml`. The minimum supported Rust version (MSRV) is Rust
 `1.95.0`, as declared in the root `Cargo.toml`. Protobuf code generation uses
-the Buf version pinned by the `buf-tools` build dependency; a system `buf` or
-`protoc` installation is not required. The first uncached build downloads and
-verifies the corresponding official Buf release asset.
+the Buf executable provided by the Cargo-resolved `buf-tools` build dependency.
+Its minimum version requirement is declared in [Cargo.toml](Cargo.toml). A system
+`buf` or `protoc` installation is not required. The first uncached build downloads
+and verifies the corresponding official Buf release asset.
 
 The root workspace publishes library crates and does not commit `Cargo.lock`.
 Cargo may generate an ignored local lockfile while building or testing. The

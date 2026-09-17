@@ -20,7 +20,7 @@ fn main() {
         .args(["build", "--as-file-descriptor-set", "-o"])
         .arg(&descriptor_path)
         .status()
-        .expect("run the pinned Buf CLI for the Buffa 0.5 fixture");
+        .expect("run the Cargo-resolved Buf CLI for the Buffa 0.5 fixture");
     assert!(status.success(), "Buffa 0.5 fixture Buf build failed");
 
     buffa_build::Config::new()
