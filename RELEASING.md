@@ -589,3 +589,35 @@ the repository.
 Within one version, the compiled package order remains core, transcription,
 signing, verification. A retry cannot move Latest from a later package back
 to an earlier package of that same version.
+
+## Source provenance before release authority
+
+The protected workflow passes the qualified base, source SHA, version, and
+fresh/recovery operation to the typed anonymous policy rebind. Its local
+read-only equivalent, run from exact current main with a separate exact source
+checkout, is:
+
+```shell
+cargo xtask github release rebind-policy \
+  --repository NVIDIA/yaml-sigil-rs \
+  --base-ref refs/heads/main --operation fresh \
+  --source-root ../release-source --source-sha "${source_sha}" \
+  --version "${version}"
+```
+
+Use `--operation recover` only for the original source of an interrupted
+publication. Support uses its exact `refs/heads/support/M.N` base and reviewed
+`.github/support-lines/M.N.json` inventory. Recovery checks the source's
+historical inventory against its recorded main commit, retains the fixed
+activation anchor, and requires that source to remain on the protected support
+lineage. Main recovery continues to validate its original push run. Support
+run IDs are audit context, not source proof.
+
+Do not recover a version with no published crate. For the four-crate workspace,
+only an ordered nonempty publication prefix without tags or Releases may
+resume publishing. Once all crates are public, recovery may complete missing
+forge objects while verifying every existing object. The single-crate traits
+case requires its crate to be published before recovery. Any inconsistent
+partial state fails closed. Follow
+[the provenance runbook](MAINTAINERS.md#maintain-support-provenance-and-recover-an-interrupted-release)
+for reviewed inventory updates and fresh approvals.
