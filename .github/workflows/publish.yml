@@ -47,6 +47,10 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: 1.98.0
     outputs:
+      base_ref: >-
+        ${{ steps.auto.outputs.base_ref || steps.validate.outputs.base_ref || steps.recover.outputs.base_ref }}
+      operation: >-
+        ${{ steps.auto.outputs.operation || steps.validate.outputs.operation || steps.recover.outputs.operation }}
       source_sha: >-
         ${{ steps.auto.outputs.source_sha ||
             steps.validate.outputs.source_sha ||
@@ -243,7 +247,7 @@ jobs:
               steps.recheck-recover.outputs.publish == 'true' }}
         env:
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
-        run: ../policy/.github/scripts/attach-release-source.sh "${SOURCE_SHA}"
+        run: ../policy/.github/scripts/attach-release-source.sh "${SOURCE_SHA}" refs/heads/main
         working-directory: release-source
 
       - name: Publish with release-plz
@@ -255,11 +259,15 @@ jobs:
           CARGO_REGISTRIES_CRATES_IO_INDEX: sparse+https://index.crates.io/
           CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
+          RELEASE_OPERATION: ${{ needs.qualify.outputs.operation }}
+          QUALIFIED_VERSION: ${{ needs.qualify.outputs.version }}
         run: |
           # Re-read anonymous live main as the last policy operation before the
           # sole publisher receives this step's read-scoped GitHub token.
-          ../policy/.github/scripts/rebind-release-policy.sh \
-            "NVIDIA/yaml-sigil-rs" ../policy . "${SOURCE_SHA}"
+          ../policy/xtask/target/debug/xtask github release rebind-policy \
+            --base-ref refs/heads/main --operation "${RELEASE_OPERATION}" \
+            --version "${QUALIFIED_VERSION}" \
+            --source-root . --source-sha "${SOURCE_SHA}"
           # release-plz is the sole Cargo publisher and native tag/Release
           # creation is disabled; only this process receives Git association.
           GIT_TOKEN="${{ github.token }}" release-plz release \
@@ -421,9 +429,14 @@ jobs:
       - name: Bind protected policy to anonymous live main
         env:
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
+          RELEASE_OPERATION: ${{ needs.qualify.outputs.operation }}
+          QUALIFIED_VERSION: ${{ needs.qualify.outputs.version }}
         run: >-
-          policy/.github/scripts/rebind-release-policy.sh
-          "NVIDIA/yaml-sigil-rs" policy release-source "${SOURCE_SHA}"
+          cargo xtask github release rebind-policy
+          --base-ref refs/heads/main --operation "${RELEASE_OPERATION}"
+          --version "${QUALIFIED_VERSION}"
+          --source-root ../release-source --source-sha "${SOURCE_SHA}"
+        working-directory: policy
 
       # Mint a contents-only App token scoped to this one repository after all
       # source and registry qualification has completed.
@@ -443,8 +456,10 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASE_VERSION: ${{ needs.qualify.outputs.version }}
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
+          RELEASE_OPERATION: ${{ needs.qualify.outputs.operation }}
         run: >-
           cargo xtask github release finalize --base-ref refs/heads/main
+          --operation "${RELEASE_OPERATION}"
           --source-root ../release-source
           --source-sha "${SOURCE_SHA}"
           --version "${RELEASE_VERSION}"

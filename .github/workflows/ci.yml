@@ -104,9 +104,6 @@ jobs:
       - name: Test local release source attachment
         run: .github/scripts/test-attach-release-source.sh
 
-      - name: Test pre-token live-main release policy binding
-        run: .github/scripts/test-rebind-release-policy.sh
-
       - name: Lint GitHub Actions workflows
         uses: devops-actions/actionlint@9fb9c192862f19e684586ca84b500461bcd8a541 # v0.1.12 (actionlint v1.7.12)
 

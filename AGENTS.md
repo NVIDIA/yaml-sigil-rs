@@ -454,11 +454,8 @@ The surviving provider helpers have deliberately narrow roles:
 - `check-release-pull-request.sh` adds the canonical branch, single-commit, and
   release-file boundary for explicit version changes.
 - `attach-release-source.sh` binds an already-qualified source only to local
-  main refs immediately before the protected release-plz publication call; it
+  selected base refs immediately before the protected release-plz publication call; it
   never updates a remote.
-- `rebind-release-policy.sh` anonymously confirms the post-approval policy
-  checkout is still exact live `main` and the source remains on its lineage
-  immediately before the publisher or finalizer receives release authority.
 - `remove-preinstalled-aws-tap.sh` performs one bounded macOS host cleanup
   before Rust setup.
 
@@ -622,3 +619,13 @@ Consumers that need RPC transport wire it in their own deployment.
 Keep proto/schema imports, conformance fixture changes, crypto behavior
 changes, CI edits, and unrelated formatting in separate commits or clearly
 separated commit sections when possible.
+
+`github release rebind-policy` owns the anonymous pre-authority rebind. Pass
+`--base-ref`, `--source-root`, `--source-sha`, `--version`, and
+`--operation fresh|recover` explicitly. Only current protected `main` supplies
+executing
+policy. Source attachment remains the small tested shell helper, identical
+across the two Rust repositories, and changes only the selected local refs.
+The per-line JSON inventory excludes itself; compare opaque Git blob IDs,
+never workflow contents. Recovery validates historical inventory and retained
+protected-base lineage without demanding current-main content.

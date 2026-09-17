@@ -8,13 +8,11 @@
 .github/scripts/check-trusted-tool-pins.sh
 .github/scripts/install-actionlint.sh
 .github/scripts/materialize-candidate.sh
-.github/scripts/rebind-release-policy.sh
 .github/scripts/remove-preinstalled-aws-tap.sh
 .github/scripts/report_required_ci.py
 .github/scripts/test-attach-release-source.sh
 .github/scripts/test-check-release-pull-request.sh
 .github/scripts/test-materialize-candidate.sh
-.github/scripts/test-rebind-release-policy.sh
 .github/scripts/test-trusted-tool-pins.sh
 .github/scripts/test_bind_candidate_pr.py
 .github/scripts/test_report_required_ci.py
@@ -39,6 +37,7 @@ xtask/src/cargo_metadata_output.rs
 xtask/src/ci.rs
 xtask/src/github.rs
 xtask/src/github/latest.rs
+xtask/src/github/provenance.rs
 xtask/src/github/support.rs
 xtask/src/github/transport.rs
 xtask/src/main.rs
