@@ -3,6 +3,7 @@
 
 //! Narrow, typed GitHub operations for release qualification and finalization.
 
+mod latest;
 mod support;
 mod transport;
 
@@ -23,7 +24,7 @@ use sha2::{Digest, Sha256};
 
 use crate::bounded_process::{self, OutputLimits, VALIDATION_OUTPUT_LIMITS};
 use crate::release;
-use crate::release_policy::{PackagePolicy, RUST_POLICY};
+use crate::release_policy::{PackagePolicy, RUST_POLICY, ReleaseLine};
 use crate::versions;
 use transport::{GhCli, Transport};
 
@@ -304,6 +305,7 @@ fn finalize(root: &Path, arguments: &FinalizeArgs) -> Result<(), String> {
             &arguments.source_sha,
             &policy_main_sha,
             &date,
+            ReleaseLine::from_base_ref(&arguments.base_ref)?,
         )?;
     }
     println!(
@@ -1105,8 +1107,10 @@ fn finalize_package(
     source_sha: &str,
     policy_main_sha: &str,
     tagger_date: &str,
+    line: ReleaseLine,
 ) -> Result<(), String> {
-    let spec = ReleaseSpec::new(package, version, source_sha)?;
+    let mut spec = ReleaseSpec::new(package, version, source_sha)?;
+    spec.line = line;
     let tag_object_sha = reconcile_tag(github, &spec, source_sha, policy_main_sha, tagger_date)?;
     reconcile_release(
         github,
@@ -1126,9 +1130,10 @@ fn reconcile_release(
     tagger_date: &str,
     tag_object_sha: &str,
 ) -> Result<(), String> {
+    let latest = latest::Guard::capture(github, spec.line, &spec.tag)?;
     if inspect_release(github, spec, source_sha)? {
         require_exact_tag_object(github, spec, source_sha, tagger_date, tag_object_sha)?;
-        return Ok(());
+        return latest.verify(github);
     }
     create_release(
         github,
@@ -1137,16 +1142,18 @@ fn reconcile_release(
         policy_main_sha,
         tagger_date,
         tag_object_sha,
+        &latest,
     )?;
     if !inspect_release(github, spec, source_sha)? {
         return Err(format!("immutable Release {} was not retained", spec.tag));
     }
     require_exact_tag_object(github, spec, source_sha, tagger_date, tag_object_sha)?;
-    Ok(())
+    latest.verify(github)
 }
 
 #[derive(Debug)]
 struct ReleaseSpec {
+    line: ReleaseLine,
     tag: String,
     body: String,
     prerelease: bool,
@@ -1158,6 +1165,7 @@ impl ReleaseSpec {
         let tag = package.tag(&version.to_string());
         require_tag(&tag)?;
         Ok(Self {
+            line: ReleaseLine::Main,
             message: format!(
                 "chore: release package {} version {version}",
                 package.package
@@ -1336,6 +1344,7 @@ fn create_release(
     policy_main_sha: &str,
     tagger_date: &str,
     tag_object_sha: &str,
+    latest: &latest::Guard,
 ) -> Result<(), String> {
     let payload = json!({
         "tag_name": spec.tag,
@@ -1345,11 +1354,12 @@ fn create_release(
         "draft": false,
         "prerelease": spec.prerelease,
         "generate_release_notes": false,
-        // Keep prereleases excluded; let GitHub select stable Latest by date and version.
-        "make_latest": if spec.prerelease { "false" } else { "legacy" },
+        // Decide before mutation; older recovery and support preserve Latest.
+        "make_latest": latest.request_value(),
     });
     require_current_mutation_policy(github, source_sha, policy_main_sha)?;
     require_exact_tag_object(github, spec, source_sha, tagger_date, tag_object_sha)?;
+    latest.require_unchanged(github)?;
     let result: Result<Release, String> =
         github.post(&format!("repos/{REPOSITORY}/releases"), &payload);
     match result {
@@ -1809,6 +1819,7 @@ mod tests {
         release_posted: bool,
         release_read_back: bool,
         release_payload: Option<serde_json::Value>,
+        latest: Option<serde_json::Value>,
         tag_change_after_release_boundary: Option<TagChange>,
         events: Vec<String>,
     }
@@ -1830,6 +1841,7 @@ mod tests {
                 release_posted: false,
                 release_read_back: false,
                 release_payload: None,
+                latest: None,
                 tag_change_after_release_boundary: None,
                 events: Vec::new(),
             }
@@ -1998,6 +2010,9 @@ mod tests {
             path: &str,
         ) -> Result<Option<T>, String> {
             self.events.push(format!("GET? {path}"));
+            if path == format!("repos/{REPOSITORY}/releases/latest") {
+                return self.latest.clone().map(Self::decode).transpose();
+            }
             if path == format!("repos/{REPOSITORY}/git/ref/tags/{}", self.tag) {
                 if self.release_boundary_crossed()
                     && matches!(
@@ -2037,6 +2052,9 @@ mod tests {
             } else if path == format!("repos/{REPOSITORY}/releases") {
                 self.release_payload =
                     Some(serde_json::to_value(payload).map_err(|error| error.to_string())?);
+                if self.release_payload.as_ref().unwrap()["make_latest"] == "true" {
+                    self.latest = Some(json!({"id": 1, "tag_name": self.tag}));
+                }
                 self.release_created = true;
                 self.release_posted = true;
                 Self::decode(self.release())
@@ -2263,6 +2281,7 @@ mod tests {
             TEST_SOURCE_SHA,
             TEST_POLICY_SHA,
             date,
+            ReleaseLine::Main,
         )
         .unwrap();
 
@@ -2278,14 +2297,14 @@ mod tests {
         assert_eq!(posts.len(), 3);
         for (index, event) in posts {
             if event.ends_with("/releases") {
-                assert_eq!(github.events[index - 4], compare);
-                assert_eq!(github.events[index - 3], main);
+                assert_eq!(github.events[index - 5], compare);
+                assert_eq!(github.events[index - 4], main);
                 assert_eq!(
-                    github.events[index - 2],
+                    github.events[index - 3],
                     format!("GET? repos/{REPOSITORY}/git/ref/tags/{}", spec.tag)
                 );
                 assert_eq!(
-                    github.events[index - 1],
+                    github.events[index - 2],
                     format!("GET repos/{REPOSITORY}/git/tags/{TEST_TAG_OBJECT_SHA}")
                 );
                 continue;
@@ -2318,6 +2337,7 @@ mod tests {
             TEST_SOURCE_SHA,
             TEST_POLICY_SHA,
             date,
+            ReleaseLine::Main,
         )
         .unwrap_err();
 
@@ -2371,6 +2391,7 @@ mod tests {
             TEST_SOURCE_SHA,
             TEST_POLICY_SHA,
             date,
+            ReleaseLine::Main,
         )
         .unwrap_err();
 
@@ -2393,6 +2414,7 @@ mod tests {
             TEST_SOURCE_SHA,
             TEST_POLICY_SHA,
             date,
+            ReleaseLine::Main,
         )
         .unwrap_err();
 
@@ -2524,12 +2546,23 @@ mod tests {
     fn finalizer_selects_latest_only_for_stable_releases() {
         let package = &RUST_POLICY.packages[0];
         let date = "2026-09-04T12:00:00Z";
-        for (version, prerelease, latest) in
-            [("0.6.0-rc.1", true, "false"), ("0.6.0", false, "legacy")]
-        {
+        for (line, version, prior, latest) in [
+            (ReleaseLine::Main, "0.6.0-rc.1", Some("0.5.1"), "false"),
+            (ReleaseLine::Main, "0.6.0", None, "true"),
+            (ReleaseLine::Main, "0.5.2", Some("0.6.0"), "false"),
+            (ReleaseLine::Main, "0.6.0", Some("0.5.1"), "true"),
+            (
+                ReleaseLine::Support { major: 0, minor: 5 },
+                "0.5.2",
+                Some("0.6.0"),
+                "false",
+            ),
+        ] {
             let version = Version::parse(version).unwrap();
             let spec = ReleaseSpec::new(package, &version, TEST_SOURCE_SHA).unwrap();
             let mut github = MutationTransport::new(&spec, date, false);
+            github.latest = prior.map(|v| json!({"id":44, "tag_name":package.tag(v)}));
+            let before = github.latest.clone();
             finalize_package(
                 &mut github,
                 package,
@@ -2537,11 +2570,17 @@ mod tests {
                 TEST_SOURCE_SHA,
                 TEST_POLICY_SHA,
                 date,
+                line,
             )
             .unwrap();
             let payload = github.release_payload.unwrap();
-            assert_eq!(payload["prerelease"], prerelease);
+            assert_eq!(payload["prerelease"], !version.pre.is_empty());
             assert_eq!(payload["make_latest"], latest);
+            if latest == "false" {
+                assert_eq!(github.latest, before);
+            } else {
+                assert_eq!(github.latest.unwrap()["tag_name"], spec.tag);
+            }
         }
     }
 
