@@ -422,7 +422,7 @@ fn real_provider_qualification_and_cross_provider_matrix() {
     let rustcrypto_ed_public = rustcrypto_ed.0.verifying_key().to_bytes();
     let rustcrypto_p =
         RustCryptoP256Signer(p256::ecdsa::SigningKey::from_slice(&[32; 32]).unwrap());
-    let rustcrypto_p_public = rustcrypto_p.0.verifying_key().to_encoded_point(false);
+    let rustcrypto_p_public = rustcrypto_p.0.verifying_key().to_sec1_point(false);
     let (ring_ed, ring_ed_public) = ring_ed25519_signer();
     let (ring_p, ring_p_public) = ring_p256_signer();
     let (aws_ed, aws_ed_public) = aws_ed25519_signer();
@@ -686,7 +686,7 @@ fn malformed_signature_octets_never_reach_a_provider() {
         .bind_ecdsa_p256_sha256(
             p256_signing_key
                 .verifying_key()
-                .to_encoded_point(false)
+                .to_sec1_point(false)
                 .as_bytes(),
         )
         .unwrap();
@@ -788,7 +788,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             expected_message: expected_message.to_vec(),
             calls: Arc::clone(&calls),
         };
-        let public_key = signer.key.verifying_key().to_encoded_point(false);
+        let public_key = signer.key.verifying_key().to_sec1_point(false);
         let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
             .build()
             .unwrap();
@@ -837,7 +837,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
 #[test]
 fn qualified_p256_signing_rejects_an_adapter_that_hashes_twice() {
     let signer = DoubleHashP256Signer(p256::ecdsa::SigningKey::from_slice(&[44; 32]).unwrap());
-    let public_key = signer.0.verifying_key().to_encoded_point(false);
+    let public_key = signer.0.verifying_key().to_sec1_point(false);
     let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
         .build()
         .unwrap();

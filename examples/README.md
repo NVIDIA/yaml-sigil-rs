@@ -7,11 +7,11 @@ below from the repository root.
 
 | Example | Demonstrates |
 |---------|--------------|
-| [`github-keys`](./github-keys/README.md) | YAML signing and verification with Ed25519 keys from GitHub's anonymous authentication-key and signing-key APIs or an explicit public key, selected with `--signer`. |
 | [`ring_provider.rs`](./ring_provider.rs) | Native `ring` signing and verification adapters. |
 | [`aws_lc_provider.rs`](./aws_lc_provider.rs) | Native `aws-lc-rs` signing and verification adapters. |
 | [`ring_unqualified_provider.rs`](./ring_unqualified_provider.rs) | Explicitly unqualified `ring` signing and verification, with implementer-owned compatibility risk. |
 | [`async_provider.rs`](./async_provider.rs) | Awaitable P-256 signing, binding, qualification, and verification through a simulated service. |
+| [`github-keys`](./github-keys/README.md) | Ed25519 signing and local verification with agent identities, an explicit public key, or GitHub discovery. |
 | [`yaml_facade.rs`](./yaml_facade.rs) | YAML signature-document parsing and serialization through the core facade. |
 | [`protobuf_facade.rs`](./protobuf_facade.rs) | Core protobuf encoding, owned and borrowed decoding, and wire interoperability with Prost. |
 
@@ -46,58 +46,31 @@ cargo test --package yaml-sigil-examples --example protobuf-facade
 
 ## GitHub account keys
 
-Each example documents its usage and limitations.
-For the GitHub example, start with its help and
-[fixture walkthrough](./github-keys/README.md#try-the-fixtures).
-It accepts files, HTTP(S) URLs, or `stdin` through `--input`. Signing writes
-the artifact to stdout when `--output` is omitted. Progress headings and status
-messages go to stderr. Signing places `====== STATUS ======` before its final
-status.
-Input documents and signed output are capped at 4 MiB.
-Verification begins with a reminder about the signing layer's scope and ends
-with the result.
-Discovery collects all pages of both account key lists and combines their
-supported keys. It needs no GitHub token and reports anonymous API rate limits
-as errors.
-Verification uses your `--signer` choice. The artifact's optional `keyid`
-hint does not constrain verification or change where keys are requested.
-For a run without key discovery, pass a quoted OpenSSH public-key line as
-`--signer`. See [rate limits and offline runs](./github-keys/README.md#github-api-rate-limits-and-offline-runs)
-for copyable commands. Use a file or `stdin` as input for a fully offline run.
+The [`github-keys` example](./github-keys/README.md) signs through an SSH agent
+with a qualified asynchronous provider and verifies locally with public keys.
+Omit `--signer` to use supported agent identities, or restrict keys to a GitHub
+username or explicit OpenSSH public key. Both commands accept
+`--key-fingerprint`. The [numbered walkthrough](./github-keys/README.md#walkthrough)
+builds the executable once, creates and loads a protected demo key, signs and
+verifies offline, then adds GitHub discovery. Remove the demo registration
+through GitHub's settings page afterward. Generated documents stay under
+`target/github-keys-demo/`.
+
+You can verify the published fixture without an agent or GitHub access.
 
 ```shell
-cargo run --package yaml-sigil-examples --example github-keys -- --help
+cargo build --package yaml-sigil-examples --example github-keys
+target/debug/examples/github-keys verify \
+  --signer "$(cat examples/github-keys/fixtures/ddurst-nvidia.pub-key)" \
+  --input examples/github-keys/fixtures/signed.yaml
 ```
 
-### Sign your own YAML
-
-> [!WARNING]
-> The GitHub example takes ownership of private-key material in its own process.
-> See the planned [SSH agent transition](./github-keys/README.md#ssh-agent-transition).
-
-Follow the [GitHub signing instructions](./github-keys/README.md#sign-your-own-yaml)
-for key-file handling and copyable commands. Use a dedicated Ed25519 key
-registered with GitHub for authentication, signing, or both for username-based
-discovery, or pass its public half directly with `--signer`. Verification needs
-only public keys.
-
-### Tests and packaging
-
-The unpublished `yaml-sigil-examples` workspace member registers runnable
-targets with `test = true`. The existing `cargo xtask ci` sequence compiles
-them during all-target Clippy and runs their tests during
-`cargo test --workspace --all-features`.
-
-```shell
-cargo test --package yaml-sigil-examples
-```
-
-GitHub example tests use synthetic keys and a recorded public-key snapshot.
-They require no network, account credentials, private personal key, or SSH
-agent. Live key discovery is a separate manual check.
-
-Dependencies are development dependencies, annotated by example and purpose
-in [`Cargo.toml`](./Cargo.toml). Executable build outputs stay local.
+Both commands accept file, URL, or standard input with a 4 MiB document limit.
+Signing prints artifact bytes to stdout and progress to stderr. Verification
+lists public agent identities when no signer is supplied and never requests
+a signature. Explicit-signer verification needs no agent. Workspace CI runs
+the offline HTTP and agent tests. The example README also documents an
+optional isolated OpenSSH test.
 
 ## Shared modules
 

@@ -73,7 +73,7 @@
 //! # Local providers
 //!
 //! [`VerificationProviderBuilder`] qualifies one exact synchronous
-//! `signature` 2.2 adapter instance with a bounded, public-only suite.
+//! `signature` 3.0 adapter instance with a bounded, public-only suite.
 //! [`verify_with_provider`] uses keys bound through qualified algorithm slots;
 //! the explicitly named unqualified functions provide the deliberate bypass.
 //! Provider results are authoritative and are not retried through RustCrypto.
@@ -193,7 +193,7 @@ pub fn resolve_ed25519_verifying_key(
 ///     }
 /// }
 /// let signing = p256::ecdsa::SigningKey::from_slice(&[12; 32]).unwrap();
-/// let public = signing.verifying_key().to_encoded_point(false);
+/// let public = signing.verifying_key().to_sec1_point(false);
 /// let resolved: p256::ecdsa::VerifyingKey =
 ///     ApplicationPublicKey(public.as_bytes().to_vec()).try_into()?;
 /// assert_eq!(&resolved, signing.verifying_key());

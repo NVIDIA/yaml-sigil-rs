@@ -17,7 +17,7 @@ each signing request.
   error used by resource-aware protobuf output.
 - `sign_with_provider` accepts a qualified provider key, while
   `sign_with_unqualified_provider` makes the deliberate bypass explicit.
-- `ProviderSigningKeyBuilder` binds a synchronous `signature` 2.2 signer to
+- `ProviderSigningKeyBuilder` binds a synchronous `signature` 3.0 signer to
   canonical public-key bytes and offers `build` and `build_unqualified`.
 - `AsyncProviderSigner` and `AsyncProviderSigningKeyBuilder` support awaitable
   operations. `ProviderAsyncSigner` and `UnqualifiedProviderAsyncSigner`
@@ -43,7 +43,7 @@ material, tokens, or raw signatures on trusted fact surfaces.
 
 Implement `signature::Signer<[u8; 64]> + Sync` for a type you own that holds or
 borrows your provider's initialized key handle. Add a direct dependency on
-[`signature`](https://crates.io/crates/signature) 2.2. Your `try_sign` method
+[`signature`](https://crates.io/crates/signature) 3.0. Your `try_sign` method
 performs the provider operation and returns the fixed-width signature or
 `signature::Error`, which becomes `SignError::KeyOperationFailure`.
 

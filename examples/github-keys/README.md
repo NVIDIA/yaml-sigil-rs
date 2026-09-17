@@ -1,76 +1,328 @@
-# Sign and verify YAML with GitHub account keys
+# Sign and verify YAML with SSH-agent and GitHub keys
 
-This example signs YAML with an Ed25519 private key and verifies a signature
-against keys listed on GitHub for a username.
+In this example, you sign and verify YAML documents with `yaml-sigil`
+signatures using common `ssh` keys, then use GitHub to bind an identity to its
+public keys.
 
 > [!WARNING]
-> This is an easy to use usage example, not an example of security best
-> practices.
-> Use this only for local experimentation. Do not use it as a production
-> verification gate.
-> Use a disposable demo key, preferably registered for signing only, rather
-> than an existing login key. Signing loads private-key material into this process.
+> Use this example for local experimentation. A matching signature does not
+> validate the document's contents or authorize its use. Create a protected
+> disposable demo key and review any agent confirmation before signing.
 
-You will need to pass the GitHub username with `--signer USERNAME`, and it will
-attempt to capture the public keys from
-`https://api.github.com/users/USERNAME/keys` and
-`https://api.github.com/users/USERNAME/ssh_signing_keys`.
+## Before you begin
 
-## Try the fixtures
+These instructions target Linux with Bash and OpenSSH. You need Rust, Cargo,
+`ssh-agent`, `ssh-keygen`, and `ssh-add`. The GitHub steps also need `gh` and
+an authenticated GitHub account with permission to add and remove SSH signing
+keys. The example itself makes anonymous discovery requests and never reads
+a GitHub token.
 
-> [!NOTE]
-> Discovery uses anonymous GitHub requests and accepts authentication and
-> signing keys.
-> You can also pass a quoted OpenSSH public-key line as `--signer` to skip
-> key discovery. See [rate limits and offline runs](#github-api-rate-limits-and-offline-runs).
->
-> In username mode, this example trusts GitHub to associate the
-> returned public keys with the selected account.
-> A username provides no identity continuity. Account compromise, key replacement,
-> or [username reuse](https://docs.github.com/en/account-and-profile/concepts/username-changes)
-> can change the accepted keys. Pin an independently trusted key with
-> [direct-key mode](#github-api-rate-limits-and-offline-runs).
+Clone this repository and `cd` into its root; use one Bash session throughout.
+Build the example once, then call `target/debug/examples/github-keys` directly.
+Generated documents and public registration records stay under
+`target/github-keys-demo/`. The private key stays in `~/.ssh/`.
+
+```shell
+cargo build --package yaml-sigil-examples --example github-keys
+mkdir -p target/github-keys-demo
+```
+
+Signing with `--output` refuses existing paths. When repeating the walkthrough,
+keep earlier output or explicitly remove only the generated files you intend
+to replace. Do not overwrite an existing key.
+
+## Walkthrough
+
+### 1. Check the agent
+
+```shell
+ssh-add -l -E sha256
+```
+
+An exit status of `0` lists loaded keys. Status `1` with “The agent has no
+identities” means the agent is reachable but empty; continue to key setup.
+Status `2` means the agent cannot be reached. On Linux, start one for this
+shell if your desktop does not already provide it, then repeat the check.
+
+```shell
+eval "$(ssh-agent -s)"
+ssh-add -l -E sha256
+```
+
+An empty agent is expected after starting a new one.
+
+### 2. Create and load a protected demo key
+
+Enter a **non-empty passphrase** at the local `ssh-keygen` prompt and confirm
+it. Enter it again when `ssh-add` asks. Keep it out of chat, logs, command
+arguments, and repository files. The guard below refuses existing files and
+symlinks at either demo path. If it refuses, inspect the existing key before
+deciding whether to use it in a separate run.
+
+```shell
+demo_key="$HOME/.ssh/id_ed25519-github-yaml-sigil-signing-demo"
+if [ -e "$demo_key" ] || [ -L "$demo_key" ] ||
+   [ -e "$demo_key.pub" ] || [ -L "$demo_key.pub" ]; then
+  printf '%s\n' 'Demo key path already exists; stopped before key creation.' >&2
+else
+  (umask 077; ssh-keygen -t ed25519 -C yaml-sigil-demo -f "$demo_key") &&
+    ssh-add "$demo_key"
+fi
+```
+
+Continue only after creating a passphrase-protected key and loading it
+successfully. Capture its fingerprint for later commands.
+
+```shell
+demo_fingerprint="$(ssh-keygen -lf "$demo_key.pub" -E sha256 | awk '{print $2}')"
+printf '%s\n' "$demo_fingerprint"
+ssh-add -l -E sha256
+```
+
+The fingerprint must appear in the agent list. Protection belongs to key
+setup and your agent. The example uses the SSH-agent interface and cannot
+determine whether an agent protects a private key with a passphrase, a
+keychain, or another mechanism.
+
+### 3. Sign offline
+
+Review the local unsigned fixture, then select the demo key by fingerprint.
+No `--signer` is needed and no GitHub discovery occurs.
+
+```shell
+cat examples/github-keys/fixtures/unsigned.yaml
+target/debug/examples/github-keys sign \
+  --key-fingerprint "$demo_fingerprint" \
+  --input examples/github-keys/fixtures/unsigned.yaml \
+  --output target/github-keys-demo/signed-offline.yaml
+```
+
+Expect a matching public-key fingerprint and a successful write status on
+stderr. The new file contains only the signed artifact. Agent-only signing
+omits `keyid` because an agent identity does not identify a GitHub account.
+Without a fingerprint, signing refuses multiple supported keys.
+
+### 4. Verify without a signer
+
+Try all supported public identities in the current agent, then select only
+the demo fingerprint. Both commands verify locally and request no signatures.
+
+```shell
+target/debug/examples/github-keys verify \
+  --input target/github-keys-demo/signed-offline.yaml
+target/debug/examples/github-keys verify \
+  --key-fingerprint "$demo_fingerprint" \
+  --input target/github-keys-demo/signed-offline.yaml
+```
+
+Both should end with `Signature verified (N payload bytes).` and exit status
+`0`. Verification leaves stdout empty and never prints unverified payloads.
+The agent must remain reachable when you omit `--signer`.
+
+### 5. Verify with a signer
+
+Supply the complete OpenSSH public-key line. This verifies without an agent
+or GitHub discovery. `--signer` takes a username or a quoted public-key line,
+not a filename or fingerprint.
+
+```shell
+target/debug/examples/github-keys verify \
+  --signer "$(cat "$demo_key.pub")" \
+  --key-fingerprint "$demo_fingerprint" \
+  --input target/github-keys-demo/signed-offline.yaml
+```
+
+Expect success. Now supply the published fixture's different public key.
+Expect a nonzero exit and a signature mismatch, even though your agent still
+holds the correct demo key. The explicit signer is a strict restriction.
+
+```shell
+target/debug/examples/github-keys verify \
+  --signer "$(cat examples/github-keys/fixtures/ddurst-nvidia.pub-key)" \
+  --input target/github-keys-demo/signed-offline.yaml
+```
+
+### 6. Verify the published fixture
+
+> [!WARNING]
+> The username command contacts GitHub's anonymous authentication-key and
+> signing-key endpoints. It may fail because of network access or an anonymous
+> API rate limit. A username trusts GitHub's current account-to-key association;
+> it provides no identity continuity after account compromise, key replacement,
+> or [username reuse](https://docs.github.com/en/account-and-profile/concepts/username-changes).
 > Verification establishes neither signing time nor freshness and does not
 > prevent replay.
 
-### Quick Verification
-
-Run these commands from the repository root. Verification makes an anonymous
-HTTPS request to GitHub; it needs no token, private key, or SSH agent.
-
 ```shell
-cargo run --package yaml-sigil-examples --example github-keys -- verify \
+target/debug/examples/github-keys verify \
   --signer ddurst-nvidia \
   --input examples/github-keys/fixtures/signed.yaml
 ```
 
-or
+Use the public-key snapshot immediately if discovery is unavailable. This
+alternative needs neither GitHub nor an agent.
 
 ```shell
-# The raw URLs target fixtures published on upstream `main`. If they are not
-# available on that ref, use a local fixture path or standard input.
-
-cargo run --package yaml-sigil-examples --example github-keys -- verify \
-  --signer ddurst-nvidia \
-  --input https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/main/examples/github-keys/fixtures/signed.yaml
+target/debug/examples/github-keys verify \
+  --signer "$(cat examples/github-keys/fixtures/ddurst-nvidia.pub-key)" \
+  --input examples/github-keys/fixtures/signed.yaml
 ```
 
-or
+Expect success with fingerprint
+`SHA256:EVFfVelC8GKlyPd1Tl9KLhtfTqzLkAYXsH6LP7PdCQg`. This is the published
+fixture's non-demo key. Leave its registration and signed fixtures unchanged.
+
+### 7. Upload the demo public key
+
+Check which GitHub account `gh` is using.
 
 ```shell
-cargo run --package yaml-sigil-examples --example github-keys -- verify \
-  --signer ddurst-nvidia --input stdin < examples/github-keys/fixtures/signed.yaml
+demo_account="$(gh api user --jq .login)"
+printf '%s\n' "$demo_account"
 ```
 
-It should report the matching SHA-256 public-key fingerprint on stderr and end with
-`Signature verified (N payload bytes).` on success, with exit status `0`.
+Confirm that this is the account you intend to modify, then upload the demo
+public key as a signing key.
 
-> Verification leaves stdout empty and does not print unverified payload bytes.
+```shell
+gh ssh-key add "$demo_key.pub" --type signing --title yaml-sigil-demo
+```
 
-### Misc Fixtures
+Save the account's public signing-key records, which include registration IDs
+and public-key identities. Identify your new entry by its public key, since
+titles need not be unique. Keep this record until cleanup is complete.
 
-We do offer some basic fixtures here, to help you reason about what we do and
-do not do with YAML-Sigil.
+```shell
+gh api --paginate --slurp user/ssh_signing_keys \
+  > target/github-keys-demo/registrations.json
+```
+
+If upload reports an error, check [SSH and GPG keys](https://github.com/settings/keys)
+before retrying. If any later step fails, remove the demo registration using
+step 10 before ending the walkthrough.
+
+### 8. Sign and verify through GitHub discovery
+
+Select the confirmed account and the demo fingerprint. Discovery reads both
+its authentication and signing key lists. The demo needs only a signing
+registration. Anonymous API limits still apply, even though `gh` is logged in.
+
+```shell
+target/debug/examples/github-keys sign \
+  --signer "$demo_account" --key-fingerprint "$demo_fingerprint" \
+  --input examples/github-keys/fixtures/unsigned.yaml \
+  --output target/github-keys-demo/signed-github.yaml
+target/debug/examples/github-keys verify \
+  --signer "$demo_account" --key-fingerprint "$demo_fingerprint" \
+  --input target/github-keys-demo/signed-github.yaml
+```
+
+Expect signing and verification success with the demo fingerprint. Signing
+includes the matching discovery URL as an optional, unsigned `keyid` hint.
+Neither command falls back to unrelated agent keys if the account or
+fingerprint restriction fails.
+
+### 9. Verify the document offline
+
+Verify the new artifact using the agent's public identities, then the explicit
+public key. Neither command resolves its `keyid` URL.
+
+```shell
+target/debug/examples/github-keys verify \
+  --key-fingerprint "$demo_fingerprint" \
+  --input target/github-keys-demo/signed-github.yaml
+target/debug/examples/github-keys verify \
+  --signer "$(cat "$demo_key.pub")" \
+  --input target/github-keys-demo/signed-github.yaml
+```
+
+Both should succeed. You can choose a public key independently of the
+artifact's unsigned hint. Treat that choice as your trust decision.
+
+### 10. Remove the demo registration
+
+Open [SSH and GPG keys](https://github.com/settings/keys) for the account from
+step 7. Find the `yaml-sigil-demo` signing key, check that its fingerprint
+matches `demo_fingerprint`, and click **Delete**. Confirm that the entry is
+gone. Leave your other keys, including the published fixture's key, in place.
+
+Repeat step 9 after removal; offline verification still succeeds. Removing a
+GitHub registration does not change signatures or revoke a locally trusted
+public key. Username discovery no longer includes the removed registration.
+Your local key files and loaded agent identity remain.
+
+## Key selection
+
+Omitting `--signer` uses public identities from your SSH agent. An explicit
+username or public key restricts the accepted keys. `--key-fingerprint SHA256:…`
+further restricts either mode. Signing needs one matching agent key;
+verification tries the selected public keys until one verifies.
+
+## Read and write documents
+
+Both commands require `--input <FILE>`, `--input <URL>`, or `--input stdin`.
+Documents are capped at 4 MiB, including signed output. `stdin` reads standard
+input; `./stdin` names a file with that basename.
+HTTP and HTTPS input URLs are fetched anonymously with a 20-second timeout.
+The SSH agent may impose a smaller signing-request limit. Signing appends a
+missing final newline to a nonempty payload and preserves the returned artifact
+bytes without reserialization. The 4 MiB bound is example policy, separate
+from the 16,384-octet signature-carrier constraint.
+
+For standard input, use the document produced in step 3.
+
+```shell
+target/debug/examples/github-keys verify \
+  --signer "$(cat "$demo_key.pub")" --input stdin \
+  < target/github-keys-demo/signed-offline.yaml
+```
+
+You can also read a URL. This URL targets the published fixture on
+`dev/0.6.0`; if it is unavailable there, use the local fixture instead.
+
+```shell
+target/debug/examples/github-keys verify \
+  --signer "$(cat examples/github-keys/fixtures/ddurst-nvidia.pub-key)" \
+  --input https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/dev/0.6.0/examples/github-keys/fixtures/signed.yaml
+```
+
+URL input makes a network request even with an explicit signer. Review a
+local copy before signing. URL input is signed without a preview; HTTP permits
+substitution in transit and HTTPS authenticates only the server connection.
+
+Omitting `--output` writes the exact signed artifact to stdout. Progress and
+results stay on stderr, ending with `====== STATUS ======`. Combining the two
+streams produces a transcript, not a YAML document. Payloads may contain
+terminal controls, so send untrusted output to a new file with `--output`.
+
+### Progress stages
+
+Signing checks the agent before reading input or contacting GitHub.
+
+```text
+====== 1/6 Check SSH agent ======
+====== 2/6 Read unsigned YAML ======
+====== 3/6 Resolve public keys ======
+====== 4/6 Select SSH-agent key ======
+====== 5/6 Sign YAML through the SSH agent ======
+====== 6/6 Write signed YAML ======
+====== STATUS ======
+```
+
+Verification checks agent availability only when no signer is supplied.
+
+```text
+====== 1/5 Check key source ======
+====== 2/5 Read signed YAML ======
+====== 3/5 Check signature metadata ======
+====== 4/5 Resolve public keys ======
+====== 5/5 Verify the signature ======
+====== STATUS ======
+```
+
+## Fixtures
+
+These fixtures distinguish signature validity from application validity.
 
 | File | Expected result | Reason |
 |------|-----------------|--------|
@@ -78,8 +330,8 @@ do not do with YAML-Sigil.
 | [`signed.yaml`](./fixtures/signed.yaml) | Success. | The signature matches the unchanged payload and the recorded Ed25519 key. |
 | [`tampered-payload.yaml`](./fixtures/tampered-payload.yaml) | Failure. | The port changes from `8080` to `8081` without a new signature. |
 | [`tampered-signature.yaml`](./fixtures/tampered-signature.yaml) | Failure. | A signature byte changes while the payload stays the same. |
-| [`changed-keyid.yaml`](./fixtures/changed-keyid.yaml) | Success. | **Changing the unsigned `keyid` hint leaves the signature intact; verification still uses the caller-selected signer.** |
-| [`signed-application-invalid.yaml`](./fixtures/signed-application-invalid.yaml) | Success. | **The signature matches even though `port: not-an-integer` violates the illustrative application's integer-port rule.** |
+| [`changed-keyid.yaml`](./fixtures/changed-keyid.yaml) | Success. | Changing the unsigned `keyid` hint leaves the signature intact; verification still uses the caller-selected signer. |
+| [`signed-application-invalid.yaml`](./fixtures/signed-application-invalid.yaml) | Success. | The signature matches even though `port: not-an-integer` violates the illustrative application's integer-port rule. |
 
 > [!NOTE]
 > The last sample signs [`application-invalid.yaml`](./fixtures/application-invalid.yaml).
@@ -105,108 +357,32 @@ SHA256:EVFfVelC8GKlyPd1Tl9KLhtfTqzLkAYXsH6LP7PdCQg
 The modified samples derive from `signed.yaml` through the changes listed
 above.
 
-## Read and write documents
+## SSH agent signing
 
-Both commands require `--input <FILE>`, `--input <URL>`, or `--input stdin`.
-Documents are capped at 4 MiB, including signed output. `stdin` reads standard
-input; `./stdin` names a file with that basename.
-HTTP and HTTPS input URLs are fetched anonymously with a 20-second timeout.
+[`agent.rs`](./agent.rs) uses `russh` to connect to `SSH_AUTH_SOCK`. Start and
+configure your agent outside the example. The example does not load, decrypt,
+add, or remove keys.
 
-## Stages
+The adapter implements `AsyncProviderSigner` and forwards the exact message
+bytes supplied by `yaml-sigil`. `AsyncProviderSigningKeyBuilder::build`
+validates the public key without a synthetic signing request. Qualified
+signing verifies each returned signature locally before emitting an artifact.
+The agent's ordinary Ed25519 signature supplies the required 64-byte `R || S`.
+An OpenSSH `ssh-keygen -Y sign` SSHSIG envelope signs different bytes and
+cannot be substituted. See the [crypto-provider guide](../../docs/crypto-providers.md).
 
-### Verification
-
-```text
-REMINDER: We are validating the document's signature, not the document itself.
-====== 1/4 Read signed YAML ======
-====== 2/4 Check signature metadata ======
-====== 3/4 Resolve public keys ======
-====== 4/4 Verify the signature ======
-```
-
-### Signing
-
-```text
-REMINDER: Signing a document does not validate its contents.
-====== 1/5 Read unsigned YAML ======
-====== 2/5 Load private key ======
-====== 3/5 Resolve signer and match the public key ======
-====== 4/5 Sign YAML ======
-====== 5/5 Write signed YAML ======
-====== STATUS ======
-```
-
-## Sign your own YAML
-
-> [!WARNING]
-> This example takes ownership of your private-key material in its own process,
-> including decrypting encrypted key files. The example and its dependencies
-> can access the raw key during signing. See the planned
-> [SSH agent transition](#ssh-agent-transition) for signing through an agent.
->
-> Review a local copy before signing. URL input is signed without a preview.
-> HTTP permits substitution in transit. HTTPS authenticates the server connection.
-> Neither confirms what you intend to sign.
-
-Use a dedicated ordinary OpenSSH Ed25519 private-key file whose public half
-is registered with GitHub for authentication, signing, or both.
-Replace `YOUR-USERNAME` and select your actual key file; the
-filename below is the convention used for this demo.
-
-```shell
-cargo run --package yaml-sigil-examples --example github-keys -- sign \
-  --signer YOUR-USERNAME \
-  --private-key "$HOME/.ssh/id_ed25519-github-yaml-sigil-signing" \
-  --input https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/main/examples/github-keys/fixtures/unsigned.yaml \
-  > signed-example.yaml
-cargo run --package yaml-sigil-examples --example github-keys -- verify \
-  --signer YOUR-USERNAME \
-  --input stdin < signed-example.yaml
-```
-
-Encrypted keys prompt for a passphrase on the terminal without echoing it.
-A session without a terminal cannot decrypt an encrypted file. Passphrases
-are not accepted as command arguments. The private-key parser, passphrase
-buffer, and native signing key clear their secret buffers on drop.
-
-In username mode, signing confirms that the private key's public half is in
-either of the account's public key lists. With an explicit public key, it
-requires that exact key to match. Signing appends a missing final newline
-before signing a nonempty YAML payload, then writes
-the artifact bytes returned by `sign_yaml`. It refuses an existing output
-path when `--output FILE` is supplied. Input arguments select a file, URL,
-or standard input; they do not accept inline YAML.
-
-The executable supports ordinary `ssh-ed25519` keys. It skips other public-key
-algorithms in mixed lists and rejects signing with RSA, P-256, certificates,
-or security-key forms such as `sk-ssh-ed25519@openssh.com`.
-
-Omitting `--output` writes the exact signed artifact to stdout. Use
-`--output FILE` to create a new file; existing paths are refused. Progress and
-verification results stay on stderr so you can redirect or pipe stdout as YAML.
-Combining stderr and stdout produces a terminal transcript that cannot be
-parsed as a YAML stream.
-Payloads may contain terminal controls. Direct untrusted signed output to
-`--output FILE` or a redirected file.
-
-### SSH agent transition
-
-The intended `0.6.0` update replaces private-key-file loading with an
-SSH-agent-backed signing provider using that release's crypto-provider
-interfaces. Key discovery, the `keyid` hint, caller-selected account or key,
-and signature verification remain separate from signing-key access.
-An agent reduces key exposure; it does not make requested signatures or
-document contents trustworthy.
-
-That adapter must request a signature over the payload bytes supplied by
-`yaml-sigil`. An OpenSSH `ssh-keygen -Y sign` SSHSIG envelope signs different
-bytes and cannot be substituted for a `yaml-sigil` signature. The current
-example **does not implement agent signing**.
+Connection, key listing, and signing each have a 30-second timeout. The
+example makes one signing request and never retries it. Failure or cancellation
+closes the signing connection; it does not prove the agent did not sign.
+Verification with an explicit signer needs no agent. Agent-only verification
+requests public identities and performs the signature check locally; it never
+requests a signature.
 
 ## Discovery and verification
 
-[`main.rs`](./main.rs) keeps the public library calls visible. It loads a
-signing key or calls `pre_verify_yaml`, checks the signature metadata, and uses
+[`main.rs`](./main.rs) keeps the public library calls visible. It binds the
+agent signing key or calls `pre_verify_yaml_with_resource_limits`, checks the
+signature metadata, and uses
 `verify_from_pre_verify_yaml` with each caller-selected candidate Ed25519 key.
 It accepts only `VerifierState::Verified`. The caller retains responsibility
 for any use of the authenticated payload.
@@ -240,6 +416,9 @@ resources, repeated or skipped page numbers, and changed page sizes are errors.
 Discovery finishes both lists before selecting a signing key or verifying a
 signature. An error in either list fails the operation even if a previous
 response contained a matching key.
+
+[`keys.rs`](./keys.rs) shares key decoding, admissibility checks, and fingerprint
+filtering between GitHub discovery, explicit public keys, and agent identities.
 
 Each JSON record must contain one OpenSSH public-key line in its `key` field.
 The `ssh-key` parser decodes that line. The
@@ -278,51 +457,6 @@ in `X-RateLimit-Reset` when available. Retry after that time. It does not prompt
 for GitHub credentials or retry through an authenticated path.
 See [GitHub's rate-limit documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
 
-#### Verification
-
-For an example run without GitHub key discovery, supply the public key
-explicitly. This command verifies the local signed fixture using its recorded
-public-key snapshot.
-
-```shell
-cargo run --package yaml-sigil-examples --example github-keys -- verify \
-  --signer "$(cat examples/github-keys/fixtures/ddurst-nvidia.pub-key)" \
-  --input examples/github-keys/fixtures/signed.yaml
-```
-
-`--signer` takes the complete OpenSSH line, such as `ssh-ed25519 AAAA...`,
-including an optional comment. It does not take a filename or a fingerprint.
-The shell command above reads the public-key file and passes its contents.
-Select a key you trust; do not accept an untrusted document's suggested key.
-
-This mode verifies only against the supplied key. It does not check the
-account's current GitHub registration and never resolves the artifact's
-unsigned `keyid`. It can therefore verify the URL-labeled fixtures while
-GitHub is unavailable. Key discovery never switches to this mode automatically.
-URL inputs still make HTTP requests; use a local file or `stdin` for an
-offline run.
-
-#### Signing
-
-You can sign offline with the same dedicated private key and its public half.
-Replace the paths when your key has a different filename.
-
-```shell
-cargo run --package yaml-sigil-examples --example github-keys -- sign \
-  --signer "$(cat "$HOME/.ssh/id_ed25519-github-yaml-sigil-signing.pub")" \
-  --private-key "$HOME/.ssh/id_ed25519-github-yaml-sigil-signing" \
-  --input examples/github-keys/fixtures/unsigned.yaml \
-  > signed-offline.yaml
-cargo run --package yaml-sigil-examples --example github-keys -- verify \
-  --signer "$(cat "$HOME/.ssh/id_ed25519-github-yaml-sigil-signing.pub")" \
-  --input stdin < signed-offline.yaml
-```
-
-Direct-key signing omits `keyid` because a public key alone does not identify
-a GitHub account. You can verify that artifact with the explicit public key
-or with a username whose authentication-key or signing-key list contains the
-same key.
-
 ## Find the endpoint for other VCS systems
 
 > [!NOTE]
@@ -353,8 +487,8 @@ use the native `p256` library to obtain the uncompressed point expected by
 
 ```rust
 use anyhow::{Result, bail};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
-use ssh_key::{PublicKey, public::EcdsaPublicKey};
+use p256::elliptic_curve::sec1::ToSec1Point;
+use russh::keys::ssh_key::{PublicKey, public::EcdsaPublicKey};
 use yaml_sigil_verification::resolve_p256_verifying_key;
 
 fn resolve_ssh_p256(line: &str) -> Result<p256::ecdsa::VerifyingKey> {
@@ -365,24 +499,24 @@ fn resolve_ssh_p256(line: &str) -> Result<p256::ecdsa::VerifyingKey> {
     };
     let native = p256::PublicKey::from_sec1_bytes(point.as_bytes())
         .map_err(|_| anyhow::anyhow!("invalid P-256 point"))?;
-    let uncompressed = native.to_encoded_point(false);
+    let uncompressed = native.to_sec1_point(false);
     Ok(resolve_p256_verifying_key(uncompressed.as_bytes())?)
 }
 ```
 
-For signing, decode the OpenSSH P-256 private scalar into
-`p256::ecdsa::SigningKey`. Select `AlgorithmId::EcdsaP256Sha256` and
-`SigningKey::EcdsaP256Sha256` in `SignYamlParams`. For verification, supply
+For P-256 agent signing, an adapter must convert the SSH signature's integer
+pair to fixed-width 64-byte `r || s` and use the provider's P-256 slot.
+For verification, supply
 the resolved key through `PublicKeys.p256` and enable that algorithm in
 `VerifierOptions`. Resolve keys from the caller's selected account or explicit
-public key, and require the private/public-key match when signing. Keep `keyid`
+public key, and bind signing to the matching agent key. Keep `keyid`
 as an optional hint.
 
-Let the library produce its fixed-width signature and apply SHA-256. Do not
-substitute an SSH signature blob, DER encoding, or an SSHSIG envelope, or
-prehash the message before handing it to the library.
-The P-256 adaptation test exercises this conversion and a library round trip
-without adding a P-256 CLI option.
+Pass the final message bytes unchanged; the P-256 agent operation must apply
+SHA-256 exactly once. Do not substitute an SSH signature blob, DER encoding,
+or an SSHSIG envelope, or prehash the message yourself.
+The P-256 adaptation test covers public-key conversion and a local library
+round trip. It does not implement or test P-256 agent signing.
 
 ## Tests and dependencies
 
@@ -393,17 +527,28 @@ cargo xtask ci
 
 The target's `test = true` registration makes the existing workspace CI run
 its tests. They cover CLI arguments, file/URL/stdin signing and verification,
-stdout artifact bytes, progress steps, encrypted keys, key selection, malformed
+stdout artifact bytes, progress steps, agent key selection, malformed
 key records, pagination, later-page failures, anonymous rate limits, HTTP
 response and read failures, document size boundaries, cumulative discovery limits,
-caller-selected URLs, direct-key signing and verification without network
+caller-selected URLs, agent-only and direct-key signing and verification
+without network
 access, optional and changed `keyid` hints, fixture outcomes in both modes,
-and the P-256 recipe.
+and the P-256 public-key recipe. Agent tests check exact message bytes,
+refusals, malformed replies, wrong-key signatures, timeouts, and cancellation
+without retries or partial artifacts.
 The tests use synthetic private keys or the recorded public-key snapshot.
-HTTP responses are supplied locally to keep tests offline. Live HTTP transport
-and GitHub verification are separate manual checks.
+HTTP responses and agent peers are supplied locally to keep tests offline.
+Live HTTP transport and GitHub verification are separate manual checks.
 
-The example uses `clap`, `anyhow`, `ssh-key` `0.6.7`, `ureq` `3.4`, `serde_json`,
-`rpassword`, `zeroize`, and the workspace's RustCrypto bindings and public
+On Unix, run this additional test with OpenSSH installed. It starts an
+isolated agent and loads a synthetic key without changing your existing agent.
+
+```shell
+cargo test --package yaml-sigil-examples --example github-keys \
+  openssh_agent_round_trip -- --ignored
+```
+
+The example uses `clap`, `anyhow`, `russh` `0.63.3` and its `ssh-key` re-export,
+Tokio, `ureq` `3.4`, `serde_json`, and the workspace's RustCrypto bindings and public
 `yaml-sigil` APIs. They are development dependencies of the unpublished
 example package, with usage documented in [`Cargo.toml`](../Cargo.toml).

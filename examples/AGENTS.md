@@ -15,7 +15,8 @@ Keep the introduction and index general. Put options, output conventions,
 and limitations specific to an example or related group in that group's
 section.
 
-Keep agent instructions in this file. Put implementation explanations in the
+Keep shared agent instructions in this file and example-specific walkthroughs in
+scoped `AGENTS.md` files. Put implementation explanations in the
 example source so readers can follow the code without switching to the README.
 Explain the purpose of each stage and the public contracts it demonstrates.
 More inline commentary is appropriate here than in production library code.
@@ -102,6 +103,14 @@ Use the local examples' key and payload options and four output stages, with
 an additional warning stage first. Test both keys with default, file, and
 stdin input and independently verify the printed artifacts. Neither the
 example operation nor its tests require provider qualification.
+
+## SSH-agent and GitHub key example
+
+Follow [`github-keys/AGENTS.md`](./github-keys/AGENTS.md) for its protected-key,
+offline-first walkthrough and exact registration cleanup. Keep the
+[human walkthrough](./github-keys/README.md) and index aligned with optional
+signers, fingerprint filtering, and public-only agent verification. Preserve
+the published fixture's non-demo key and signed bytes.
 
 ## Validation and packaging
 

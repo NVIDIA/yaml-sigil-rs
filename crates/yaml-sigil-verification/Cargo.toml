@@ -40,10 +40,10 @@ workspace = true
 
 [dependencies]
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
-curve25519-dalek = "4.1"
+curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
 p256 = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 signature = { workspace = true }
 tracing = "0.1"
 yaml-sigil-core = { workspace = true, default-features = false }
@@ -59,7 +59,7 @@ json-schema-validate = ["yaml-sigil-core/json-schema-validate"]
 # Keep provider tests runnable on Windows x86-64 hosts without NASM, including
 # when this package is tested separately from the examples workspace member.
 aws-lc-rs = { version = "=1.18.1", default-features = false, features = ["alloc", "non-fips", "prebuilt-nasm"] }
-rand_core = { workspace = true }
+rand = { workspace = true }
 ring = "=0.17.14"
 tokio = { workspace = true, features = ["macros", "rt"] }
 yaml-sigil-signing = { workspace = true }

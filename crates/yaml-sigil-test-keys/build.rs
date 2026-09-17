@@ -6,6 +6,7 @@
 //! This crate is intended only as a **dev-dependency** so key material is not built for
 //! normal `cargo build` / `cargo check` of `yaml-sigil-verification` or `yaml-sigil-signing`.
 
+use p256::elliptic_curve::Generate;
 use rand::SeedableRng;
 use std::env;
 use std::fs;
@@ -21,8 +22,8 @@ fn main() {
 
     let ed0 = ed25519_dalek::SigningKey::generate(&mut rng);
     let ed1 = ed25519_dalek::SigningKey::generate(&mut rng);
-    let p0 = p256::ecdsa::SigningKey::random(&mut rng);
-    let p1 = p256::ecdsa::SigningKey::random(&mut rng);
+    let p0 = p256::ecdsa::SigningKey::generate_from_rng(&mut rng);
+    let p1 = p256::ecdsa::SigningKey::generate_from_rng(&mut rng);
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
     let path = Path::new(&out_dir).join("buildtime_test_keys.rs");
