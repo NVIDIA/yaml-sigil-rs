@@ -7,11 +7,13 @@ use std::io::Read as _;
 use std::str::FromStr;
 use std::time::Duration;
 
+#[cfg(test)]
+use super::keys::parse_export;
+use super::keys::{Candidate, parse_candidates};
 use anyhow::{Context, Result, bail, ensure};
-use ed25519_dalek::VerifyingKey;
-use ssh_key::{Fingerprint, HashAlg, PublicKey};
+#[cfg(test)]
+use russh::keys::ssh_key::{HashAlg, PublicKey};
 use ureq::http::{HeaderMap, Response, StatusCode, Uri};
-use yaml_sigil_verification::resolve_ed25519_verifying_key;
 
 // These are example discovery policies, not YamlSigil artifact constraints.
 const MAX_DISCOVERY_BYTES: usize = 256 * 1024;
@@ -19,7 +21,7 @@ const MAX_PAGES_PER_RESOURCE: usize = 10;
 const PER_PAGE: usize = 100;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const API_VERSION: &str = "2026-03-10";
-const RATE_LIMIT_HELP: &str = "See examples/github-keys/README.md, 'GitHub API rate limits and offline runs', for retry guidance and the explicit public-key option: https://github.com/NVIDIA/yaml-sigil-rs/blob/main/examples/github-keys/README.md#github-api-rate-limits-and-offline-runs";
+const RATE_LIMIT_HELP: &str = "See examples/github-keys/README.md, 'GitHub API rate limits and offline runs', for retry guidance and the explicit public-key option: https://github.com/NVIDIA/yaml-sigil-rs/blob/dev/0.6.0/examples/github-keys/README.md#github-api-rate-limits-and-offline-runs";
 
 #[derive(Clone, Debug)]
 pub(super) struct GitHubAccount(String);
@@ -51,14 +53,6 @@ impl FromStr for GitHubAccount {
         );
         Ok(Self(format!("https://api.github.com/users/{username}")))
     }
-}
-
-#[derive(Clone)]
-pub(super) struct Candidate {
-    pub(super) key: VerifyingKey,
-    pub(super) fingerprint: Fingerprint,
-    // Set only by discovery, never from an artifact's untrusted keyid hint.
-    pub(super) source: Option<String>,
 }
 
 pub(super) fn fetch(account: &GitHubAccount) -> Result<Vec<Candidate>> {
@@ -321,46 +315,6 @@ fn read_page(mut response: Response<ureq::Body>, remaining: &mut usize) -> Resul
         .collect()
 }
 
-// This also reads the offline fixture's OpenSSH public-key snapshot. API key
-// fields have already been checked to contain exactly one nonempty line each.
-pub(super) fn parse_export(export: &str) -> Result<Vec<Candidate>> {
-    let candidates = parse_candidates(export)?;
-    ensure!(!candidates.is_empty(), "no supported Ed25519 public keys");
-    Ok(candidates)
-}
-
-fn parse_candidates(export: &str) -> Result<Vec<Candidate>> {
-    let mut candidates = Vec::new();
-    for (index, line) in export.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let public = PublicKey::from_openssh(line).map_err(|error| {
-            anyhow::anyhow!("malformed OpenSSH key on line {}: {error}", index + 1)
-        })?;
-        let Some(ed25519) = public.key_data().ed25519() else {
-            // Unsupported algorithms can coexist with ordinary Ed25519 keys.
-            continue;
-        };
-        // The base64 field is an SSH wire blob, not a raw Ed25519 point.
-        // Let ssh-key decode it, then use the library's admissibility resolver.
-        let key = resolve_ed25519_verifying_key(ed25519.as_ref())
-            .with_context(|| format!("inadmissible Ed25519 key on line {}", index + 1))?;
-        if !candidates
-            .iter()
-            .any(|candidate: &Candidate| candidate.key == key)
-        {
-            candidates.push(Candidate {
-                key,
-                fingerprint: public.fingerprint(HashAlg::Sha256),
-                source: None,
-            });
-        }
-    }
-    Ok(candidates)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,7 +346,8 @@ mod tests {
     fn key(seed: u8) -> String {
         let native = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
         PublicKey::new(
-            ssh_key::public::Ed25519PublicKey(native.verifying_key().to_bytes()).into(),
+            russh::keys::ssh_key::public::Ed25519PublicKey(native.verifying_key().to_bytes())
+                .into(),
             "synthetic test",
         )
         .to_openssh()
@@ -545,8 +500,11 @@ mod tests {
     fn either_registration_list_can_be_empty_or_have_only_unsupported_keys() {
         let p256 = p256::ecdsa::SigningKey::from_slice(&[9; 32]).unwrap();
         let unsupported = PublicKey::new(
-            ssh_key::public::EcdsaPublicKey::NistP256(p256.verifying_key().to_encoded_point(false))
-                .into(),
+            russh::keys::ssh_key::public::EcdsaPublicKey::from_sec1_bytes(
+                p256.verifying_key().to_sec1_point(false).as_bytes(),
+            )
+            .unwrap()
+            .into(),
             "unsupported algorithm",
         )
         .to_openssh()

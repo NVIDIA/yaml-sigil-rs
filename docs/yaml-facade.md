@@ -67,7 +67,10 @@ The example tests cover a quoted `keyid` and an absent `keyid`. The
 [core-only consumer fixture](../tests/downstream/core-only/Cargo.toml) also
 parses and serializes documents while depending directly on only
 `yaml-sigil-core`. It checks that using the facade does not require a direct
-YAML-backend dependency.
+YAML-backend dependency. The
+[downstream Serde fixture](../tests/downstream/noyalib-0-0-35/Cargo.toml) checks
+values in both directions between `noyalib` `0.0.35` and the current private
+backend.
 
 ```shell
 cargo test --package yaml-sigil-examples --example yaml-facade

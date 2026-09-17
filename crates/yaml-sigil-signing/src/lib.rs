@@ -22,7 +22,7 @@
 //!
 //! # Local providers
 //!
-//! [`ProviderSigningKeyBuilder`] accepts synchronous `signature` 2.2 adapters
+//! [`ProviderSigningKeyBuilder`] accepts synchronous `signature` 3.0 adapters
 //! without exposing private-key material. [`sign_with_provider`] uses the
 //! qualified key path, which validates the bound public key and self-verifies
 //! every real output. [`sign_with_unqualified_provider`] names the deliberate

@@ -181,7 +181,8 @@ mod tests {
     use curve25519_dalek::scalar::Scalar;
     use p256::ecdsa::signature::Signer;
     use p256::ecdsa::{SigningKey, VerifyingKey};
-    use rand_core::OsRng;
+    use p256::elliptic_curve::Generate;
+    use rand::rngs::SysRng;
 
     fn signature_with_permitted_non_prime_order_r(
         payload: &[u8],
@@ -319,7 +320,7 @@ mod tests {
 
     #[test]
     fn ecdsa_accepts_raw_rs64_and_classifies_failures() {
-        let sk = SigningKey::random(&mut OsRng);
+        let sk = SigningKey::try_generate_from_rng(&mut SysRng).expect("generate key");
         let vk = VerifyingKey::from(&sk);
         let msg = b"payload line\n";
         let sig: p256::ecdsa::Signature = sk.sign(msg);

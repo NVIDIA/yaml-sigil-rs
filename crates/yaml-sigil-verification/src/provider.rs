@@ -22,7 +22,7 @@
 //!
 //! # Implement a verification adapter
 //!
-//! Add a direct dependency on `signature` 2.2 and implement these public
+//! Add a direct dependency on `signature` 3.0 and implement these public
 //! extension traits for types you own.
 //!
 //! - [`ProviderVerifierFactory`] creates a handle bound to the supplied
@@ -39,7 +39,7 @@
 //! A signature mismatch becomes [`crate::VerifierState::SignedButFailedVerification`].
 //! An operational failure becomes [`crate::InvocationError::KeyResolutionFailure`].
 //!
-//! This example uses `p256` 0.13 as the native provider and supports only the
+//! This example uses `p256` 0.14 as the native provider and supports only the
 //! P-256 slot. Its verification call applies SHA-256 once to `message` and
 //! accepts fixed-width `r || s`. The empty `ProviderVerifier` implementation
 //! uses the default classification because this in-memory verifier reports
@@ -115,7 +115,7 @@
 //! assert!(!provider.status(AlgorithmId::Ed25519).is_qualified());
 //! # // A fixed key and artifact are used only to execute this documentation test.
 //! # let native_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
-//! # let public_key = native_key.verifying_key().to_encoded_point(false);
+//! # let public_key = native_key.verifying_key().to_sec1_point(false);
 //! # let artifact = yaml_sigil_signing::sign_proto(&yaml_sigil_signing::SignProtoParams {
 //! #     payload: b"example: signed\n",
 //! #     algorithm: AlgorithmId::EcdsaP256Sha256,
@@ -158,7 +158,7 @@ pub enum ProviderVerificationOutcome {
     ProviderFailure,
 }
 
-/// A `signature` 2.2 verifier that preserves YamlSigil's provider-failure
+/// A `signature` 3.0 verifier that preserves YamlSigil's provider-failure
 /// distinction.
 ///
 /// Bound verifiers must be `Send + Sync` so their keys can be moved or shared

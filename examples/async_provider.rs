@@ -13,7 +13,8 @@ use std::io::{self, Read, Write};
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, ValueEnum};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
-use rand_core::OsRng;
+use p256::elliptic_curve::Generate;
+use rand::rngs::SysRng;
 use signature::{RandomizedSigner as _, Verifier as _};
 use tokio::sync::{mpsc, oneshot};
 use yaml_sigil_core::AlgorithmId;
@@ -95,13 +96,14 @@ impl Client {
     }
 }
 
-fn start_service() -> (Client, tokio::task::JoinHandle<()>) {
+fn start_service() -> (Client, tokio::task::JoinHandle<Result<()>>) {
     let (requests, mut operations) = mpsc::channel(8);
     let worker = tokio::task::spawn_blocking(move || {
         // Generate a fresh random private key inside the worker. Only its
         // public bytes and actual requested signatures leave this scope.
-        let key = SigningKey::random(&mut OsRng);
-        let public_key = key.verifying_key().to_encoded_point(false);
+        let key = SigningKey::try_generate_from_rng(&mut SysRng)
+            .context("generate the simulated service key")?;
+        let public_key = key.verifying_key().to_sec1_point(false);
         let mut verification_keys = Vec::<VerifyingKey>::new();
         while let Some(operation) = operations.blocking_recv() {
             match operation {
@@ -111,7 +113,7 @@ fn start_service() -> (Client, tokio::task::JoinHandle<()>) {
                 Operation::Sign(message, reply) => {
                     // Randomized message signing hashes with SHA-256 exactly
                     // once. Return fixed-width big-endian r || s, not DER.
-                    let signed: Result<Signature, _> = key.try_sign_with_rng(&mut OsRng, &message);
+                    let signed: Result<Signature, _> = key.try_sign_with_rng(&mut SysRng, &message);
                     let _ = reply.send(signed.map(|sig| sig.to_bytes().into()));
                 }
                 Operation::Bind(bytes, reply) => {
@@ -147,6 +149,7 @@ fn start_service() -> (Client, tokio::task::JoinHandle<()>) {
                 }
             }
         }
+        Ok(())
     });
     (Client { requests }, worker)
 }
@@ -364,7 +367,7 @@ async fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()
     // Close the queue and join even when the operation failed. Production
     // adapters must define their own deadlines and remote cancellation policy.
     drop(client);
-    worker.await.context("simulated service worker failed")?;
+    worker.await.context("simulated service worker failed")??;
     result
 }
 
