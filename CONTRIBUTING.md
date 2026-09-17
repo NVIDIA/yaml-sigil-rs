@@ -95,9 +95,11 @@ a different head.
 The authoritative aggregate job records its pre-execution protected-policy SHA
 and exact base ref/SHA; movement of either object invalidates the run.
 
-The copied `.github/workflows/ci.yml` must exactly match protected current
-`main`. Coordinate a proposed change to that workflow with a maintainer
-before requesting candidate testing.
+The copied `.github/workflows/ci.yml`, `ci-trusted.yml`, and
+`ci-candidate.yml` must exactly match protected current `main`. Coordinate a
+proposed workflow change with a maintainer before requesting candidate testing.
+Maintainers can explicitly stage a reviewed policy change through the separate
+procedure in `MAINTAINERS.md`; ordinary copied-ref admission stays unchanged.
 
 Candidate setup completes before source materialization. The checkout uses
 anonymous Git transport, rejects requested Git filters, disables Git LFS, and
@@ -119,9 +121,10 @@ every rewritten commit is DCO-compliant, then request testing for the new exact
 SHA.
 
 The authoritative candidate result is the NVIDIA-runner aggregate whose name
-starts with `Candidate CI (Linux)` and records the exact protected-policy and
-base objects. A separate protected, checkout-free reporter binds the workflow
-ID, run and attempt, repository, open pull request, copied ref, current head,
+starts with `Candidate CI / Candidate CI (Linux)` and records the exact
+protected-policy and base objects. A separate protected, checkout-free
+reporter binds the workflow ID, run and attempt, repository, open pull request,
+copied ref, current head,
 authoritative job conclusion, and zero-artifact result before the
 repository-scoped App creates the base-specific required verdict described
 above. Stable macOS and Windows jobs are advisory and cannot influence that
