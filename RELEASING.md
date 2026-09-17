@@ -14,18 +14,21 @@ installers, containers, or retained CI artifacts.
 
 ## Prepare the release pull request
 
-Start from a clean checkout of exact current `main` with current tags:
+Select `main`, or an already activated `support/M.N` after reviewing its
+inventory and protection. Start from the exact selected tip with current tags:
 
 ```shell
-git fetch origin main --tags
-git switch main
-git merge --ff-only origin/main
+base_ref="refs/heads/main" # Or the reviewed refs/heads/support/M.N.
+base_branch="${base_ref#refs/heads/}"
+git fetch origin "${base_ref}:refs/remotes/origin/${base_branch}" --tags
+git switch "${base_branch}"
+git merge --ff-only "origin/${base_branch}"
 git status --short
 ```
 
 Confirm that the exact `yaml-sigil-traits` version in `Cargo.toml` is already
 published and is the intended dependency. If it needs to change, land that
-dependency update on `main` before starting the release branch.
+dependency update on the selected base before starting the release branch.
 
 Choose the reviewed stable or prerelease version and create its canonical
 same-repository branch. Do not reuse a prior release branch.
@@ -45,8 +48,8 @@ cargo binstall --force --locked --no-confirm release-plz@0.3.160
 release-plz --version
 ```
 
-Prepare the exact version. The command requires exact `origin/main` and runs
-`release-plz update` first. If current `main` carries an unpublished
+Prepare the exact version. The command requires the exact selected remote tip
+and runs `release-plz update` first. If current `main` carries an unpublished
 `MAJOR.MINOR.PATCH-rc.0` coordination stub, select either its first real RC or
 the stable `MAJOR.MINOR.PATCH`; never release `rc.0` itself. For that bounded
 selection, when starting a derived version as a prerelease, when advancing an
@@ -60,7 +63,7 @@ before the next release operation and must be absent afterward.
 Both `prepare` and `check` reject `rc.0` as a release version.
 
 ```shell
-cargo xtask release prepare --base-ref refs/heads/main --version "${version}"
+cargo xtask release prepare --base-ref "${base_ref}" --version "${version}"
 git diff --check
 git diff --stat
 git diff
@@ -107,7 +110,7 @@ Push the branch and open the canonical pull request.
 ```shell
 git push -u origin "release-plz-manual-${version}"
 gh pr create \
-  --base main \
+  --base "${base_branch}" \
   --head "release-plz-manual-${version}" \
   --title "chore(release): prepare ${version}" \
   --body "Prepare the four YamlSigil Rust source crates for ${version}."
@@ -117,7 +120,7 @@ After GitHub records the pull-request association, run the credential-free,
 non-publishing source check:
 
 ```shell
-cargo xtask release check --base-ref refs/heads/main --version "${version}"
+cargo xtask release check --base-ref "${base_ref}" --version "${version}"
 ```
 
 `release check` verifies the exact four-package inventory, shared version,
@@ -148,11 +151,13 @@ test ! -L Cargo.lock
 origin_url="$(git remote get-url origin)"
 test "${origin_url}" = "git@github.com:NVIDIA/yaml-sigil-rs.git" || \
   test "${origin_url}" = "https://github.com/NVIDIA/yaml-sigil-rs.git"
+base_ref="refs/heads/main" # Or the reviewed refs/heads/support/M.N.
+base_branch="${base_ref#refs/heads/}"
 version="MAJOR.MINOR.PATCH[-PRERELEASE]"
 reviewed_head=FULL_REVIEWED_PULL_REQUEST_HEAD_SHA
 expected_branch="release-plz-manual-${version}"
 git fetch --no-tags origin \
-  "+refs/heads/main:refs/remotes/origin/main" \
+  "+${base_ref}:refs/remotes/origin/${base_branch}" \
   "+refs/heads/${expected_branch}:refs/remotes/origin/${expected_branch}"
 test -z "$(git status --porcelain=v1 --untracked-files=all)"
 test "$(git rev-parse HEAD)" = "${reviewed_head}"
@@ -160,12 +165,12 @@ test "$(git branch --show-current)" = "${expected_branch}"
 test "$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')" = \
   "origin/${expected_branch}"
 test "$(git rev-parse '@{upstream}')" = "${reviewed_head}"
-test "$(git rev-list --count "refs/remotes/origin/main..${reviewed_head}")" -eq 1
+test "$(git rev-list --count "refs/remotes/origin/${base_branch}..${reviewed_head}")" -eq 1
 test "$(git rev-parse "${reviewed_head}^")" = \
-  "$(git rev-parse refs/remotes/origin/main)"
-live_main="$(git ls-remote --exit-code origin refs/heads/main)"
-test "${live_main}" = \
-  "$(git rev-parse refs/remotes/origin/main)"$'\t'"refs/heads/main"
+  "$(git rev-parse "refs/remotes/origin/${base_branch}")"
+live_base="$(git ls-remote --exit-code origin "${base_ref}")"
+test "${live_base}" = \
+  "$(git rev-parse "refs/remotes/origin/${base_branch}")"$'\t'"${base_ref}"
 # Bind the acceptance evidence to the repository's reviewed analyzer version.
 release-plz --version | grep -Fx 'release-plz 0.3.160'
 evidence="<APPROVED-EVIDENCE-DIR>/release-plz-dry-run-${reviewed_head}.log"
@@ -239,11 +244,11 @@ stops the release. If the block is interrupted before cleanup, inspect and
 remove only its regular generated root lock before starting a new invocation.
 
 Merge only after the exact head passes review and required CI. Release pull
-requests use an explicitly authorized squash. Verify the resulting `main`
+requests use an explicitly authorized squash. Verify the resulting selected-base
 commit has one parent, a GitHub Verified signature, the DCO trailer, the pull
 request association, and a tree equal to the reviewed head.
 
-## Publish from main
+## Publish under main policy
 
 The enabled `publish.yml` workflow qualifies each `main` push without secrets.
 Ordinary pushes that are not the squash of a canonical release pull request
@@ -279,7 +284,8 @@ self-review permitted, and one custom deployment branch policy restricted to
 After publication and registry confirmation, the secretless approval job waits
 at the `release-finalization` environment. Do not approve that deployment yet.
 Immediately before approval, a repository administrator performs this
-read-only operator preflight with the exact values shown by the pending run.
+read-only operator preflight from exact clean current main, with a separate
+exact source checkout and the values shown by the pending run.
 The two ruleset IDs are repository policy: `21898912` protects tag creation,
 and `21898913` protects tag update and deletion.
 
@@ -290,7 +296,10 @@ policy_sha=FULL_CURRENT_MAIN_SHA
 source_sha=FULL_QUALIFIED_RELEASE_SOURCE_SHA
 run_id=PENDING_RUN_ID
 run_attempt=PENDING_RUN_ATTEMPT
-expected_event=EXPECTED_PUSH_OR_WORKFLOW_DISPATCH
+base_ref=refs/heads/main # Or the reviewed refs/heads/support/M.N.
+operation=push # push, release, or recover.
+version=EXACT_QUALIFIED_VERSION
+source_root=/ABSOLUTE/PATH/TO/EXACT/RELEASE/SOURCE
 tag_creation_ruleset_id=21898912
 tag_update_deletion_ruleset_id=21898913
 approval_environment=release-finalization
@@ -301,6 +310,26 @@ automation_environment_id=20345456136
 automation_branch_policy_id=57933874
 
 test "${run_attempt}" = 1
+
+# Main pushes and support dispatches retain distinct publication authority.
+case "${operation}" in
+  push)
+    test "${base_ref}" = refs/heads/main
+    test "${source_sha}" = "${policy_sha}"
+    expected_event=push
+    release_operation=fresh
+    ;;
+  release)
+    test "${base_ref}" != refs/heads/main
+    expected_event=workflow_dispatch
+    release_operation=fresh
+    ;;
+  recover)
+    expected_event=workflow_dispatch
+    release_operation=recover
+    ;;
+  *) exit 1 ;;
+esac
 
 operator_login="$(gh api user --jq .login)"
 test "$(gh api \
@@ -353,20 +382,11 @@ check_live_bindings() {
     "${approval_environment}"
   test "$(jq -r '.[0].current_user_can_approve' \
     <<< "${pending_json}")" = true
-  comparison_json="$(gh api \
-    "repos/${repository}/compare/${source_sha}...${policy_sha}")"
-  compare_status="$(jq -r .status <<< "${comparison_json}")"
-  compare_base="$(jq -r .base_commit.sha <<< "${comparison_json}")"
-  compare_merge_base="$(jq -r .merge_base_commit.sha \
-    <<< "${comparison_json}")"
-  test "${compare_base}" = "${source_sha}"
-  test "${compare_merge_base}" = "${source_sha}"
-  # Only the exact current source or an older commit on current main lineage
-  # remains eligible for approval.
-  case "${compare_status}" in
-    identical | ahead) ;;
-    *) return 1 ;;
-  esac
+  # The protected typed command checks the exact selected lineage and inventory.
+  cargo xtask github release rebind-policy \
+    --repository "${repository}" --base-ref "${base_ref}" \
+    --operation "${release_operation}" --version "${version}" \
+    --source-root "${source_root}" --source-sha "${source_sha}"
 }
 
 check_live_bindings
@@ -524,16 +544,18 @@ separate `crates-io` approval does not substitute for this immediately
 pre-finalizer check. These commands grant no workflow credential and make no
 settings, App, ruleset, environment, tag, or Release change.
 
-### Validate or recover without publishing
+### Validate or recover publication
 
 Run the validation-only operation against exact current `main` without
 publication, registry reconciliation, OIDC, App mutation, tags, or Releases:
 
 ```shell
+git fetch origin main
 source_sha="$(git rev-parse origin/main)"
 gh workflow run publish.yml \
   --ref main \
   -f operation=validate \
+  -f base_ref=refs/heads/main \
   -f source_sha="${source_sha}"
 ```
 
@@ -546,6 +568,7 @@ GitHub objects.
 gh workflow run publish.yml \
   --ref main \
   -f operation=recover \
+  -f base_ref=refs/heads/main \
   -f source_sha="FULL_ORIGINAL_SOURCE_SHA" \
   -f original_run_id="ORIGINAL_RUN_ID" \
   -f original_run_attempt="ORIGINAL_RUN_ATTEMPT"
@@ -555,10 +578,53 @@ Never run `cargo publish` or a local non-dry-run `release-plz release`. Never
 move an existing tag, replace a conflicting Release, or advance a partial
 release to newer `main`.
 
+## Dispatch a support release
+
+After integration on an activated line, record its exact squash source and
+version. A support push runs CI only. Validate the selected tip using protected
+main policy before requesting publication:
+
+```shell
+base_ref="refs/heads/support/MAJOR.MINOR"
+version="MAJOR.MINOR.PATCH[-PRERELEASE]"
+source_sha="FULL_REVIEWED_SUPPORT_SQUASH_SHA"
+gh workflow run publish.yml --repo NVIDIA/yaml-sigil-rs --ref main \
+  -f operation=validate -f base_ref="${base_ref}" \
+  -f source_sha="${source_sha}" -f version="${version}"
+```
+
+After the validation succeeds and publication is authorized, dispatch the
+same source. The workflow requalifies it after the existing publication gate:
+
+```shell
+gh workflow run publish.yml --repo NVIDIA/yaml-sigil-rs --ref main \
+  -f operation=release -f base_ref="${base_ref}" \
+  -f source_sha="${source_sha}" -f version="${version}"
+```
+
+For an interrupted support release with published source packages, retain its
+original source and version even if the support tip has advanced. Record its
+run coordinates for audit and request fresh applicable environment approvals:
+
+```shell
+gh workflow run publish.yml --repo NVIDIA/yaml-sigil-rs --ref main \
+  -f operation=recover -f base_ref="${base_ref}" \
+  -f source_sha="FULL_ORIGINAL_SOURCE_SHA" -f version="ORIGINAL_VERSION" \
+  -f original_run_id="ORIGINAL_RUN_ID" -f original_run_attempt="ORIGINAL_ATTEMPT"
+```
+
+All dispatches execute on main and share repository-wide publication
+serialization. `validate` skips mutation jobs. `release` requires the current
+support tip and current policy equality; `recover` proves the original source's
+historical inventory and continued protected lineage. Every later job carries
+the qualified base, source, version, and fresh/recovery operation. The existing
+main-only environments, OIDC scope, App token scope, and approval boundaries
+also apply to support. Never rerun an old approval to avoid a fresh dispatch.
+
 ## Explicit release base
 
-The procedures above name `refs/heads/main` explicitly. Keep `--base-ref` on
-all detached invocations. For a future protected support line, use the same
+The procedures above select `base_ref` explicitly. Keep `--base-ref` on
+all detached invocations. For an activated protected support line, use the same
 manual release branch convention with `--base-ref refs/heads/support/M.N` in
 both preparation and checking. Fetch that base and its tags first; preparation
 starts at its exact remote-tracking tip. The selected version stays on `M.N`,
@@ -567,7 +633,7 @@ one ordinal or promotes that patch to stable. Duplicate versions, skipped
 patches, `rc.0`, and build metadata are rejected during preparation.
 
 Preparation continues to use release-plz 0.3.160 for version and changelog
-changes. These command options alone do not enable support publication. Read
+changes. Activation and publication require separate authorization. Read
 [the maintainer procedure](MAINTAINERS.md#support-readiness-commands) for the
 read-only activation proposal and remaining activation boundary.
 

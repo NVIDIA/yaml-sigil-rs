@@ -91,6 +91,9 @@ enum ReleaseCommand {
 
 #[derive(Args)]
 struct QualifyArgs {
+    /// Optional initial selection; mandatory explicit reuse in later workflow jobs.
+    #[arg(long)]
+    version: Option<Version>,
     #[arg(long)]
     base_ref: String,
     /// Separate checkout containing the exact release source as data.
@@ -175,6 +178,13 @@ fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
     let version = versions::current(&arguments.source_root).map_err(|error| error.to_string())?;
     release::validate_policy(&arguments.source_root).map_err(|error| error.to_string())?;
 
+    if arguments
+        .version
+        .as_ref()
+        .is_some_and(|expected| expected != &version)
+    {
+        return Err("qualified source version changed across the authority boundary".into());
+    }
     line.require_version(&version)?;
     let binding = provenance::Binding::load(
         &arguments.source_root,
@@ -289,7 +299,7 @@ fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
     })?
     .ok_or_else(|| "release qualification skipped registry reconciliation".to_string())?;
     require_consistent_objects(&mut github, &arguments.source_sha, &version, line, &states)?;
-    let decision = decide(arguments.operation, &states)?;
+    let decision = registry_decision(arguments.operation, &states, arguments.wait_for_registry)?;
     binding.verify(&mut github)?;
     append_qualification_outputs(
         &arguments.source_sha,
@@ -889,6 +899,25 @@ fn allowed_release_path(path: &str) -> bool {
         || RUST_POLICY.packages.iter().any(|package| {
             path == format!("{}/Cargo.toml", package.path_in_vcs) || path == package.changelog
         })
+}
+
+fn registry_decision(
+    operation: Operation,
+    states: &[bool],
+    confirmation: bool,
+) -> Result<Decision, String> {
+    if confirmation {
+        // Confirmation cannot authorize another publication or finalization.
+        // It accepts only the complete four-package registry proof.
+        if states.len() != RUST_POLICY.packages.len() || states.iter().any(|state| !state) {
+            return Err("registry confirmation requires all four exact source packages".into());
+        }
+        return Ok(Decision {
+            publish: false,
+            finalize: false,
+        });
+    }
+    decide(operation, states)
 }
 
 fn decide(operation: Operation, states: &[bool]) -> Result<Decision, String> {
@@ -2376,6 +2405,22 @@ mod tests {
             TEST_POLICY_SHA,
             ReleaseLine::Main
         ));
+    }
+
+    #[test]
+    fn support_registry_confirmation_cannot_reauthorize_publication() {
+        let complete = [true; 4];
+        assert!(registry_decision(Operation::Release, &complete, false).is_err());
+        assert_eq!(
+            registry_decision(Operation::Release, &complete, true).unwrap(),
+            Decision {
+                publish: false,
+                finalize: false
+            }
+        );
+        for incomplete in [vec![], vec![true], vec![true, false, false, false]] {
+            assert!(registry_decision(Operation::Release, &incomplete, true).is_err());
+        }
     }
 
     #[test]

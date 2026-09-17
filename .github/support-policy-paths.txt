@@ -3,6 +3,8 @@
 .cargo/config.toml
 .github/scripts/attach-release-source.sh
 .github/scripts/bind-candidate-pr.py
+.github/scripts/bind-release-invocation.sh
+.github/scripts/test-bind-release-invocation.sh
 .github/scripts/check-pull-request-commits.sh
 .github/scripts/check-release-pull-request.sh
 .github/scripts/check-trusted-tool-pins.sh
