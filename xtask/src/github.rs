@@ -3,6 +3,7 @@
 
 //! Narrow, typed GitHub operations for release qualification and finalization.
 
+mod support;
 mod transport;
 
 use std::env;
@@ -71,6 +72,13 @@ struct ReleaseArgs {
 
 #[derive(Subcommand)]
 enum ReleaseCommand {
+    /// Validate and print a proposed support activation without mutation.
+    StartSupport {
+        #[arg(long)]
+        version: Version,
+        #[arg(long)]
+        repository: Option<String>,
+    },
     /// Inspect exact source and registry state without mutation.
     Qualify(QualifyArgs),
     /// Create or verify deterministic annotated tags and zero-asset Releases.
@@ -79,6 +87,8 @@ enum ReleaseCommand {
 
 #[derive(Args)]
 struct QualifyArgs {
+    #[arg(long)]
+    base_ref: String,
     /// Separate checkout containing the exact release source as data.
     #[arg(long)]
     source_root: PathBuf,
@@ -101,6 +111,8 @@ struct QualifyArgs {
 
 #[derive(Args)]
 struct FinalizeArgs {
+    #[arg(long)]
+    base_ref: String,
     /// Separate checkout containing the exact published source as data.
     #[arg(long)]
     source_root: PathBuf,
@@ -131,6 +143,10 @@ struct Decision {
 pub(crate) fn run(root: &Path, args: GithubArgs) -> Result<(), String> {
     match args.command {
         GithubCommand::Release(release) => match release.command {
+            ReleaseCommand::StartSupport {
+                version,
+                repository,
+            } => support::start(root, &version, repository.as_deref()),
             ReleaseCommand::Qualify(arguments) => qualify(root, &arguments),
             ReleaseCommand::Finalize(arguments) => finalize(root, &arguments),
         },
@@ -138,6 +154,7 @@ pub(crate) fn run(root: &Path, args: GithubArgs) -> Result<(), String> {
 }
 
 fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
+    support::require_main_base(&arguments.base_ref)?;
     let mut github = GhCli::new()?;
     let policy_main_sha = main_sha(&mut github)?;
     require_separate_checkouts(
@@ -237,6 +254,7 @@ fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
 }
 
 fn finalize(root: &Path, arguments: &FinalizeArgs) -> Result<(), String> {
+    support::require_main_base(&arguments.base_ref)?;
     let mut github = GhCli::new()?;
     let policy_main_sha = main_sha(&mut github)?;
     require_separate_checkouts(

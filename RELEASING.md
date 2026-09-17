@@ -60,7 +60,7 @@ before the next release operation and must be absent afterward.
 Both `prepare` and `check` reject `rc.0` as a release version.
 
 ```shell
-cargo xtask release prepare --version "${version}"
+cargo xtask release prepare --base-ref refs/heads/main --version "${version}"
 git diff --check
 git diff --stat
 git diff
@@ -117,7 +117,7 @@ After GitHub records the pull-request association, run the credential-free,
 non-publishing source check:
 
 ```shell
-cargo xtask release check --version "${version}"
+cargo xtask release check --base-ref refs/heads/main --version "${version}"
 ```
 
 `release check` verifies the exact four-package inventory, shared version,
@@ -553,3 +553,19 @@ gh workflow run publish.yml \
 Never run `cargo publish` or a local non-dry-run `release-plz release`. Never
 move an existing tag, replace a conflicting Release, or advance a partial
 release to newer `main`.
+
+## Explicit release base
+
+The procedures above name `refs/heads/main` explicitly. Keep `--base-ref` on
+all detached invocations. For a future protected support line, use the same
+manual release branch convention with `--base-ref refs/heads/support/M.N` in
+both preparation and checking. Fetch that base and its tags first; preparation
+starts at its exact remote-tracking tip. The selected version stays on `M.N`,
+uses the patch after the last stable release, and advances an existing RC by
+one ordinal or promotes that patch to stable. Duplicate versions, skipped
+patches, `rc.0`, and build metadata are rejected during preparation.
+
+Preparation continues to use release-plz 0.3.160 for version and changelog
+changes. These command options alone do not enable support publication. Read
+[the maintainer procedure](MAINTAINERS.md#support-readiness-commands) for the
+read-only activation proposal and remaining activation boundary.
