@@ -12,6 +12,13 @@ Whenever a workflow or supporting policy changes, update the matching
 procedure in `MAINTAINERS.md` in the same change. Keep that runbook concise,
 coherent, and aligned with the executable behavior.
 
+Ordinary copied-ref tests require protected workflow equality. Reviewed
+maintainer staging uses a separate main-only route and canonical
+`ci-testing/pr-<number>-<head-sha>` refs. Follow `MAINTAINERS.md` for exact-head
+admission, the authoritative Linux aggregate, and automatic App reporting.
+The reporter must authenticate the original writer, exact source, current
+main ancestry and terminal result before its checks-only token can be used.
+
 Use [`CONTRIBUTING.md`](CONTRIBUTING.md) to choose `main` or an advertised
 breaking-change coordination base before starting work. Keep compatible and
 protected-policy changes on `main`; target the active coordination branch only
@@ -511,9 +518,9 @@ GitHub-hosted macOS and Windows jobs are advisory. Explicitly admitted copied
 refs run public-workspace `cargo check` and `cargo test` without secrets,
 OIDC, protected environments, cache saves, or retained artifacts. Complete
 provider-neutral source, package, version-policy, and release-branch
-validation remains authoritative on NVIDIA Linux. Only the aggregate whose name
-starts with `Candidate CI (Linux)` and records the exact policy/base binding
-feeds the checkout-free App reporter; advisory conclusions never affect the
+validation remains authoritative on NVIDIA Linux. For copied refs, the
+aggregate named by protected policy records the exact policy/base binding
+and feeds the checkout-free App reporter; advisory conclusions never affect the
 base-specific required verdict.
 
 Treat every GitHub Action `uses:` pin update as a potential validation-behavior

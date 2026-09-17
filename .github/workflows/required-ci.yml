@@ -15,10 +15,11 @@ concurrency:
 
 jobs:
   report:
-    name: Report copied-ref CI
+    name: Report reviewed CI
     if: >-
       github.event.workflow_run.event == 'push' &&
-      startsWith(github.event.workflow_run.head_branch, 'pull-request/')
+      (startsWith(github.event.workflow_run.head_branch, 'pull-request/') ||
+       startsWith(github.event.workflow_run.head_branch, 'ci-testing/pr-'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: protected-automation
@@ -41,7 +42,7 @@ jobs:
           test -s "${RUNNER_TEMP}/required-ci/reporter.py"
           python3 -m py_compile "${RUNNER_TEMP}/required-ci/reporter.py"
 
-      - name: Inspect exact-base copied-ref result
+      - name: Inspect exact-base reviewed result
         id: inspect
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -53,6 +54,7 @@ jobs:
           --workflow-id "333755871"
           --workflow-path ".github/workflows/ci.yml"
           --job-name "Candidate CI (Linux)"
+          --staging-job-name "Trusted CI / Linux result"
           --app-slug "nvidia-yamlsigil-release-pr"
 
       # Mint only a checks token scoped to this repository after the complete
@@ -82,4 +84,5 @@ jobs:
           --workflow-id "333755871"
           --workflow-path ".github/workflows/ci.yml"
           --job-name "Candidate CI (Linux)"
+          --staging-job-name "Trusted CI / Linux result"
           --app-slug "nvidia-yamlsigil-release-pr"
