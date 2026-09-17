@@ -96,13 +96,14 @@ dependencies = [
 
 [[package]]
 name = "buf-tools"
-version = "1.72.0-hotfix.2"
+version = "1.73.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d0aff13670ca31038bcdffdf18db2c102f34791c0203efda853dff8335d2c34"
+checksum = "c20bffc07f2b2d1e2ca84dc3f8a106815c546d1a87d292086e48226dc89ac39a"
 dependencies = [
  "flate2",
  "hex",
  "minisign-verify",
+ "rustls",
  "semver",
  "sha2 0.11.0",
  "tar",

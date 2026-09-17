@@ -27,9 +27,10 @@ The public extension-trait contract lives in
 provides implementation support for the published API crates in this
 workspace.
 
-Code generation obtains a pinned, verified Buf executable from the
+Code generation obtains a verified Buf executable from the Cargo-resolved
 [`buf-tools`](https://crates.io/crates/buf-tools) build dependency and feeds its
 descriptor set to [`buffa-build`](https://crates.io/crates/buffa-build).
+The workspace manifest declares the minimum `buf-tools` version requirement.
 Neither a system `buf` nor a system `protoc` installation is required.
 
 ## The Signature Document

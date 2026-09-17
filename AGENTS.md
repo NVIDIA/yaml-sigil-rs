@@ -303,27 +303,29 @@ executable WebAssembly, installers, containers, retained CI or build outputs,
 GitHub Release assets, or separately generated source archives. Local and
 ephemeral compilation remains permitted for validation.
 
-The xtask resolves its Buf executable through the same pinned `buf-tools`
-version used by `yaml-sigil-core` at build time. A system `buf` or `protoc`
+The xtask and `yaml-sigil-core` resolve their Buf executables through
+`buf-tools` using the same minimum version requirement. Their separate Cargo
+lockfiles may select different compatible releases. A system `buf` or `protoc`
 installation is not required. Follow the coordinated upgrade workflow below
 when changing any Buf-related version or installation control.
 
 ## Coordinated Buf upgrades
 
-Publishing a new `buf-tools` release does not automatically update any
-YamlSigil repository. Use coordinated pull requests to update every applicable
-pin and verification surface. Do not infer its crate version from the upstream
-Buf CLI version.
+Cargo may select a newer compatible `buf-tools` release when resolving
+dependencies. Use coordinated pull requests to raise every applicable minimum
+requirement and verification surface. Do not infer the crate version from the
+upstream Buf CLI version.
 
 The controls have distinct roles:
 
 - `buf-tools` is the Rust build dependency used by this workspace and its
-  xtask. Its version may contain a suffix such as `-hotfix.N`; do not derive it
-  mechanically from the Buf CLI version. Update the exact pins in `Cargo.toml`
-  and `xtask/Cargo.toml`, then regenerate the committed `xtask/Cargo.lock`.
+  xtask. Its release suffix can differ from the Buf CLI version. Update the
+  minimum requirements in `Cargo.toml` and `xtask/Cargo.toml`, then regenerate
+  the committed `xtask/Cargo.lock`.
   The root workspace intentionally does not commit `Cargo.lock`, so do not add
   it merely for a Buf upgrade. CI obtains the executable only through this
-  exact crate dependency; do not add a second provider-specific installer.
+  Cargo-resolved crate dependency; do not add a second provider-specific
+  installer.
 - `buf.lock` locks BSR or module dependencies, not the installed Buf CLI
   version. Do not update it solely because the CLI or `buf-tools` changed.
 
@@ -331,12 +333,12 @@ Coordinate these repository-specific surfaces:
 
 - In `yaml-sigil-rs`, update `Cargo.toml`, `xtask/Cargo.toml`,
   `xtask/Cargo.lock`, the provider-neutral Buf checks in `xtask/src/ci.rs`, and
-  their exact command documentation. Candidate CI obtains Buf through the same
-  pinned `buf-tools` dependency.
+  their command documentation. Candidate CI obtains Buf through the same
+  Cargo-resolved `buf-tools` dependency.
 - In `yaml-sigil-spec`, update its ordinary and protected
-  `bufbuild/buf-action` configuration, protected runner pin, and policy tests.
-  It has no product `buf-tools` dependency unless its current source proves
-  otherwise.
+  `buf-toolchain` Cargo installation requirements, installer validation, and
+  provider-neutral minimum CLI check. It has no product `buf-tools` dependency
+  unless its current source proves otherwise.
 - In `yaml-sigil-traits`, update only applicable current validation surfaces.
   It otherwise has no independent Buf product dependency unless its current
   source proves otherwise.
@@ -345,7 +347,7 @@ For each future coordinated upgrade:
 
 - Review the selected Buf and `buf-tools` releases and confirm their published
   mapping.
-- Make one coordinated change that updates every applicable pin and
+- Make one coordinated change that updates every applicable minimum and
   verification surface.
 - Regenerate only Cargo lockfiles already committed by the affected
   repository.
@@ -354,7 +356,7 @@ For each future coordinated upgrade:
   actionlint, and Markdown checks.
 - Require successful ordinary and App-owned protected CI at the exact reviewed
   heads.
-- Confirm that CI used the pinned `buf-tools` executable and retained no
+- Confirm that CI used the Cargo-resolved `buf-tools` executable and retained no
   artifacts.
 
 Install `rumdl`, exact `cargo-audit` `0.22.2`, exact `cargo-deny` `0.20.2`,
