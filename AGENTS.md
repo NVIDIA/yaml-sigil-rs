@@ -407,7 +407,8 @@ Coordinate these repository-specific surfaces:
 - In `yaml-sigil-rs`, update `Cargo.toml`, `xtask/Cargo.toml`,
   `xtask/Cargo.lock`, the provider-neutral Buf checks in `xtask/src/ci.rs`, and
   their command documentation. Candidate CI obtains Buf through the same
-  Cargo-resolved `buf-tools` dependency.
+  Cargo-resolved `buf-tools` dependency. Keep the build dependency in
+  `tests/downstream/buffa-0-5/Cargo.toml` aligned with the workspace minimum.
 - In `yaml-sigil-spec`, update its ordinary and protected
   `buf-toolchain` Cargo installation requirements, installer validation, and
   provider-neutral minimum CLI check. It has no product `buf-tools` dependency
