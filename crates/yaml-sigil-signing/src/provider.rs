@@ -18,12 +18,12 @@
 //!
 //! Implement [`signature::Signer<[u8; 64]>`](signature::Signer) for a type you
 //! own that holds or borrows your provider's initialized key handle. Add a
-//! direct dependency on `signature` 2.2 to implement this contract. The adapter
+//! direct dependency on `signature` 3.0 to implement this contract. The adapter
 //! must be [`Sync`], and its `try_sign` method returns exactly 64 signature
 //! octets or a [`signature::Error`]. Operation errors become
 //! [`SignError::KeyOperationFailure`].
 //!
-//! This example wraps a borrowed `p256` 0.13 key. Replace the wrapper's field
+//! This example wraps a borrowed `p256` 0.14 key. Replace the wrapper's field
 //! and signing call with your provider's handle and message-signing operation.
 //! The builder receives an adapter reference and public-key bytes without
 //! requiring private-key export. The `p256` signing call applies SHA-256, so
@@ -51,7 +51,7 @@
 //!     payload: &[u8],
 //! ) -> Result<SignOutcome, ProviderSigningKeyError> {
 //!     let adapter = P256Signer(native_key);
-//!     let public_key = native_key.verifying_key().to_encoded_point(false);
+//!     let public_key = native_key.verifying_key().to_sec1_point(false);
 //!     let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(
 //!         &adapter,
 //!         public_key.as_bytes(),
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(ed_error.algorithm(), AlgorithmId::Ed25519);
 
         let p256_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
-        let compressed = p256_key.verifying_key().to_encoded_point(true);
+        let compressed = p256_key.verifying_key().to_sec1_point(true);
         let p256_error =
             ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, compressed.as_bytes())
                 .build_unqualified()
@@ -463,7 +463,7 @@ mod tests {
         let message = b"high-S provider output";
         let signature: p256::ecdsa::Signature =
             signature::Signer::try_sign(&signing_key, message).unwrap();
-        let low_signature = signature.normalize_s().unwrap_or(signature);
+        let low_signature = signature.normalize_s();
         let (r, _) = low_signature.split_bytes();
         let high_s: p256::FieldBytes = (-low_signature.s()).into();
         let high_signature = p256::ecdsa::Signature::from_scalars(r, high_s)
@@ -471,7 +471,7 @@ mod tests {
             .to_bytes()
             .into();
         let signer = FixedSigner(high_signature);
-        let public_key = signing_key.verifying_key().to_encoded_point(false);
+        let public_key = signing_key.verifying_key().to_sec1_point(false);
         let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
             .build()
             .unwrap();

@@ -5,7 +5,8 @@
 
 use ed25519_dalek::SigningKey as EdSigningKey;
 use p256::ecdsa::SigningKey as P256SigningKey;
-use rand_core::OsRng;
+use p256::elliptic_curve::Generate;
+use rand::rngs::SysRng;
 use yaml_sigil_core::{
     AlgorithmId, CoreError, DecompositionOutcome, ProtobufWireDecodeAdvertisement,
     YamlSignatureDocumentDuplicateKeyPolicy, YamlSignatureDocumentUnknownFieldPolicy,
@@ -32,7 +33,7 @@ fn ed25519_pair() -> (EdSigningKey, ed25519_dalek::VerifyingKey) {
 }
 
 fn p256_pair() -> (P256SigningKey, p256::ecdsa::VerifyingKey) {
-    let sk = P256SigningKey::random(&mut OsRng);
+    let sk = P256SigningKey::try_generate_from_rng(&mut SysRng).expect("generate key");
     let vk = *sk.verifying_key();
     (sk, vk)
 }

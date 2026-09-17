@@ -51,6 +51,20 @@ free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
+The private backend updates to `noyalib` `0.0.43` and `jsonschema` `0.56`
+retain the expected `yaml-signature-conformance/` and `schema-alignment/`
+outcomes. Parser budgets, canonical YAML, and fixture bytes do not change.
+The downstream Serde fixture still uses `noyalib` `0.0.35` to check the public
+boundary across versions.
+
+The `0.6` crypto dependency update uses `ed25519-dalek` 3, `curve25519-dalek` 5,
+`p256` 0.14, `signature` 3, and `sha2` 0.11. The `alg-ed25519/` and
+`alg-ecdsa/` suites retain their expected outcomes, including canonical
+mixed-order Ed25519 acceptance, noncanonical and small-order key rejection,
+and P-256 high-S/low-S acceptance. Provider qualification and artifact round
+trips exercise the new public key types. Fixture bytes, signature encodings,
+and deliberate divergences do not change.
+
 The unpublished WebAssembly boundary adds local regression coverage in
 `crates/yaml-sigil-wasm/tests/wasm.rs` and
 `crates/yaml-sigil-wasm/tests/generated_api.cjs`. Its opt-in bounded operations

@@ -143,6 +143,20 @@ uses a blocking worker with a private key store and awaits channel replies.
 It demonstrates both choices with fresh P-256 keys and no external service.
 The `ring` and `aws-lc-rs` examples demonstrate synchronous adapters only.
 
+The [`github-keys` example](../examples/github-keys/README.md#ssh-agent-signing)
+uses `russh` for asynchronous SSH-agent signing with an existing Ed25519 key.
+Its [walkthrough](../examples/github-keys/README.md#walkthrough) starts with a
+protected demo key and offline signing before introducing GitHub discovery.
+Omitting `--signer` uses supported agent identities. A username or explicit
+public key restricts the accepted keys. Either mode can filter by fingerprint.
+Signing requires one matching agent key, binds its public key, and uses
+qualified signing with an artifact limit. Verification tries selected public
+keys locally through the default RustCrypto API, without signing requests.
+An explicit verification signer needs no agent. The agent interface does not
+reveal key protection.
+The adapter owns connection and request timeouts. Dropping a signing request
+closes its connection without retrying or claiming to undo the agent's work.
+
 ## Qualification and error handling
 
 The costs below follow the current implementation's operations and allocation
@@ -313,11 +327,12 @@ adapters. It is narrower than a guarantee about an integrator's provider.
 | Protection against an adapter deliberately evading qualification. | Not provided; the adapter is trusted code. | Not provided. | Not provided by implementing traits. |
 | Runnable YAML examples with fresh keys, file/stdin/default input, and independent checking of printed output. | Native examples test qualified signing for both algorithms and qualified P-256 verification; the async example tests qualified P-256. | The dedicated `ring` example tests both operations unqualified for both algorithms without qualification; the async example tests unqualified P-256. | No runnable custom direct-trait example; default trait implementations run workspace tests. |
 | Borrowed clients and keys, `Send + Sync`, pending/wake/drop behavior. | Tested with controllable async adapters. | Borrowed-key round trips are tested; shared async plumbing retains the same contracts. | External traits require `Send`; runtime behavior of custom implementations is not tested here. |
+| SSH-agent Ed25519 signing with a selected public key. | `github-keys` tests exact messages, key selection, refusals, malformed replies, wrong-key signatures, timeout, and cancellation. An opt-in Unix test uses an isolated OpenSSH agent. | No agent example. | No custom agent trait implementation. |
 | Bounded signing rejects early and checks the exact final output. | Tested for both algorithms and forms, sync and async. | Tested for both algorithms and forms, sync and async. | Custom operations must implement their own policy. |
 | Input-size rejection before artifact-dependent provider verification. | Existing shared admission helper is available. | Tested with an operation counter. | Custom operations must select and test admission. |
 | Every applicable conformance fixture against each provider. | Not tested. | Not tested. | Default implementations run the workspace fixture suites; arbitrary associated key types need test-driver adaptation. |
 | RNG quality, nonce-generation policy, constant-time behavior, side channels, key storage, and service authorization. | Not established by qualification or output self-verification. | Not established. | Not established by implementing traits. |
-| Real SDK scheduling, network cancellation, timeouts, rate limits, and all deployment platforms. | Not tested. | Not tested. | Integrator-owned. |
+| Real SDK scheduling, network cancellation, timeouts, rate limits, and all deployment platforms. | Integrator-owned; the agent example's focused tests do not cover every agent or platform. | Not tested. | Integrator-owned. |
 | FIPS validation or other certification. | Not established. | Not established. | Not established. |
 
 Evidence lives in the signing unit tests,
@@ -361,13 +376,18 @@ build, or deployment as FIPS validated.
 
 ## Existing RustCrypto types
 
-The convenience APIs continue to expose the supported `ed25519-dalek` 2.x
-and `p256` 0.13 key types. This is a deliberate public dependency for now.
-Keeping them avoids another conversion layer for existing RustCrypto users.
-It also means a future incompatible dependency version can require public API
-migration; Cargo can treat types from incompatible versions as distinct.
-See Cargo's
+The `0.6` convenience APIs expose `ed25519-dalek` 3.x and `p256` 0.14
+key types. Synchronous provider adapters implement `signature` 3.x traits.
+Update your direct dependencies together; Cargo treats types and traits from
+incompatible versions as distinct. See Cargo's
 [version incompatibility guidance](https://doc.rust-lang.org/cargo/reference/resolver.html#version-incompatibility-hazards).
+
+For P-256, replace `to_encoded_point` with `to_sec1_point` and `SigningKey::random`
+with the `p256::elliptic_curve::Generate` trait. The
+[`async-provider` example](../examples/async_provider.rs) uses
+`try_generate_from_rng` with `rand` 0.10's fallible `SysRng`.
+Public-key bytes, signature encodings, and the external `yaml-sigil-traits`
+contracts retain their existing formats and behavior.
 
 You can own an application wrapper and implement `TryFrom` into these existing
 public types when conversion validates public bytes, or `From` when it is
