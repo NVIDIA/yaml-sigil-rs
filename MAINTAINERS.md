@@ -80,6 +80,14 @@ Finalization uses [explicit guarded Latest selection](#latest-selection-during-f
 Main stable releases advance Latest; prereleases, support releases, and older
 main recovery preserve it.
 
+### Maintain dependency license exceptions
+
+Review the resolved dependency's license terms before changing an exception.
+Keep each exception scoped to its intended crate, license, and version range,
+and explain its purpose and scope in an adjacent Cargo Deny configuration
+comment. After dependency or policy changes, run the documented Cargo Deny
+checks for every affected dependency graph.
+
 ### Diagnose copied-ref binding failures
 
 The anonymous binder reports the failed endpoint, HTTP status, request ID,
@@ -663,3 +671,19 @@ the repository.
 Within one version, the compiled package order remains core, transcription,
 signing, verification. A retry cannot move Latest from a later package back
 to an earlier package of that same version.
+
+## Review support-line contributions
+
+After a line is separately activated and advertised, its PR base may be the
+canonical `support/M.N`, with each component between 0 and 999999999 and no
+leading zeros. Protected current main still supplies candidate policy. Bind
+the exact main policy, support-base SHA, and reviewed head, then require the
+App-owned `Required CI [refs/heads/support/M.N]` result for that same triple.
+A main or another line's check does not qualify the head.
+
+Ordinary backports use the existing candidate path. A same-repository
+`release-plz-manual-VERSION` branch may target support only when its version's
+major and minor match the base. Detached validation receives that exact base
+explicitly; release paths and package validators retain their repository's
+existing boundaries. Support admission creates no publication authority and
+activates no support ref or ruleset.

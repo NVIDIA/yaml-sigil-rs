@@ -368,7 +368,7 @@ cargo +1.98.0 install --locked cargo-deny --version 0.20.2
 cargo +1.98.0 install --locked cargo-machete --version 0.9.2
 ```
 
-Cargo Deny reads the repository-wide policy from `deny.toml` and the exact
+Cargo Deny reads the repository-wide policy from `deny.toml` and the crate-specific
 license exceptions for each graph from the nearest `deny.exceptions.toml`.
 The root check resolves the uncommitted workspace graph, while the xtask check
 uses its committed lockfile. The xtask command suppresses only warnings for
@@ -438,7 +438,7 @@ The surviving provider helpers have deliberately narrow roles:
   identities before the scoped App creates the base-specific required verdict.
 - `bind-candidate-pr.py` anonymously binds the open pull request, exact
   contribution base, protected current `main`, copied ref, ordered commit
-  inventory, and optional main-only canonical release branch before source
+  inventory, and optional canonical main or support release branch before source
   materialization.
 - `materialize-candidate.sh` and its tests perform anonymous exact-head
   materialization while rejecting filters, ancestor Cargo configuration, and

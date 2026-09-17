@@ -1,5 +1,7 @@
-# These licenses are restricted to exact crates in the developer-tool graph.
+# Unicode-3.0 is restricted to unicode-ident 1.0.x patches.
+# The other license exception remains exact in the developer-tool graph.
 exceptions = [
-    { allow = ["Unicode-3.0"], crate = "unicode-ident@1.0.24" },
+    # Permit proc-macro patch updates within 1.0.x under the same license approval.
+    { allow = ["Unicode-3.0"], crate = "unicode-ident:1.0.*" },
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots@1.0.9" },
 ]

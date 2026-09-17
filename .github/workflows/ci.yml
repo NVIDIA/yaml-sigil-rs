@@ -500,6 +500,7 @@ jobs:
           CARGO_BIN: ${{ steps.tools.outputs.cargo }}
           PATH: ${{ steps.tools.outputs.path }}
           RELEASE_BRANCH: ${{ steps.pull.outputs.release_branch }}
+          RELEASE_BASE_REF: ${{ steps.pull.outputs.base_ref }}
         run: |
           # Only a binder-validated canonical branch enters release-source
           # validation; ordinary candidates skip this release-specific command.
@@ -512,7 +513,7 @@ jobs:
             rm -- Cargo.lock
             release_version="${RELEASE_BRANCH#release-plz-manual-}"
             "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- \
-              release check --base-ref refs/heads/main --version "${release_version}"
+              release check --base-ref "${RELEASE_BASE_REF}" --version "${release_version}"
           fi
           "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- ci
         working-directory: ${{ runner.temp }}/candidate-source
