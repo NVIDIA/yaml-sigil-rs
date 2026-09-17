@@ -768,3 +768,5 @@ retain the same base/source/version/operation. A changed main policy requires
 a new dispatch. All privileged jobs and existing environments remain main-only,
 and publication is serialized across the whole repository. Each recovery
 receives fresh applicable environment approvals; an older approval is not reused.
+
+<!-- Inert coordination CI reporter canary; close without merging. -->
