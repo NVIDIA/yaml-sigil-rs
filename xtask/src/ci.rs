@@ -18,7 +18,7 @@ const CARGO_DENY_INSTALL_GUIDANCE: &str =
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str =
     "cargo +1.98.0 install --locked cargo-machete --version 0.9.2";
 #[cfg(test)]
-const BUF_VERSION: &str = "1.72.0";
+const BUF_VERSION_REQUIREMENT: &str = ">=1.73.0";
 
 #[derive(Clone, Copy, Debug)]
 struct Step {
@@ -204,20 +204,25 @@ mod tests {
     }
 
     #[test]
-    fn pinned_buf_tools_path_has_exact_cli_version() {
+    fn buf_tools_path_meets_minimum_cli_version() {
         let path = buf_tools::buf_bin_path();
         assert!(path.is_absolute());
         assert!(path.is_file());
         let output = Command::new(path)
             .arg("--version")
             .output()
-            .expect("execute pinned Buf CLI");
+            .expect("execute Cargo-resolved Buf CLI");
         assert!(output.status.success());
-        assert_eq!(
+        let version = semver::Version::parse(
             std::str::from_utf8(&output.stdout)
                 .expect("Buf version is UTF-8")
                 .trim(),
-            BUF_VERSION
+        )
+        .expect("Buf reports a semantic version");
+        let requirement = semver::VersionReq::parse(BUF_VERSION_REQUIREMENT).unwrap();
+        assert!(
+            requirement.matches(&version),
+            "unsupported Buf CLI: {version}"
         );
     }
 

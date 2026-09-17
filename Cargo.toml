@@ -38,7 +38,7 @@ yaml-sigil-verification = { version = "0.5.1", path = "crates/yaml-sigil-verific
 yaml-sigil-signing = { version = "0.5.1", path = "crates/yaml-sigil-signing", default-features = false }
 
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
-buf-tools = "=1.72.0-hotfix.2"
+buf-tools = ">=1.73.0-rc.3"
 buffa = "0.5"
 buffa-build = "0.5"
 # Keep precomputed tables explicit for workspace consumers with defaults off.
