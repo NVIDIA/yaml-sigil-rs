@@ -2,11 +2,12 @@ name: CI
 
 on:
   push:
-    # Coordination refs run the same non-publishing matrix; rollback refs do
+    # Coordination and support refs run the non-publishing matrix; rollback refs do
     # not match and never execute CI or release policy.
     branches:
       - main
       - dev/*.*.*
+      - support/*.*
       - ci-testing/*
       - pull-request/[0-9]+
 
@@ -22,6 +23,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' ||
       startsWith(github.ref, 'refs/heads/dev/') ||
+      startsWith(github.ref, 'refs/heads/support/') ||
       startsWith(github.ref, 'refs/heads/ci-testing/')
     runs-on: linux-amd64-cpu8
     timeout-minutes: 75
@@ -102,7 +104,9 @@ jobs:
         run: .github/scripts/test-check-release-pull-request.sh
 
       - name: Test local release source attachment
-        run: .github/scripts/test-attach-release-source.sh
+        run: |
+          .github/scripts/test-attach-release-source.sh
+          .github/scripts/test-bind-release-invocation.sh
 
       - name: Lint GitHub Actions workflows
         uses: devops-actions/actionlint@9fb9c192862f19e684586ca84b500461bcd8a541 # v0.1.12 (actionlint v1.7.12)
@@ -120,6 +124,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' ||
       startsWith(github.ref, 'refs/heads/dev/') ||
+      startsWith(github.ref, 'refs/heads/support/') ||
       startsWith(github.ref, 'refs/heads/ci-testing/')
     runs-on: linux-amd64-cpu8
     timeout-minutes: 60
@@ -152,6 +157,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' ||
       startsWith(github.ref, 'refs/heads/dev/') ||
+      startsWith(github.ref, 'refs/heads/support/') ||
       startsWith(github.ref, 'refs/heads/ci-testing/')
     continue-on-error: true
     runs-on: ${{ matrix.runner }}
