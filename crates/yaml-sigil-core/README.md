@@ -152,9 +152,9 @@ The YAML and protobuf algorithm identifiers map as follows:
 
 Protobuf wire value `0`, `ALGORITHM_UNSPECIFIED`, is invalid. Read the
 `yaml-sigil` specification for the complete
-[signature-document semantics](https://github.com/NVIDIA/yaml-sigil-spec/blob/bcfa1e05a61fc27c6fd814a3910e7a24a560f038/README.md#the-signature-document)
+[signature-document semantics](https://github.com/NVIDIA/yaml-sigil-spec/blob/98140c77464af0a1cae2c6a650a1adeb9493e5f2/README.md#the-signature-document)
 and
-[base64 requirements](https://github.com/NVIDIA/yaml-sigil-spec/blob/bcfa1e05a61fc27c6fd814a3910e7a24a560f038/base64-requirements.md).
+[base64 requirements](https://github.com/NVIDIA/yaml-sigil-spec/blob/98140c77464af0a1cae2c6a650a1adeb9493e5f2/base64-requirements.md).
 
 ## Third-party material
 
