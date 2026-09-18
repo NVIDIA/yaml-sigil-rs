@@ -10,7 +10,7 @@ below from the repository root.
 | [`ring_provider.rs`](./ring_provider.rs) | Native `ring` signing and verification adapters. |
 | [`aws_lc_provider.rs`](./aws_lc_provider.rs) | Native `aws-lc-rs` signing and verification adapters. |
 | [`ring_unqualified_provider.rs`](./ring_unqualified_provider.rs) | Explicitly unqualified `ring` signing and verification, with implementer-owned compatibility risk. |
-| [`async_provider.rs`](./async_provider.rs) | Awaitable P-256 signing, binding, qualification, and verification through a simulated service. |
+| [`async_provider.rs`](./async_provider.rs) | Awaitable P-256 signing and verification through a simulated service, including key binding and qualification. |
 | [`github-keys`](./github-keys/README.md) | Ed25519 signing and local verification with agent identities, an explicit public key, or GitHub discovery. |
 | [`yaml_facade.rs`](./yaml_facade.rs) | YAML signature-document parsing and serialization through the core facade. |
 | [`protobuf_facade.rs`](./protobuf_facade.rs) | Core protobuf encoding, owned and borrowed decoding, and wire interoperability with Prost. |
@@ -75,8 +75,9 @@ optional isolated OpenSSH test.
 ## Shared modules
 
 The [`cli-common` module](./cli-common/mod.rs) contains shared CLI helpers.
-Currently it provides the local provider examples' `clap` interface, input
-handling, YamlSigil operations, output formatting, and test helpers.
+It defines the local provider examples' `clap` interface and connects input
+handling to YamlSigil operations. It also formats output and supplies test
+helpers.
 The [`yaml_io` helpers](./cli-common/yaml_io.rs) share YAML file, standard-input,
 and default-document handling and transcript output across the provider examples.
 The [`key_type` module](./cli-common/key_type.rs) supplies key selection for
@@ -86,18 +87,19 @@ qualified or unqualified operations.
 
 ## Local cryptographic providers
 
-The `ring-provider` and `aws-lc-provider` commands generate a fresh random key,
-sign a YAML document, and verify the resulting artifact through public
-provider adapters. Native key generation, signing, verification, and key
-binding live in [`cli-common/ring.rs`](./cli-common/ring.rs) and
-[`aws_lc_provider.rs`](./aws_lc_provider.rs). Comments explain the contracts
-at each layer. The options and behavior below apply to these two commands.
-They implement synchronous provider operations. They do not implement
-`AsyncProviderSigner`, `AsyncProviderVerifier`, or an awaitable factory, and
-putting their calls inside an async function would still execute their native
-cryptography synchronously. Use the async example below for that integration
-contract and the [provider guide](../docs/crypto-providers.md) for the three
-supported integration choices and their tested boundaries.
+The `ring-provider` and `aws-lc-provider` commands sign a YAML document with a
+fresh random key, then verify the artifact through public provider adapters.
+[`cli-common/ring.rs`](./cli-common/ring.rs) and
+[`aws_lc_provider.rs`](./aws_lc_provider.rs) contain the native cryptographic
+operations and key bindings, with comments explaining each layer's contract.
+The options and behavior below apply to both commands.
+
+These examples use synchronous providers. Wrapping their calls in an async
+function still runs the native cryptography synchronously. They do not
+implement `AsyncProviderSigner` or `AsyncProviderVerifier`, and they have no
+awaitable factory. Use the async example below for that integration contract.
+The [provider guide](../docs/crypto-providers.md) describes the three supported
+integration choices and their tested boundaries.
 
 ```shell
 cargo run --package yaml-sigil-examples --example ring-provider
@@ -179,8 +181,8 @@ targets with `test = true`. The existing `cargo xtask ci` sequence compiles
 them during all-target Clippy and executes their tests during
 `cargo test --workspace --all-features`.
 
-Each target tests its `clap` command and signs and verifies default, file, and
-standard-input documents with both key types. The tests exercise the same
+Each target tests its `clap` command and both key types. Round trips cover the
+default document and inputs from files or stdin. The tests exercise the same
 operation as the CLI, then verify the printed artifact using the printed
 public key. Run only these tests with the following command.
 
@@ -197,10 +199,10 @@ cargo test --package yaml-sigil-examples
 > of whether its cryptographic behavior meets your requirements. A native
 > round trip does not establish YamlSigil compatibility.
 
-[`ring_unqualified_provider.rs`](./ring_unqualified_provider.rs) makes the
-unqualified builder, signing, and verification calls visible in its entry
-point. It supports both P-256 and Ed25519 and generates a fresh random key on
-each run. The native adapters come from
+[`ring_unqualified_provider.rs`](./ring_unqualified_provider.rs) calls the
+unqualified builders directly from its entry point and uses the unqualified
+signing and verification operations. It supports P-256 and Ed25519 and generates
+a fresh random key on each run. The native adapters come from
 [`cli-common/ring.rs`](./cli-common/ring.rs). Neither the operation nor its
 tests require qualification, and it never retries through another path.
 
@@ -231,17 +233,18 @@ difference is acceptable for your integration; running this example does
 not resolve it. The [provider guide](../docs/crypto-providers.md) describes
 the three supported paths and the evidence needed for a conformance claim.
 
-Workspace CI compiles this target and runs its parser and default, file, and
-stdin round trips for both key types. The tests independently verify the
-printed artifact with its printed public key through the RustCrypto
-convenience API. That checks these generated samples and the example's
-wiring; it does not qualify the adapter or cover every possible input.
+Workspace CI compiles this target and tests its parser and both key types.
+Round trips cover the default document and inputs from files or stdin. The
+tests independently verify the printed artifact with its printed public key
+through the RustCrypto convenience API. That checks these generated samples and
+the example's wiring; it does not qualify the adapter or cover every possible
+input.
 Run these tests with `cargo test --package yaml-sigil-examples`.
 
 ## Asynchronous provider
 
-The `async-provider` command generates a fresh P-256 key inside a simulated
-service worker, signs a YAML document, and verifies it. It implements
+The `async-provider` command signs and verifies a YAML document using a fresh
+P-256 key generated inside a simulated service worker. It implements
 `AsyncProviderSigner`, `AsyncProviderVerifier`, and
 `AsyncProviderVerifierFactory`, then uses the provider-backed `AsyncSigner`
 and `AsyncVerifier` facades. The factory and its handles borrow a client.
@@ -276,8 +279,9 @@ not bound payload size, and dropping an awaiting request does not undo work
 already accepted by the worker. A real adapter owns SDK scheduling, deadlines,
 remote cancellation, concurrency, and retry policy.
 
-The target has `test = true`, so the existing workspace Clippy and test stages
-compile it and run its parser and default, file, and stdin round trips in
-both modes. Tests independently verify the printed artifact using the printed
-public key. The command `cargo test --package yaml-sigil-examples` runs these
-tests together with the native provider examples.
+The target has `test = true`, so workspace CI compiles it with Clippy and runs
+its tests. These cover the parser and round trips in both provider modes,
+using the default document and inputs from files or stdin. Tests independently
+verify the printed artifact using the printed public key. The command
+`cargo test --package yaml-sigil-examples` runs these tests together with the
+native provider examples.

@@ -3,10 +3,10 @@
 > [!IMPORTANT]
 > WebAssembly support is currently experimental.
 
-`yaml-sigil-wasm` exposes YAML Sigil compose, decompose, sign, and verify
-operations to browser and Node.js JavaScript through
-`wasm32-unknown-unknown`. It delegates protocol processing to the Rust
-implementation crates in this workspace.
+`yaml-sigil-wasm` exposes YAML Sigil artifact composition and decomposition
+to browser and Node.js JavaScript through `wasm32-unknown-unknown`. It also
+provides signing and verification. Protocol processing runs in this workspace's
+Rust implementation crates.
 
 This experimental crate is distributed as a crates.io source package starting
 with `0.6.0-rc.1`. Its JavaScript API may change before stabilization. The repository

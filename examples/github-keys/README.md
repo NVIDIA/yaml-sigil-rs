@@ -291,9 +291,10 @@ local copy before signing. URL input is signed without a preview; HTTP permits
 substitution in transit and HTTPS authenticates only the server connection.
 
 Omitting `--output` writes the exact signed artifact to stdout. Progress and
-results stay on stderr, ending with `====== STATUS ======`. Combining the two
-streams produces a transcript, not a YAML document. Payloads may contain
-terminal controls, so send untrusted output to a new file with `--output`.
+results stay on stderr, ending with `====== STATUS ======`. Keep the streams
+separate when capturing a YAML artifact; combining them produces a transcript.
+Payloads may contain terminal controls, so send untrusted output to a new file
+with `--output`.
 
 ### Progress stages
 
@@ -333,13 +334,12 @@ These fixtures distinguish signature validity from application validity.
 | [`changed-keyid.yaml`](./fixtures/changed-keyid.yaml) | Success. | Changing the unsigned `keyid` hint leaves the signature intact; verification still uses the caller-selected signer. |
 | [`signed-application-invalid.yaml`](./fixtures/signed-application-invalid.yaml) | Success. | The signature matches even though `port: not-an-integer` violates the illustrative application's integer-port rule. |
 
-> [!NOTE]
-> The last sample signs [`application-invalid.yaml`](./fixtures/application-invalid.yaml).
-> The example performs no application-level port check. Syntactically acceptable
-> YAML and a matching signature do not imply a usable application configuration.
-> The `changed-keyid.yaml` sample verifies in both username and direct-key modes
-> because changing the hint leaves the payload's cryptographic signature intact.
-> The unsigned and tampered samples fail in both modes.
+The last sample signs [`application-invalid.yaml`](./fixtures/application-invalid.yaml).
+The example performs no application-level port check. Syntactically acceptable
+YAML and a matching signature do not imply a usable application configuration.
+The `changed-keyid.yaml` sample verifies in both username and direct-key modes
+because changing the hint leaves the payload's cryptographic signature intact.
+The unsigned and tampered samples fail in both modes.
 
 ### Fixture provenance
 
