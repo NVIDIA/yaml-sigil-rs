@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-verification-v0.5.1...yaml-sigil-verification-v0.6.0-rc.1) - 2026-09-18
+
+### Added
+
+- *(crypto)* [**breaking**] upgrade dependencies and SSH-agent example ([#140](https://github.com/NVIDIA/yaml-sigil-rs/pull/140))
+- *(wasm)* add resource-aware JavaScript bindings
+- *(crypto)* add async providers and runnable examples
+- *(verification)* add provider qualification
+- add opt-in artifact resource limits ([#107](https://github.com/NVIDIA/yaml-sigil-rs/pull/107))
+- *(core)* [**breaking**] hide Buffa behind protobuf facade
+
+### Fixed
+
+- *(crypto)* preserve thread safety and isolate provider key bindings
+
+### Other
+
+- editorial pass ([#159](https://github.com/NVIDIA/yaml-sigil-rs/pull/159))
+- document local cryptographic providers
+- *(core)* document protobuf security boundaries
+
 ## [0.5.0](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-verification-v0.5.0-rc.2...yaml-sigil-verification-v0.5.0) - 2026-09-06
 
 ### Other
