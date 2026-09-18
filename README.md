@@ -31,7 +31,8 @@ Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before proposing a change.
 
 ## Crates
 
-The workspace publishes four crates. Most applications start with
+The workspace provides four Rust implementation crates and a WebAssembly
+binding crate. Most Rust applications start with
 `yaml-sigil-signing` when producing signed documents and
 `yaml-sigil-verification` when accepting them. The core and transcription
 crates provide the shared document handling used by those higher-level APIs.
@@ -66,11 +67,8 @@ serialization through the core API. The
 borrowed decoding and exchanging wire bytes with Prost. Both include
 small runnable examples.
 
-The other released crates build on this layer. Signing uses it to apply the
-document rules and encode signature information. Transcription uses it to take
-artifacts apart and handle protobuf envelopes. Verification uses it to read
-signature information and reject malformed artifacts before checking a
-signature. Most applications therefore use `yaml-sigil-core` indirectly.
+The other implementation crates build on this layer, so most applications use
+`yaml-sigil-core` indirectly.
 
 ### [`yaml-sigil-transcription`](./crates/yaml-sigil-transcription/README.md)
 
@@ -121,9 +119,10 @@ and deciding which public keys are trusted.
 
 ### [`yaml-sigil-wasm`](./crates/yaml-sigil-wasm/README.md)
 
-This unpublished, source-only crate exposes compose, decompose, sign, and
-verify operations to browser and Node.js WebAssembly consumers. The repository
-does not publish or retain generated WebAssembly or an npm package.
+This crate exposes artifact composition and decomposition to browser and
+Node.js WebAssembly consumers, along with signing and verification. Starting
+with `0.6.0-rc.1`, releases include its source package. The repository does not
+publish or retain generated WebAssembly or an npm package.
 The `0.6.0` bindings also expose explicit resource-aware operations with a
 reusable policy. Existing calls retain their unbounded whole-artifact behavior.
 
@@ -167,18 +166,18 @@ rules at this boundary. The provider remains responsible for private-key
 generation quality, entropy, storage, access policy, and operational controls
 that an opaque handle does not expose.
 
-The provider boundary accepts messages, not prehashes, and uses exactly 64
-signature octets. P-256 adapters apply SHA-256 once to the supplied message
-bytes. Provider interoperability and qualification do not establish or imply
-FIPS validation. That claim depends on the provider build, configuration,
-platform, operational boundary, and deployment.
+The provider boundary accepts message bytes and uses exactly 64 signature
+octets. Prehashed input is unsupported. P-256 adapters apply SHA-256 once to
+the supplied message bytes. Provider interoperability and qualification do not
+establish or imply FIPS validation. That claim depends on the provider build,
+configuration, platform, operational boundary, and deployment.
 
 The runnable [`ring` and `aws-lc-rs` examples](./examples/README.md) implement
 the public adapter traits, generate fresh Ed25519 or P-256 keys, and sign and
 verify YAML artifacts. Both use `clap` and run their round-trip tests in CI.
-The [`async-provider` example](./examples/async_provider.rs) demonstrates
-awaitable signing, key binding, qualification, and verification through a
-simulated P-256 service, with both qualified and unqualified modes.
+The [`async-provider` example](./examples/async_provider.rs) signs and verifies
+through a simulated P-256 service. It demonstrates awaitable key binding and
+qualification, with both qualified and unqualified modes.
 
 ### Workspace-only support crates
 
@@ -362,19 +361,20 @@ an import.
 
 ## Release preparation
 
-Release preparation publishes only `yaml-sigil-core`,
-`yaml-sigil-transcription`, `yaml-sigil-signing`, and
-`yaml-sigil-verification` to crates.io. The workspace default, conformance,
-test-key, and xtask packages remain unpublished. Publication creates no
-executable artifacts or GitHub Release assets.
+The release workflow publishes source packages to crates.io for
+`yaml-sigil-core`, `yaml-sigil-transcription`, `yaml-sigil-signing`, and
+`yaml-sigil-verification`. Starting with `0.6.0-rc.1`, releases also include
+`yaml-sigil-wasm`. The workspace default, conformance, test-key, and xtask
+packages remain unpublished. Publication creates no executable artifacts or
+GitHub Release assets.
 
 Maintainers prepare one local, signed release pull request for an explicitly
 selected version. See [`RELEASING.md`](RELEASING.md) for the complete
 procedure. The typed preparation and non-publishing validation commands are:
 
 ```shell
-cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE]
-cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE]
+cargo xtask release prepare --version MAJOR.MINOR.PATCH[-PRERELEASE] --base-ref refs/heads/main
+cargo xtask release check --version MAJOR.MINOR.PATCH[-PRERELEASE] --base-ref refs/heads/main
 ```
 
 ## Developer validation
@@ -390,6 +390,7 @@ cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-core
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-transcription
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signing
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-verification
+cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-wasm
 ```
 
 These checks do not upload anything. The package-content checks only list and

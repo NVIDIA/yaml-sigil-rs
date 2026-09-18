@@ -63,8 +63,8 @@ They demonstrate synchronous operations. The
 [`async-provider` example](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/examples/async_provider.rs)
 demonstrates awaitable operations through a simulated service. The
 [provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
-compares qualified, unqualified, and direct trait implementations and records
-what the implementation checks and tests for each choice.
+describes the checks and tests for each integration choice. It covers qualified
+and explicitly unqualified adapters as well as direct trait implementations.
 
 Use `ProviderSigningKeyBuilder::ed25519` with a 32-octet canonical compressed
 public key or `ProviderSigningKeyBuilder::ecdsa_p256_sha256` with a 65-octet
@@ -112,7 +112,8 @@ Async provider operations do not require a synchronous adapter or a library
 runtime. Clients can be borrowed without a `'static` requirement. Local
 payload preparation and qualified output self-verification remain synchronous;
 the provider's signing operation can suspend. The adapter or caller owns
-blocking-pool placement, timeouts, retries, and remote cancellation semantics.
+blocking-pool placement and timeout policy. It also controls retries and remote
+cancellation semantics.
 
 ## Resource boundaries
 
@@ -139,9 +140,9 @@ result.
 you can lower, raise, or disable that ceiling. Existing signing and transcoding
 functions remain unbounded by this policy. Adoption at the affected trust
 boundary, or an equivalent earlier raw-input bound, is required to protect an
-existing caller. The policy is operational hardening, not YamlSigil `v1alpha1`
-conformance. The 16,384-octet YAML signature-carrier constraint remains
-separate.
+existing caller. This policy provides operational limits without changing
+YamlSigil `v1alpha1` conformance. The 16,384-octet YAML signature-carrier
+constraint remains separate.
 
 ## Third-party material
 

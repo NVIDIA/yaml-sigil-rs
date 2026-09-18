@@ -84,9 +84,9 @@ They demonstrate synchronous operations. The
 [`async-provider` example](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/examples/async_provider.rs)
 demonstrates awaitable operations through a simulated service. The
 [provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
-compares qualified, unqualified, and direct trait implementations and records
-what the implementation checks and tests for each choice. Qualification offers
-narrower evidence than complete conformance.
+describes the checks and tests for each integration choice. It covers qualified
+and explicitly unqualified adapters as well as direct trait implementations.
+Qualification offers narrower evidence than complete conformance.
 
 Implement `ProviderVerifierFactory` to bind canonical public-key bytes to an
 opaque local provider handle. Ed25519 keys use 32 canonical compressed octets.

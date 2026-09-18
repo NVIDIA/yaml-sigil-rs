@@ -1,7 +1,8 @@
 # yaml-sigil-core
 
-`yaml-sigil-core` provides parsing, encoding, and shared document support for
-[`yaml-sigil`](https://github.com/NVIDIA/yaml-sigil-spec#tldr).
+`yaml-sigil-core` parses and encodes
+[`yaml-sigil`](https://github.com/NVIDIA/yaml-sigil-spec#tldr) documents. It
+supplies the shared document helpers used by the API crates.
 
 Use this crate when you need decomposition, payload invariants, signature
 document parsing, protobuf wire helpers, or schema validation. Most callers
@@ -45,15 +46,16 @@ backends accept or emit the same YAML.
 
 Use `parse_signature_document` as the authoritative entry point for untrusted
 YAML signature carriers. Direct Serde deserialization constructs the data model
-without applying YamlSigil's YAML byte limit, parser resource budgets, document
-count, or duplicate-key, merge-key, anchor, and tag policies.
+without applying YamlSigil's YAML byte limit or parser resource budgets. It
+also bypasses the document-count policy and the policies for duplicate keys,
+merge keys, anchors, and tags.
 
 Serde compatibility covers semantic values. It does not promise identical YAML
 acceptance, resource policy, comments, scalar style, field order, or bytes
 across backends. Use `serialize_signature_document` for canonical YAML output.
 Retain the original carrier bytes when forwarding must preserve presentation or
-byte identity. Treat the text inside `CoreError::SignatureYaml` as an unstable
-human diagnostic, not a machine-readable interface.
+byte identity. The text inside `CoreError::SignatureYaml` is an unstable
+diagnostic intended for people. Do not parse it as a machine-readable interface.
 
 The exact-pinned downstream fixture characterizes interoperability between
 `noyalib` releases `0.0.35` and `0.0.43`. This same-library, cross-version test

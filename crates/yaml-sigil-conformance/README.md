@@ -1,14 +1,14 @@
 # yaml-sigil-conformance
 
-`yaml-sigil-conformance` is a workspace-only test harness that drives local
-YamlSigil conformance fixtures through the Rust implementation's public trait
-surfaces and byte-level helpers.
+`yaml-sigil-conformance` runs local YamlSigil conformance fixtures against the
+Rust implementation's public traits and byte-level helpers. This crate is used
+only within the workspace.
 
 ## Implementation key bindings
 
 The shared traits let each implementation choose its signing and verification
-key types. This harness tests the RustCrypto implementation in this workspace,
-so its fixture runners use key types from
+key types. The fixture runners test this workspace's RustCrypto implementation
+with key types from
 [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) and
 [`p256`](https://crates.io/crates/p256). These are the same types accepted by
 [`yaml-sigil-signing`](https://crates.io/crates/yaml-sigil-signing) and
