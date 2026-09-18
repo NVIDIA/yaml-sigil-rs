@@ -123,6 +123,26 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-09-17: Reviewed and refreshed local artifacts from public
+  `NVIDIA/yaml-sigil-spec` `main` at
+  `98140c77464af0a1cae2c6a650a1adeb9493e5f2`, advancing the reviewed revision
+  from `bcfa1e05a61fc27c6fd814a3910e7a24a560f038`. The delta adds a
+  non-normative language implementation kit, a fixture discovery manifest,
+  glossary text, and repository validation and maintenance changes. The kit
+  and manifest do not replace the normative specification or fixture
+  expectations and are not imported into this workspace.
+
+  `cargo xtask update-spec` produces no artifact changes. The local proto,
+  JSON Schema, curated fixture bytes and mappings, expected outcomes,
+  imported and crate-local notices, public contracts, and runtime behavior
+  remain unchanged. The core and conformance README links now identify the
+  reviewed specification revision.
+
+  Public `NVIDIA/yaml-sigil-traits` `main` at
+  `9d35be595f0e5133f01808542740095f8e574169` pins the same specification
+  revision. Its public trait and DTO definitions remain unchanged since the
+  previous review. This workspace already depends on `yaml-sigil-traits`
+  `0.4.0`, so no dependency or API reconciliation is needed.
 - 2026-09-06: Replaced the public generated protobuf types with the
   private-field `yaml_sigil_core::pb` facade. The Buffa 0.5 characterization
   vectors and independent downstream fixture confirm the same field numbers,
