@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.5.1...yaml-sigil-core-v0.6.0-rc.1) - 2026-09-18
+
 ### Added
 
+- *(crypto)* [**breaking**] upgrade dependencies and SSH-agent example ([#140](https://github.com/NVIDIA/yaml-sigil-rs/pull/140))
+- *(wasm)* add resource-aware JavaScript bindings
+- add opt-in artifact resource limits ([#107](https://github.com/NVIDIA/yaml-sigil-rs/pull/107))
+- *(core)* [**breaking**] hide Buffa behind protobuf facade
 - Add opaque owned protobuf messages and zero-copy borrowed views that retain
   unknown fields and unknown algorithm numbers.
+
+### Other
+
+- editorial pass ([#159](https://github.com/NVIDIA/yaml-sigil-rs/pull/159))
+- *(spec)* advance non-normative specification review ([#156](https://github.com/NVIDIA/yaml-sigil-rs/pull/156))
+- *(core)* define serialization backend boundary ([#108](https://github.com/NVIDIA/yaml-sigil-rs/pull/108))
+- *(core)* document protobuf security boundaries
+- *(core)* pin protobuf wire compatibility
+- *(buf)* adopt minimum toolchain requirements ([#148](https://github.com/NVIDIA/yaml-sigil-rs/pull/148))
 
 ### Changed
 

@@ -3,3 +3,20 @@
 All notable changes to this crate are documented in this file.
 
 ## [Unreleased]
+
+## [0.6.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/releases/tag/yaml-sigil-wasm-v0.6.0-rc.1) - 2026-09-18
+
+### Added
+
+- *(release)* enable Wasm source crate publication ([#157](https://github.com/NVIDIA/yaml-sigil-rs/pull/157))
+- *(crypto)* [**breaking**] upgrade dependencies and SSH-agent example ([#140](https://github.com/NVIDIA/yaml-sigil-rs/pull/140))
+- *(wasm)* add resource-aware JavaScript bindings
+
+### Fixed
+
+- *(wasm)* stabilize JavaScript byte input copying
+
+### Other
+
+- editorial pass ([#159](https://github.com/NVIDIA/yaml-sigil-rs/pull/159))
+- *(wasm)* mark WebAssembly support experimental
