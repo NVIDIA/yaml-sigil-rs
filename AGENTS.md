@@ -304,6 +304,7 @@ cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-core
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-transcription
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signing
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-verification
+cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-wasm
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
@@ -322,7 +323,7 @@ cargo audit --file xtask/Cargo.lock
 ```
 
 `cargo xtask wasm` is a separate provider-neutral local check for the
-unpublished `yaml-sigil-wasm` boundary. It requires Rust 1.95.0 with
+source-only `yaml-sigil-wasm` boundary. It requires Rust 1.95.0 with
 `wasm32-unknown-unknown`, `wasm-pack` 0.15.0, Node.js 20 or newer, and
 Firefox:
 
@@ -358,7 +359,7 @@ runner-temporary paths; no policy or privileged step follows candidate Rust.
 
 The static package-content stage runs
 `cargo package --list --allow-dirty --exclude-lockfile --package <crate>` for
-each of the four publishable crates and compares Cargo's modeled paths with the
+each publishable crate and compares Cargo's modeled paths with the
 committed exact inventory under `xtask/package-contents/`. `--allow-dirty`
 permits source-tree inspection without changing tracked files.
 `--exclude-lockfile` prevents Cargo from resolving unpublished local
@@ -369,7 +370,8 @@ stage does not assemble a `.crate` archive or publish anything. Run
 validation with `cargo package` remains release-sequenced.
 
 Publish only `yaml-sigil-core`, `yaml-sigil-transcription`,
-`yaml-sigil-signing`, and `yaml-sigil-verification` as crates.io `.crate`
+`yaml-sigil-signing`, `yaml-sigil-verification`, and `yaml-sigil-wasm`
+(starting at `0.6`) as crates.io `.crate`
 source packages. Keep the workspace default, conformance, test-key, and xtask
 packages unpublished. Do not distribute compiled native executables,
 executable WebAssembly, installers, containers, retained CI or build outputs,

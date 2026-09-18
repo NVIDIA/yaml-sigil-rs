@@ -63,6 +63,7 @@ jobs:
       operation: ${{ steps.qualify.outputs.operation }}
       source_sha: ${{ steps.qualify.outputs.source_sha }}
       version: ${{ steps.qualify.outputs.version }}
+      release_config: ${{ steps.qualify.outputs.release_config }}
       publish: ${{ steps.qualify.outputs.publish }}
       finalize: ${{ steps.qualify.outputs.finalize }}
       registry_state: ${{ steps.qualify.outputs.registry_state }}
@@ -144,7 +145,7 @@ jobs:
           test ! -L Cargo.lock
           test -z "$(git ls-files -- Cargo.lock)"
           rm -- Cargo.lock
-          # Content policy proves the exact four source crates are coherent.
+          # Content policy checks the exact source-version package family.
           cargo xtask release check --base-ref "${BASE_REF}" --version "${RELEASE_VERSION}"
         working-directory: release-source
 
@@ -242,6 +243,8 @@ jobs:
           SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
           RELEASE_OPERATION: ${{ needs.qualify.outputs.operation }}
           QUALIFIED_VERSION: ${{ needs.qualify.outputs.version }}
+          RELEASE_CONFIG: ${{ steps.requalify.outputs.release_config }}
+          INITIAL_RELEASE_CONFIG: ${{ needs.qualify.outputs.release_config }}
         run: |
           # Re-read anonymous live main as the last policy operation before the
           # sole publisher receives this step's read-scoped GitHub token.
@@ -249,10 +252,12 @@ jobs:
             --base-ref "${BASE_REF}" --operation "${RELEASE_OPERATION}" \
             --version "${QUALIFIED_VERSION}" \
             --source-root . --source-sha "${SOURCE_SHA}"
+          # Requalification must retain the fixed source-version configuration.
+          test "${RELEASE_CONFIG}" = "${INITIAL_RELEASE_CONFIG}"
           # release-plz is the sole Cargo publisher and native tag/Release
           # creation is disabled; only this process receives Git association.
           GIT_TOKEN="${{ github.token }}" release-plz release \
-            --config .release-plz.toml \
+            --config "${RELEASE_CONFIG}" \
             --manifest-path Cargo.toml
         working-directory: release-source
 

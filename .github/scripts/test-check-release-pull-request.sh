@@ -237,4 +237,32 @@ git -C "${promotion_repo}" -c user.name=fixture \
   commit --quiet --message=invalid-mode
 reject_promotion HEAD_SHA="$(git -C "${promotion_repo}" rev-parse HEAD)"
 
+# The Wasm paths are release-managed only from 0.6, including prereleases.
+for version in 0.5.1 0.6.0-rc.1 0.6.0 1.0.0; do
+  family_repo="${test_root}/family-${version}"
+  family_base="$(initialize_release_range "${family_repo}")"
+  install -d "${family_repo}/crates/yaml-sigil-wasm"
+  printf '%s\n' '# Changelog' > "${family_repo}/crates/yaml-sigil-wasm/CHANGELOG.md"
+  printf '%s\n' '[workspace]' '[workspace.package]' \
+    "version = \"${version}\"" > "${family_repo}/Cargo.toml"
+  git -C "${family_repo}" add Cargo.toml crates/yaml-sigil-wasm/CHANGELOG.md
+  git -C "${family_repo}" -c user.name=fixture \
+    -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+    commit --quiet --message=release
+  family_head="$(git -C "${family_repo}" rev-parse HEAD)"
+  # Historical sources reject the added Wasm release path before execution.
+  if [[ "${version}" == 0.5.1 ]]; then
+    expect_inventory_rejection "${family_repo}" "${family_base}" \
+      "${family_head}" 'Release proposal changed unexpected path' \
+      "release-plz-manual-${version}"
+  else
+    (
+      cd -- "${family_repo}"
+      BASE_SHA="${family_base}" HEAD_SHA="${family_head}" \
+        YAML_SIGIL_RELEASE_PR_BRANCH="release-plz-manual-${version}" \
+        "${script_dir}/check-release-pull-request.sh"
+    )
+  fi
+done
+
 echo "release pull-request and coordination promotion policy tests passed"

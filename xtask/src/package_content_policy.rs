@@ -26,6 +26,11 @@ pub(crate) const PACKAGE_SPECS: &[PackageSpec] = &[
         inventory_path: "xtask/package-contents/yaml-sigil-verification.txt",
         inventory: include_str!("../package-contents/yaml-sigil-verification.txt"),
     },
+    PackageSpec {
+        name: "yaml-sigil-wasm",
+        inventory_path: "xtask/package-contents/yaml-sigil-wasm.txt",
+        inventory: include_str!("../package-contents/yaml-sigil-wasm.txt"),
+    },
 ];
 
 #[cfg(test)]
@@ -44,6 +49,7 @@ mod tests {
                 "yaml-sigil-transcription",
                 "yaml-sigil-signing",
                 "yaml-sigil-verification",
+                "yaml-sigil-wasm",
             ]
         );
     }

@@ -99,6 +99,15 @@ allowed() {
       crates/yaml-sigil-verification/CHANGELOG.md)
       return 0
       ;;
+    crates/yaml-sigil-wasm/Cargo.toml | crates/yaml-sigil-wasm/CHANGELOG.md)
+      # The Wasm source crate joins the release family at 0.6, including RCs.
+      # Cargo validates canonical SemVer independently after path admission.
+      local major minor _remainder
+      IFS=. read -r major minor _remainder <<< "${head_version}"
+      [[ "${major}" =~ ^(0|[1-9][0-9]{0,8})$ \
+        && "${minor}" =~ ^(0|[1-9][0-9]{0,8})$ ]] || return 1
+      (( major > 0 || minor >= 6 ))
+      ;;
     *)
       return 1
       ;;

@@ -25,7 +25,9 @@ use sha2::{Digest, Sha256};
 
 use crate::bounded_process::{self, OutputLimits, VALIDATION_OUTPUT_LIMITS};
 use crate::release;
-use crate::release_policy::{PackagePolicy, RUST_POLICY, ReleaseLine};
+#[cfg(test)]
+use crate::release_policy::RUST_POLICY;
+use crate::release_policy::{PackagePolicy, ReleaseLine, for_version};
 use crate::versions;
 use transport::{GhCli, Transport};
 
@@ -128,7 +130,7 @@ struct FinalizeArgs {
     /// Exact source commit whose crates are already public.
     #[arg(long, value_name = "SHA")]
     source_sha: String,
-    /// Exact common version of the four published crates.
+    /// Exact common version of the selected source package family.
     #[arg(long)]
     version: Version,
     /// App slug observed from the protected token-minting action.
@@ -299,7 +301,12 @@ fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
     })?
     .ok_or_else(|| "release qualification skipped registry reconciliation".to_string())?;
     require_consistent_objects(&mut github, &arguments.source_sha, &version, line, &states)?;
-    let decision = registry_decision(arguments.operation, &states, arguments.wait_for_registry)?;
+    let decision = registry_decision(
+        arguments.operation,
+        &states,
+        arguments.wait_for_registry,
+        &version,
+    )?;
     binding.verify(&mut github)?;
     append_qualification_outputs(
         &arguments.source_sha,
@@ -309,7 +316,7 @@ fn qualify(root: &Path, arguments: &QualifyArgs) -> Result<(), String> {
     )?;
     println!(
         "qualified {} {} at {} (publish={}, finalize={})",
-        RUST_POLICY.packages.len(),
+        for_version(&version).packages.len(),
         version,
         arguments.source_sha,
         decision.publish,
@@ -340,7 +347,7 @@ fn finalize(root: &Path, arguments: &FinalizeArgs) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let states = registry_states(&arguments.source_sha, &arguments.version)?;
     if states.iter().any(|published| !published) {
-        return Err("all four crates must be public before finalization".to_string());
+        return Err("all selected crates must be public before finalization".to_string());
     }
     line.require_version(&arguments.version)?;
     let binding = provenance::Binding::load(
@@ -371,7 +378,7 @@ fn finalize(root: &Path, arguments: &FinalizeArgs) -> Result<(), String> {
         .ok_or_else(|| "release source raw committer is missing".to_string())?
         .date
         .clone();
-    for package in RUST_POLICY.packages {
+    for package in for_version(&arguments.version).packages {
         binding.verify(&mut github)?;
         finalize_package(
             &mut github,
@@ -387,7 +394,7 @@ fn finalize(root: &Path, arguments: &FinalizeArgs) -> Result<(), String> {
         )?;
     }
     println!(
-        "finalized four immutable source-only Releases for {} at {}",
+        "finalized immutable source-only Releases for {} at {}",
         arguments.version, arguments.source_sha
     );
     Ok(())
@@ -413,7 +420,7 @@ fn wait_for_registry(source_sha: &str, version: &Version) -> Result<Vec<bool>, S
             thread::sleep(Duration::from_secs(30));
         }
     }
-    Err("all four crates were not visible within 20 minutes".to_string())
+    Err("all selected crates were not visible within 20 minutes".to_string())
 }
 
 fn require_separate_checkouts(
@@ -635,7 +642,7 @@ fn classify_release_pull_request(
         "repos/{REPOSITORY}/pulls/{}/files?per_page=100",
         pull.number
     ))?;
-    validate_release_files(&files, pull.changed_files)?;
+    validate_release_files(&files, pull.changed_files, version)?;
     Ok(true)
 }
 
@@ -668,15 +675,19 @@ fn canonical_release_pull(
         && pull.head.reference == expected_branch
         && pull.head.repo.full_name == REPOSITORY
         && pull.changed_files > 0
-        && pull.changed_files <= 9
+        && pull.changed_files <= 1 + 2 * for_version(version).packages.len() as u64
 }
 
-fn validate_release_files(files: &[PullFile], changed_files: u64) -> Result<(), String> {
+fn validate_release_files(
+    files: &[PullFile],
+    changed_files: u64,
+    version: &Version,
+) -> Result<(), String> {
     if files.len() as u64 != changed_files || files.is_empty() {
         return Err("release pull-request file inventory is incomplete".to_string());
     }
     for file in files {
-        if file.status != "modified" || !allowed_release_path(&file.filename) {
+        if file.status != "modified" || !allowed_release_path(&file.filename, version) {
             return Err(format!(
                 "release pull request changes unexpected path {}",
                 file.filename
@@ -894,35 +905,34 @@ fn require_release_signature_identity(
     Ok(())
 }
 
-fn allowed_release_path(path: &str) -> bool {
-    path == "Cargo.toml"
-        || RUST_POLICY.packages.iter().any(|package| {
-            path == format!("{}/Cargo.toml", package.path_in_vcs) || path == package.changelog
-        })
+fn allowed_release_path(path: &str, version: &Version) -> bool {
+    for_version(version).allows_release_path(path)
 }
 
 fn registry_decision(
     operation: Operation,
     states: &[bool],
     confirmation: bool,
+    version: &Version,
 ) -> Result<Decision, String> {
     if confirmation {
         // Confirmation cannot authorize another publication or finalization.
-        // It accepts only the complete four-package registry proof.
-        if states.len() != RUST_POLICY.packages.len() || states.iter().any(|state| !state) {
-            return Err("registry confirmation requires all four exact source packages".into());
+        // It accepts only the complete selected-family registry proof.
+        if states.len() != for_version(version).packages.len() || states.iter().any(|state| !state)
+        {
+            return Err("registry confirmation requires all selected exact source packages".into());
         }
         return Ok(Decision {
             publish: false,
             finalize: false,
         });
     }
-    decide(operation, states)
+    decide(operation, states, version)
 }
 
-fn decide(operation: Operation, states: &[bool]) -> Result<Decision, String> {
-    if states.len() != RUST_POLICY.packages.len() {
-        return Err("registry state does not cover exactly four packages".to_string());
+fn decide(operation: Operation, states: &[bool], version: &Version) -> Result<Decision, String> {
+    if states.len() != for_version(version).packages.len() {
+        return Err("registry state does not cover the exact selected package family".to_string());
     }
     if operation == Operation::Validate {
         return Ok(Decision {
@@ -982,7 +992,7 @@ fn require_consistent_objects(
         .as_ref()
         .ok_or("source committer is missing")?
         .date;
-    for package in RUST_POLICY.packages {
+    for package in for_version(version).packages {
         let mut spec = ReleaseSpec::new(package, version, source)?;
         spec.line = line;
         let tag = inspect_tag(github, &spec, source, date)?;
@@ -1009,8 +1019,8 @@ fn registry_state(states: &[bool]) -> &'static str {
 }
 
 fn registry_states(source_sha: &str, version: &Version) -> Result<Vec<bool>, String> {
-    let mut states = Vec::with_capacity(RUST_POLICY.packages.len());
-    for package in RUST_POLICY.packages {
+    let mut states = Vec::with_capacity(for_version(version).packages.len());
+    for package in for_version(version).packages {
         let record = registry_record(package.package, version)?;
         if let Some(record) = record {
             verify_published_source(package, version, source_sha, &record)?;
@@ -1559,6 +1569,7 @@ fn append_qualification_outputs(
 ) -> Result<(), String> {
     append_output("source_sha", source_sha)?;
     append_output("version", &version.to_string())?;
+    append_output("release_config", for_version(version).config)?;
     append_output("publish", bool_text(decision.publish))?;
     append_output("finalize", bool_text(decision.finalize))?;
     append_output("registry_state", state)
@@ -1569,6 +1580,7 @@ fn append_output(name: &str, value: &str) -> Result<(), String> {
         name,
         "source_sha"
             | "version"
+            | "release_config"
             | "publish"
             | "finalize"
             | "registry_state"
@@ -2312,15 +2324,32 @@ mod tests {
     #[test]
     fn automatic_release_is_all_or_nothing() {
         assert_eq!(
-            decide(Operation::Auto, &[false, false, false, false]).unwrap(),
+            decide(
+                Operation::Auto,
+                &[false, false, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap(),
             Decision {
                 publish: true,
                 finalize: true,
             }
         );
-        assert!(decide(Operation::Auto, &[true, false, false, false]).is_err());
+        assert!(
+            decide(
+                Operation::Auto,
+                &[true, false, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .is_err()
+        );
         assert_eq!(
-            decide(Operation::Auto, &[true, true, true, true]).unwrap(),
+            decide(
+                Operation::Auto,
+                &[true, true, true, true],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap(),
             Decision {
                 publish: false,
                 finalize: false,
@@ -2410,49 +2439,106 @@ mod tests {
     #[test]
     fn support_registry_confirmation_cannot_reauthorize_publication() {
         let complete = [true; 4];
-        assert!(registry_decision(Operation::Release, &complete, false).is_err());
+        assert!(
+            registry_decision(Operation::Release, &complete, false, &Version::new(0, 5, 1))
+                .is_err()
+        );
         assert_eq!(
-            registry_decision(Operation::Release, &complete, true).unwrap(),
+            registry_decision(Operation::Release, &complete, true, &Version::new(0, 5, 1)).unwrap(),
             Decision {
                 publish: false,
                 finalize: false
             }
         );
         for incomplete in [vec![], vec![true], vec![true, false, false, false]] {
-            assert!(registry_decision(Operation::Release, &incomplete, true).is_err());
+            assert!(
+                registry_decision(
+                    Operation::Release,
+                    &incomplete,
+                    true,
+                    &Version::new(0, 5, 1)
+                )
+                .is_err()
+            );
         }
     }
 
     #[test]
     fn recovery_stays_on_exact_source_and_completes_objects() {
         assert!(
-            decide(Operation::Recover, &[false, false, false, false])
-                .unwrap_err()
-                .contains("zero-package")
+            decide(
+                Operation::Recover,
+                &[false, false, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap_err()
+            .contains("zero-package")
         );
-        assert!(decide(Operation::Release, &[true, true, true, true]).is_err());
-        assert!(decide(Operation::Release, &[true, false, false, false]).is_err());
         assert!(
-            decide(Operation::Release, &[false, false, false, false])
-                .unwrap()
-                .publish
+            decide(
+                Operation::Release,
+                &[true, true, true, true],
+                &Version::new(0, 5, 1)
+            )
+            .is_err()
+        );
+        assert!(
+            decide(
+                Operation::Release,
+                &[true, false, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .is_err()
+        );
+        assert!(
+            decide(
+                Operation::Release,
+                &[false, false, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap()
+            .publish
         );
         assert_eq!(
-            decide(Operation::Recover, &[true, false, false, false]).unwrap(),
+            decide(
+                Operation::Recover,
+                &[true, false, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap(),
             Decision {
                 publish: true,
                 finalize: true,
             }
         );
         assert_eq!(
-            decide(Operation::Recover, &[true, true, true, true]).unwrap(),
+            decide(
+                Operation::Recover,
+                &[true, true, true, true],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap(),
             Decision {
                 publish: false,
                 finalize: true,
             }
         );
-        assert!(decide(Operation::Recover, &[false, true, false, false]).is_err());
-        assert!(decide(Operation::Recover, &[true, false, true, false]).is_err());
+        assert!(
+            decide(
+                Operation::Recover,
+                &[false, true, false, false],
+                &Version::new(0, 5, 1)
+            )
+            .is_err()
+        );
+        assert!(
+            decide(
+                Operation::Recover,
+                &[true, false, true, false],
+                &Version::new(0, 5, 1)
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2625,32 +2711,33 @@ mod tests {
 
     #[test]
     fn idempotent_release_still_requires_surviving_exact_tag() {
-        let package = &RUST_POLICY.packages[0];
-        let version = Version::parse("0.6.0").unwrap();
-        let date = "2026-09-04T12:00:00Z";
-        let spec = ReleaseSpec::new(package, &version, TEST_SOURCE_SHA).unwrap();
-        let mut github = MutationTransport::new(&spec, date, false);
-        github.tag_object_created = true;
-        github.tag_ref_created = true;
-        github.release_created = true;
-        github.change_tag_after_release_boundary(TagChange::Deleted);
+        for package in for_version(&Version::new(0, 6, 0)).packages {
+            let version = Version::parse("0.6.0").unwrap();
+            let date = "2026-09-04T12:00:00Z";
+            let spec = ReleaseSpec::new(package, &version, TEST_SOURCE_SHA).unwrap();
+            let mut github = MutationTransport::new(&spec, date, false);
+            github.tag_object_created = true;
+            github.tag_ref_created = true;
+            github.release_created = true;
+            github.change_tag_after_release_boundary(TagChange::Deleted);
 
-        let error = finalize_package(
-            &mut github,
-            package,
-            &version,
-            TEST_SOURCE_SHA,
-            TEST_POLICY_SHA,
-            date,
-            FinalizationPolicy {
-                line: ReleaseLine::Main,
-                binding: None,
-            },
-        )
-        .unwrap_err();
+            let error = finalize_package(
+                &mut github,
+                package,
+                &version,
+                TEST_SOURCE_SHA,
+                TEST_POLICY_SHA,
+                date,
+                FinalizationPolicy {
+                    line: ReleaseLine::Main,
+                    binding: None,
+                },
+            )
+            .unwrap_err();
 
-        assert!(error.contains("does not retain exact object"));
-        assert!(!github.events.iter().any(|event| event.starts_with("POST ")));
+            assert!(error.contains("does not retain exact object"));
+            assert!(!github.events.iter().any(|event| event.starts_with("POST ")));
+        }
     }
 
     #[test]
@@ -2773,13 +2860,18 @@ mod tests {
     #[test]
     fn validation_never_mutates_even_for_partial_state() {
         assert_eq!(
-            decide(Operation::Validate, &[true, false, true, false]).unwrap(),
+            decide(
+                Operation::Validate,
+                &[true, false, true, false],
+                &Version::new(0, 5, 1)
+            )
+            .unwrap(),
             Decision {
                 publish: false,
                 finalize: false,
             }
         );
-        assert!(decide(Operation::Validate, &[false]).is_err());
+        assert!(decide(Operation::Validate, &[false], &Version::new(0, 5, 1)).is_err());
 
         let calls = Cell::new(0);
         let states = maybe_reconcile_registry(Operation::Validate, true, || {
@@ -2793,10 +2885,13 @@ mod tests {
 
     #[test]
     fn release_paths_are_exact_and_bounded() {
-        assert!(allowed_release_path("Cargo.toml"));
-        assert!(allowed_release_path("crates/yaml-sigil-core/CHANGELOG.md"));
-        assert!(!allowed_release_path("src/lib.rs"));
-        assert!(!allowed_release_path("Cargo.lock"));
+        assert!(allowed_release_path("Cargo.toml", &Version::new(0, 5, 1)));
+        assert!(allowed_release_path(
+            "crates/yaml-sigil-core/CHANGELOG.md",
+            &Version::new(0, 5, 1)
+        ));
+        assert!(!allowed_release_path("src/lib.rs", &Version::new(0, 5, 1)));
+        assert!(!allowed_release_path("Cargo.lock", &Version::new(0, 5, 1)));
     }
 
     #[test]
@@ -3023,19 +3118,19 @@ mod tests {
             filename: "Cargo.toml".to_string(),
             status: "modified".to_string(),
         }];
-        validate_release_files(&exact, 1).unwrap();
+        validate_release_files(&exact, 1, &Version::new(0, 5, 1)).unwrap();
         for status in ["added", "removed", "renamed", "copied"] {
             let files = [PullFile {
                 filename: "Cargo.toml".to_string(),
                 status: status.to_string(),
             }];
-            assert!(validate_release_files(&files, 1).is_err());
+            assert!(validate_release_files(&files, 1, &Version::new(0, 5, 1)).is_err());
         }
         let unexpected = [PullFile {
             filename: "src/lib.rs".to_string(),
             status: "modified".to_string(),
         }];
-        assert!(validate_release_files(&unexpected, 1).is_err());
+        assert!(validate_release_files(&unexpected, 1, &Version::new(0, 5, 1)).is_err());
     }
 
     #[test]
@@ -3296,5 +3391,46 @@ mod tests {
             status: "completed".to_string(),
             conclusion: Some("failure".to_string()),
         }
+    }
+    #[test]
+    fn five_package_recovery_requires_an_ordered_nonempty_prefix() {
+        let version = Version::parse("0.6.0-rc.1").unwrap();
+        assert!(decide(Operation::Recover, &[false; 5], &version).is_err());
+        assert!(decide(Operation::Recover, &[true; 4], &version).is_err());
+        assert!(
+            decide(
+                Operation::Recover,
+                &[true, false, true, false, false],
+                &version
+            )
+            .is_err()
+        );
+        for count in 1..=5 {
+            let mut states = [false; 5];
+            states[..count].fill(true);
+            assert_eq!(
+                decide(Operation::Recover, &states, &version).unwrap(),
+                Decision {
+                    publish: count < 5,
+                    finalize: true
+                }
+            );
+            assert_eq!(
+                registry_decision(Operation::Recover, &states, true, &version).is_ok(),
+                count == 5
+            );
+        }
+        assert!(allowed_release_path(
+            "crates/yaml-sigil-wasm/CHANGELOG.md",
+            &version
+        ));
+        assert!(!allowed_release_path(
+            "crates/yaml-sigil-wasm/src/lib.rs",
+            &version
+        ));
+        assert!(!allowed_release_path(
+            "crates/yaml-sigil-wasm/CHANGELOG.md",
+            &Version::new(0, 5, 1)
+        ));
     }
 }

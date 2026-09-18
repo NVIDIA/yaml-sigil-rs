@@ -96,7 +96,10 @@ fn release_order(tag: &str) -> Result<(Version, usize), String> {
     for (ordinal, prefix) in package_prefixes().iter().enumerate() {
         if let Some(raw) = tag.strip_prefix(prefix) {
             let version = Version::parse(raw).map_err(|_| "Latest tag has an invalid version")?;
-            if version.to_string() != raw || !version.build.is_empty() {
+            if version.to_string() != raw
+                || !version.build.is_empty()
+                || ordinal >= crate::release_policy::for_version(&version).packages.len()
+            {
                 return Err("Latest tag has a noncanonical version".into());
             }
             return Ok((version, ordinal));
@@ -106,8 +109,7 @@ fn release_order(tag: &str) -> Result<(Version, usize), String> {
 }
 
 fn package_prefixes() -> Vec<&'static str> {
-    crate::release_policy::RUST_POLICY
-        .packages
+    crate::release_policy::ALL_PACKAGES
         .iter()
         .map(|package| package.tag_prefix)
         .collect()
@@ -229,6 +231,14 @@ mod tests {
                 &format!("{}0.6.0", package_prefixes()[0])
             )
             .is_err()
+        );
+    }
+    #[test]
+    fn wasm_latest_requires_its_source_family() {
+        assert!(release_order("yaml-sigil-wasm-v0.5.1").is_err());
+        assert_eq!(
+            release_order("yaml-sigil-wasm-v0.6.0").unwrap(),
+            (Version::new(0, 6, 0), 4)
         );
     }
 }

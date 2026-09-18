@@ -19,9 +19,10 @@ use crate::release_base;
 use crate::release_policy::ReleaseLine;
 
 use crate::bounded_process::{self, OutputLimits, VALIDATION_OUTPUT_LIMITS};
-use crate::release_policy::{RELEASE_PLZ_VERSION, RUST_POLICY};
+use crate::release_policy::{RELEASE_PLZ_VERSION, for_version};
 use crate::{safe_file, versions};
 
+#[cfg(test)]
 const RELEASE_CONFIG: &str = ".release-plz.toml";
 const MANUAL_BRANCH_PREFIX: &str = "release-plz-manual-";
 const ACTIVATION_BRANCH_PREFIX: &str = "activate-";
@@ -29,17 +30,6 @@ const RELEASE_OUTPUT_LIMITS: OutputLimits = OutputLimits {
     stdout: 1024 * 1024,
     stderr: 4 * 1024 * 1024,
 };
-const MANAGED_PATHS: &[&str] = &[
-    "Cargo.toml",
-    "crates/yaml-sigil-core/Cargo.toml",
-    "crates/yaml-sigil-core/CHANGELOG.md",
-    "crates/yaml-sigil-transcription/Cargo.toml",
-    "crates/yaml-sigil-transcription/CHANGELOG.md",
-    "crates/yaml-sigil-signing/Cargo.toml",
-    "crates/yaml-sigil-signing/CHANGELOG.md",
-    "crates/yaml-sigil-verification/Cargo.toml",
-    "crates/yaml-sigil-verification/CHANGELOG.md",
-];
 const ACTIVATION_PATHS: &[&str] = &["Cargo.toml"];
 const TOKEN_ENVIRONMENTS: &[&str] = &[
     "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
@@ -82,7 +72,7 @@ enum ReleaseCommand {
         /// Canonical source base; mandatory for detached checkouts.
         #[arg(long)]
         base_ref: Option<String>,
-        /// Exact stable or prerelease version for all four source crates.
+        /// Exact stable or prerelease version for the source version's package family.
         #[arg(long)]
         version: Version,
     },
@@ -91,7 +81,7 @@ enum ReleaseCommand {
         /// Canonical source base; mandatory for detached checkouts.
         #[arg(long)]
         base_ref: Option<String>,
-        /// Exact expected version for all four source crates.
+        /// Exact expected version for the source version's package family.
         #[arg(long)]
         version: Version,
     },
@@ -177,7 +167,7 @@ fn prepare(root: &Path, selected: &Version, line: ReleaseLine) -> Result<()> {
 
     // release-plz remains the release proposal engine: update first derives
     // the reviewed manifest and changelog transaction without credentials.
-    let mut update = release_plz_update(root);
+    let mut update = release_plz_update(root, &current);
     without_persisted_root_lock(root, "release-plz update", || {
         run_release_plz(&mut update, "release-plz update")
     })?;
@@ -301,7 +291,7 @@ struct InheritedManifest {
 }
 
 fn snapshot_inherited_manifests(root: &Path) -> Result<Vec<InheritedManifest>> {
-    RUST_POLICY
+    for_version(&versions::current(root)?)
         .packages
         .iter()
         .map(|policy| {
@@ -373,7 +363,7 @@ pub(crate) fn check(root: &Path, expected: &Version, line: ReleaseLine) -> Resul
     })?;
     require_root_lock_absent(root)?;
     require_clean(root)?;
-    eprintln!("release: validated exact four-crate release {expected}");
+    eprintln!("release: validated exact source release {expected}");
     Ok(())
 }
 
@@ -386,7 +376,8 @@ pub(crate) fn require_real_release_version(version: &Version) -> Result<()> {
 }
 
 pub(crate) fn validate_policy(root: &Path) -> Result<()> {
-    let body = safe_file::read_manifest(root, Path::new(RELEASE_CONFIG))
+    let policy = for_version(&versions::current(root)?);
+    let body = safe_file::read_manifest(root, Path::new(policy.config))
         .context("read release-plz configuration")?;
     let document = body
         .parse::<DocumentMut>()
@@ -449,10 +440,10 @@ pub(crate) fn validate_policy(root: &Path) -> Result<()> {
         .get("package")
         .and_then(Item::as_array_of_tables)
         .ok_or_else(|| anyhow!("release-plz configuration lacks package policy"))?;
-    if packages.len() != RUST_POLICY.packages.len() {
-        bail!("release-plz configuration must name exactly four packages");
+    if packages.len() != policy.packages.len() {
+        bail!("release-plz configuration must name exactly the source version's packages");
     }
-    for (table, policy) in packages.iter().zip(RUST_POLICY.packages) {
+    for (table, policy) in packages.iter().zip(policy.packages) {
         let tag_name = format!("{}{{{{ version }}}}", policy.tag_prefix);
         let publish_all_features = policy.package != "yaml-sigil-transcription";
         let mut expected_package_keys = BTreeSet::from([
@@ -528,9 +519,9 @@ fn require_managed_diff(root: &Path) -> Result<()> {
     if paths.is_empty() {
         bail!("release-plz produced no release changes");
     }
-    let allowed = MANAGED_PATHS.iter().copied().collect::<BTreeSet<_>>();
+    let policy = for_version(&versions::current(root)?);
     for path in paths {
-        if !allowed.contains(path.as_str()) {
+        if !policy.allows_release_path(&path) {
             bail!("release preparation changed unexpected path {path}");
         }
     }
@@ -664,14 +655,14 @@ fn release_plz(root: &Path) -> Command {
     command
 }
 
-fn release_plz_update(root: &Path) -> Command {
+fn release_plz_update(root: &Path, version: &Version) -> Command {
     let mut command = release_plz(root);
     command.args([
         "update",
         "--manifest-path",
         "Cargo.toml",
         "--config",
-        RELEASE_CONFIG,
+        for_version(version).config,
     ]);
     command
 }
@@ -679,10 +670,15 @@ fn release_plz_update(root: &Path) -> Command {
 fn release_plz_set_version(root: &Path, selected: &Version) -> Command {
     let mut command = release_plz(root);
     command.arg("set-version");
-    for policy in RUST_POLICY.packages {
+    for policy in for_version(selected).packages {
         command.arg(format!("{}@{selected}", policy.package));
     }
-    command.args(["--manifest-path", "Cargo.toml", "--config", RELEASE_CONFIG]);
+    command.args([
+        "--manifest-path",
+        "Cargo.toml",
+        "--config",
+        for_version(selected).config,
+    ]);
     command
 }
 
@@ -996,6 +992,11 @@ mod tests {
         .unwrap();
         assert_eq!(rename_collapsed, ["crates/yaml-sigil-core/CHANGELOG.md"]);
 
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace.package]\nversion = \"0.5.1\"\n",
+        )
+        .unwrap();
         let error = require_managed_diff(root).unwrap_err().to_string();
         assert!(error.contains("unexpected-source.txt"));
     }
@@ -1014,5 +1015,56 @@ mod tests {
             .parent()
             .expect("xtask is inside repository root");
         validate_policy(root).unwrap();
+    }
+    #[test]
+    fn source_family_selects_only_its_exact_fixed_configuration() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        for version in ["0.5.1", "0.5.2-rc.1", "0.6.0-rc.0", "0.6.0-rc.1", "1.0.0"] {
+            let parsed = Version::parse(version).unwrap();
+            std::fs::write(
+                temp.path().join("Cargo.toml"),
+                format!("[workspace.package]\nversion = \"{version}\"\n"),
+            )
+            .unwrap();
+            let policy = for_version(&parsed);
+            let exact = std::fs::read_to_string(repository.join(policy.config)).unwrap();
+            std::fs::write(temp.path().join(policy.config), &exact).unwrap();
+            validate_policy(temp.path()).unwrap();
+            let other = if policy.packages.len() == 4 {
+                ".release-plz-wasm.toml"
+            } else {
+                ".release-plz.toml"
+            };
+            std::fs::copy(repository.join(other), temp.path().join(policy.config)).unwrap();
+            assert!(validate_policy(temp.path()).is_err());
+        }
+    }
+
+    #[test]
+    fn five_package_preparation_keeps_update_and_exact_selection_on_one_config() {
+        let version = Version::parse("0.6.0-rc.1").unwrap();
+        let command = release_plz_set_version(Path::new("."), &version);
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "set-version",
+                "yaml-sigil-core@0.6.0-rc.1",
+                "yaml-sigil-transcription@0.6.0-rc.1",
+                "yaml-sigil-signing@0.6.0-rc.1",
+                "yaml-sigil-verification@0.6.0-rc.1",
+                "yaml-sigil-wasm@0.6.0-rc.1",
+                "--manifest-path",
+                "Cargo.toml",
+                "--config",
+                ".release-plz-wasm.toml"
+            ]
+        );
+        let update = release_plz_update(Path::new("."), &Version::parse("0.6.0-rc.0").unwrap());
+        assert_eq!(update.get_args().last().unwrap(), ".release-plz-wasm.toml");
     }
 }

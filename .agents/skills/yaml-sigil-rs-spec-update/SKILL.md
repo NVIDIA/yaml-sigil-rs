@@ -200,7 +200,8 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 
 7. Coordinate release order after review:
 
-   Publish only the four implementation libraries as crates.io `.crate` source
-   packages. Keep conformance, test-key, and xtask packages unpublished. Update
+   Publish the four implementation libraries and, from `0.6` onward,
+   `yaml-sigil-wasm` as crates.io `.crate` source packages. Keep conformance,
+   test-key, and xtask packages unpublished. Update
    `yaml-sigil-traits` first when the public contract changes, then update this
    workspace's `yaml-sigil-traits` dependency.

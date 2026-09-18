@@ -110,7 +110,7 @@ pub(super) fn start(
     }
     let tags: Vec<Reference> = github.get(&format!(
         "repos/{REPOSITORY}/git/matching-refs/tags/{}",
-        tag_prefixes()[0]
+        crate::release_policy::RUST_POLICY.packages[0].tag_prefix
     ))?;
     let successor = select_successor(&tags, line, version)?;
     let anchor = published_source(
@@ -185,7 +185,7 @@ pub(super) fn require_fresh_progression(
     if line == ReleaseLine::Main {
         return Ok(());
     }
-    let prefix = tag_prefixes()[0];
+    let prefix = crate::release_policy::RUST_POLICY.packages[0].tag_prefix;
     let references: Vec<Reference> = github.get(&format!(
         "repos/{REPOSITORY}/git/matching-refs/tags/{prefix}"
     ))?;
@@ -219,7 +219,10 @@ fn select_successor(
         return Err("release tag inventory exceeds its bound".into());
     }
     let mut versions = Vec::new();
-    let prefix = format!("refs/tags/{}", tag_prefixes()[0]);
+    let prefix = format!(
+        "refs/tags/{}",
+        crate::release_policy::RUST_POLICY.packages[0].tag_prefix
+    );
     for tag in tags {
         let raw = tag
             .name
@@ -257,7 +260,7 @@ fn published_source(
     verify: impl FnOnce(&str, &Version) -> Result<(), String>,
 ) -> Result<String, String> {
     let mut source = None;
-    for prefix in tag_prefixes() {
+    for prefix in tag_prefixes(version) {
         let name = format!("{prefix}{version}");
         let reference: Reference =
             github.get(&format!("repos/{REPOSITORY}/git/ref/tags/{name}"))?;
@@ -369,8 +372,8 @@ pub(super) fn is_sha(value: &str) -> bool {
             .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
 }
 
-fn tag_prefixes() -> Vec<&'static str> {
-    crate::release_policy::RUST_POLICY
+fn tag_prefixes(version: &Version) -> Vec<&'static str> {
+    crate::release_policy::for_version(version)
         .packages
         .iter()
         .map(|p| p.tag_prefix)
@@ -403,7 +406,10 @@ mod tests {
 
     fn reference(version: &str) -> Reference {
         Reference {
-            name: format!("refs/tags/{}{version}", tag_prefixes()[0]),
+            name: format!(
+                "refs/tags/{}{version}",
+                crate::release_policy::RUST_POLICY.packages[0].tag_prefix
+            ),
             object: Object {
                 kind: "tag".into(),
                 sha: "a".repeat(40),
@@ -535,7 +541,7 @@ mod tests {
 
     fn github_fixture(sha: &str, version: &Version) -> ReadOnlyGithub {
         let mut responses = BTreeMap::new();
-        for (index, prefix) in tag_prefixes().iter().enumerate() {
+        for (index, prefix) in tag_prefixes(version).iter().enumerate() {
             let tag = format!("{prefix}{version}");
             let object = format!("{index:040x}");
             responses.insert(
@@ -587,7 +593,7 @@ mod tests {
         let mut github = github_fixture(&sha, &version);
         let key = format!(
             "repos/{REPOSITORY}/git/ref/tags/{}{version}",
-            tag_prefixes()[0]
+            crate::release_policy::RUST_POLICY.packages[0].tag_prefix
         );
         github.0.get_mut(&key).unwrap()["object"]["type"] = serde_json::json!("commit");
         assert!(
@@ -602,6 +608,14 @@ mod tests {
                 "off-main source reached registry"
             ))
             .is_err()
+        );
+    }
+    #[test]
+    fn support_baselines_keep_historical_family_and_require_wasm_from_six() {
+        assert_eq!(tag_prefixes(&Version::new(0, 5, 1)).len(), 4);
+        assert_eq!(
+            tag_prefixes(&Version::new(0, 6, 0)).last(),
+            Some(&"yaml-sigil-wasm-v")
         );
     }
 }

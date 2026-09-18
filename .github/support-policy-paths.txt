@@ -25,6 +25,7 @@
 .github/workflows/publish.yml
 .github/workflows/required-ci.yml
 .release-plz.toml
+.release-plz-wasm.toml
 deny.exceptions.toml
 deny.toml
 rust-toolchain.toml
@@ -36,6 +37,7 @@ xtask/package-contents/yaml-sigil-core.txt
 xtask/package-contents/yaml-sigil-signing.txt
 xtask/package-contents/yaml-sigil-transcription.txt
 xtask/package-contents/yaml-sigil-verification.txt
+xtask/package-contents/yaml-sigil-wasm.txt
 xtask/src/bounded_process.rs
 xtask/src/cargo_metadata_output.rs
 xtask/src/ci.rs

@@ -8,7 +8,8 @@ operations to browser and Node.js JavaScript through
 `wasm32-unknown-unknown`. It delegates protocol processing to the Rust
 implementation crates in this workspace.
 
-This crate is an unpublished, source-only workspace boundary. The repository
+This experimental crate is distributed as a crates.io source package starting
+with `0.6.0-rc.1`. Its JavaScript API may change before stabilization. The repository
 does not publish an npm package, prebuilt WebAssembly, or another executable
 artifact. Run `cargo xtask wasm` for local validation. The task puts generated
 WebAssembly and JavaScript in a temporary directory and removes that directory
@@ -58,7 +59,7 @@ The four functions above remain unbounded with respect to complete artifact
 size. Their `composeWithResourceLimits`, `decomposeWithResourceLimits`,
 `signWithResourceLimits`, and `verifyWithResourceLimits` counterparts take
 the same arguments followed by a required `ArtifactResourceLimits` object.
-They delegate to the `0.6.0` track's resource-aware Rust APIs and retain the
+They delegate to the resource-aware Rust APIs and retain the
 same result classes.
 
 Create a policy explicitly when processing external input.
@@ -113,9 +114,12 @@ without disabling parser safeguards or protobuf format limits.
 The policy does not cap total JavaScript or WebAssembly memory. The caller
 already owns the input arrays, string arguments cross the generated binding
 before operation admission, and each output getter creates another copy.
+Bound string lengths and request sizes before calling the generated bindings.
 Apply appropriate limits when reading external data, and manage result and
-input lifetimes. The existing functions require caller-owned whole-artifact
-admission when a deployment needs it.
+input lifetimes. Call `.free()` on result and policy objects when finished;
+copy any needed output first. Policy builders return new objects, so free both
+the original and derived policies. The existing functions require caller-owned
+whole-artifact admission when a deployment needs it.
 
 ## Rust implementation boundary
 
@@ -160,6 +164,75 @@ schema from a browser filesystem or fetch it over a network. The
 `browser-tests` feature only selects browser mode for the shared local test
 suite.
 
+## Build for JavaScript
+
+You build the WebAssembly module and bindings locally from source. Install
+Rust 1.95.0 or newer with `wasm32-unknown-unknown`, and `wasm-pack` 0.15.0.
+The dependency build obtains its pinned Buf tool, so the first build needs
+network access and a writable Cargo and Buf cache. A separate system `protoc`
+or Buf installation is unnecessary.
+
+From a checkout of the [source repository](https://github.com/NVIDIA/yaml-sigil-rs)
+at the desired release tag, run:
+
+```shell
+rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
+cargo install --locked wasm-pack --version 0.15.0
+build_dir="$(mktemp -d)"
+RUSTUP_TOOLCHAIN=1.95.0 CARGO_TARGET_DIR="${build_dir}/target" \
+  wasm-pack build crates/yaml-sigil-wasm --target web --release --no-pack \
+  --out-dir "${build_dir}/web"
+RUSTUP_TOOLCHAIN=1.95.0 CARGO_TARGET_DIR="${build_dir}/target" \
+  wasm-pack build crates/yaml-sigil-wasm --target nodejs --release --no-pack \
+  --out-dir "${build_dir}/node"
+```
+
+For `0.6.0-rc.1`, the source tag is `yaml-sigil-wasm-v0.6.0-rc.1`.
+You can also extract the [crates.io source archive](https://crates.io/crates/yaml-sigil-wasm)
+and replace `crates/yaml-sigil-wasm` with that extracted directory. Registry
+builds require all four matching implementation dependencies to be published.
+The source archive contains its normalized Cargo manifest and source tests;
+it does not contain the repository's `xtask`.
+
+The `web` directory contains ES-module bindings, TypeScript declarations, and
+the locally compiled `.wasm` file. Serve them from the same origin for local
+browser use, then initialize the module before calling an operation:
+
+```javascript
+import init, { ArtifactResourceLimits, verifyWithResourceLimits }
+  from "./yaml_sigil_wasm.js";
+
+await init();
+const limits = new ArtifactResourceLimits();
+try {
+  const result = verifyWithResourceLimits(
+    artifact, "yaml", algorithm, publicKey, limits,
+  );
+  try {
+    if (result.status === "verified") {
+      consumeAuthenticatedPayload(result.payload);
+    }
+  } finally {
+    result.free();
+  }
+} finally {
+  limits.free();
+}
+```
+
+The input variables above are supplied by your application. Only consume the
+payload after `verified`. The generated Node.js module uses CommonJS and loads
+its module synchronously through `require("./yaml_sigil_wasm.js")`; it does
+not require the browser's `await init()` step. Add
+`--features json-schema-validate` to either build command to embed schema
+validation. The feature is off by default.
+
+Remove temporary outputs after your local checks:
+
+```shell
+rm -rf -- "${build_dir}"
+```
+
 ## Local validation
 
 The validation task requires Rust 1.95.0, Node.js 20 or newer, Firefox, and
@@ -181,3 +254,12 @@ typed failure results.
 Byte-copy regressions also cover overridden metadata, cross-realm arrays,
 detached and resized buffers, concurrent shared-buffer growth, and policy
 reuse and disposal after rejected inputs.
+
+## License and project information
+
+NVIDIA-authored code uses the [Apache-2.0 license](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/LICENSE).
+See the [crate-local third-party notices](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-wasm/THIRD_PARTY_NOTICES.md)
+for identified standards material and its source terms. See the
+[security policy](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/SECURITY.md)
+and [contribution guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/CONTRIBUTING.md)
+for vulnerability reporting and source contributions.

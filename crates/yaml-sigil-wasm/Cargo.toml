@@ -11,7 +11,19 @@ description = "Browser WebAssembly boundary for YamlSigil v1alpha1"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-publish = false
+publish = ["crates-io"]
+keywords = ["yaml", "wasm", "digital-signature", "ed25519", "ecdsa"]
+categories = ["authentication", "cryptography", "wasm"]
+include = [
+    "/src/**",
+    "/tests/**",
+    "/CHANGELOG.md",
+    "/README.md",
+    "/LICENSE",
+    "/SECURITY.md",
+    "/CONTRIBUTING.md",
+    "/THIRD_PARTY_NOTICES.md",
+]
 # Keep this source-only boundary free of automatically discovered executables.
 autobins = false
 autobenches = false

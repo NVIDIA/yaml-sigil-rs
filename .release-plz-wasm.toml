@@ -1,0 +1,89 @@
+[workspace]
+release = false
+release_always = false
+pr_branch_prefix = "release-plz-manual-"
+changelog_update = true
+# release-plz publishes source crates only. The protected App finalizer owns
+# annotated tags and immutable, zero-asset GitHub Releases.
+git_tag_enable = false
+git_release_enable = false
+git_release_type = "auto"
+publish_allow_dirty = false
+publish_no_verify = false
+publish_timeout = "5m"
+# The workflow runs the exact analyzer directly and fails on every error.
+semver_check = false
+
+[[package]]
+name = "yaml-sigil-core"
+version_group = "yaml-sigil-rs"
+release = true
+publish = true
+publish_all_features = true
+changelog_update = true
+changelog_path = "crates/yaml-sigil-core/CHANGELOG.md"
+git_tag_enable = false
+git_tag_name = "yaml-sigil-core-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-core-v{{ version }}"
+git_release_body = "{{ changelog }}"
+git_release_type = "auto"
+
+[[package]]
+name = "yaml-sigil-transcription"
+version_group = "yaml-sigil-rs"
+release = true
+publish = true
+changelog_update = true
+changelog_path = "crates/yaml-sigil-transcription/CHANGELOG.md"
+git_tag_enable = false
+git_tag_name = "yaml-sigil-transcription-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-transcription-v{{ version }}"
+git_release_body = "{{ changelog }}"
+git_release_type = "auto"
+
+[[package]]
+name = "yaml-sigil-signing"
+version_group = "yaml-sigil-rs"
+release = true
+publish = true
+publish_all_features = true
+changelog_update = true
+changelog_path = "crates/yaml-sigil-signing/CHANGELOG.md"
+git_tag_enable = false
+git_tag_name = "yaml-sigil-signing-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-signing-v{{ version }}"
+git_release_body = "{{ changelog }}"
+git_release_type = "auto"
+
+[[package]]
+name = "yaml-sigil-verification"
+version_group = "yaml-sigil-rs"
+release = true
+publish = true
+publish_all_features = true
+changelog_update = true
+changelog_path = "crates/yaml-sigil-verification/CHANGELOG.md"
+git_tag_enable = false
+git_tag_name = "yaml-sigil-verification-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-verification-v{{ version }}"
+git_release_body = "{{ changelog }}"
+git_release_type = "auto"
+
+[[package]]
+name = "yaml-sigil-wasm"
+version_group = "yaml-sigil-rs"
+release = true
+publish = true
+publish_all_features = true
+changelog_update = true
+changelog_path = "crates/yaml-sigil-wasm/CHANGELOG.md"
+git_tag_enable = false
+git_tag_name = "yaml-sigil-wasm-v{{ version }}"
+git_release_enable = false
+git_release_name = "yaml-sigil-wasm-v{{ version }}"
+git_release_body = "{{ changelog }}"
+git_release_type = "auto"

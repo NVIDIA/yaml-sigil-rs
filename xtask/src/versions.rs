@@ -9,13 +9,13 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
-use cargo_metadata::{Metadata, Package, TargetKind};
+use cargo_metadata::{CrateType, Metadata, Package, TargetKind};
 use semver::{Version, VersionReq};
 use toml_edit::{DocumentMut, Item};
 
 use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
 use crate::cargo_metadata_output::{parse_bounded, publishes_to_crates_io};
-use crate::release_policy::RUST_POLICY;
+use crate::release_policy::{RUST_POLICY, for_version};
 use crate::safe_file;
 
 const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
@@ -147,8 +147,8 @@ fn validate_metadata(
         bail!("Cargo metadata selected an unexpected workspace root");
     }
 
-    let publishable = ordered_publishable_packages(metadata)?;
-    for (package, policy) in publishable.iter().zip(RUST_POLICY.packages) {
+    let publishable = ordered_publishable_packages(metadata, expected)?;
+    for (package, policy) in publishable.iter().zip(for_version(expected).packages) {
         validate_package(&expected_root, package, policy.package, expected)?;
     }
     validate_internal_dependencies(&expected_root, &publishable, expected)?;
@@ -159,7 +159,10 @@ fn validate_metadata(
     Ok(())
 }
 
-fn ordered_publishable_packages(metadata: &Metadata) -> Result<Vec<&Package>> {
+fn ordered_publishable_packages<'a>(
+    metadata: &'a Metadata,
+    expected: &Version,
+) -> Result<Vec<&'a Package>> {
     let mut packages_by_name = BTreeMap::new();
     for package in metadata
         .packages
@@ -170,7 +173,7 @@ fn ordered_publishable_packages(metadata: &Metadata) -> Result<Vec<&Package>> {
             continue;
         }
         let name = package.name.as_ref();
-        if !RUST_POLICY
+        if !for_version(expected)
             .packages
             .iter()
             .any(|policy| policy.package == name)
@@ -182,8 +185,8 @@ fn ordered_publishable_packages(metadata: &Metadata) -> Result<Vec<&Package>> {
         }
     }
 
-    let mut ordered = Vec::with_capacity(RUST_POLICY.packages.len());
-    for policy in RUST_POLICY.packages {
+    let mut ordered = Vec::with_capacity(for_version(expected).packages.len());
+    for policy in for_version(expected).packages {
         let package = packages_by_name
             .remove(policy.package)
             .ok_or_else(|| anyhow!("missing crates.io release package {}", policy.package))?;
@@ -236,7 +239,7 @@ fn validate_package(
             expected_name
         );
     }
-    let policy = RUST_POLICY
+    let policy = for_version(expected_version)
         .packages
         .iter()
         .find(|policy| policy.package == expected_name)
@@ -248,10 +251,35 @@ fn validate_package(
     let libraries = package
         .targets
         .iter()
-        .filter(|target| target.kind.contains(&TargetKind::Lib))
+        .filter(|target| {
+            if expected_name == "yaml-sigil-wasm" {
+                target.kind.len() == 2
+                    && target.kind.contains(&TargetKind::CDyLib)
+                    && target.kind.contains(&TargetKind::RLib)
+            } else {
+                target.kind == [TargetKind::Lib]
+            }
+        })
         .collect::<Vec<_>>();
-    if libraries.len() != 1 {
+    if libraries.len() != 1
+        || package.targets.iter().any(|target| {
+            target.kind.iter().any(|kind| {
+                matches!(
+                    kind,
+                    TargetKind::Bin | TargetKind::Example | TargetKind::Bench
+                ) || (expected_name == "yaml-sigil-wasm" && *kind == TargetKind::CustomBuild)
+            })
+        })
+    {
         bail!("release package {expected_name} must expose exactly one library target");
+    }
+    let expected_types = if expected_name == "yaml-sigil-wasm" {
+        vec![CrateType::CDyLib, CrateType::RLib]
+    } else {
+        vec![CrateType::Lib]
+    };
+    if libraries[0].crate_types != expected_types {
+        bail!("release package {expected_name} has unexpected library crate types");
     }
     Ok(())
 }
@@ -263,7 +291,7 @@ fn validate_internal_dependencies(
 ) -> Result<()> {
     let canonical = VersionReq::parse(&expected.to_string())?;
     for (package_index, package) in packages.iter().enumerate() {
-        let expected_internal = RUST_POLICY.packages[package_index]
+        let expected_internal = for_version(expected).packages[package_index]
             .internal_dependencies
             .iter()
             .map(|name| (*name).to_string())
@@ -272,7 +300,7 @@ fn validate_internal_dependencies(
             .dependencies
             .iter()
             .filter(|dependency| {
-                RUST_POLICY
+                for_version(expected)
                     .packages
                     .iter()
                     .any(|policy| policy.package == dependency.name)
@@ -285,7 +313,7 @@ fn validate_internal_dependencies(
             bail!("{} has an unexpected internal dependency set", package.name);
         }
         for dependency in &package.dependencies {
-            let Some((dependency_index, policy)) = RUST_POLICY
+            let Some((dependency_index, policy)) = for_version(expected)
                 .packages
                 .iter()
                 .enumerate()
@@ -337,6 +365,12 @@ fn validate_traits_declaration(packages: &[&Package]) -> Result<Version> {
             .iter()
             .filter(|dependency| dependency.name == TRAITS_PACKAGE)
             .collect::<Vec<_>>();
+        if package.name == "yaml-sigil-wasm" {
+            if !matches.is_empty() {
+                bail!("Wasm must resolve traits through its implementation dependencies");
+            }
+            continue;
+        }
         if matches.len() != 1 {
             bail!(
                 "{} must have one exact {TRAITS_PACKAGE} dependency",
@@ -439,7 +473,7 @@ mod tests {
             )
         };
         let local_dependency = |name: &str, requirement: &str| {
-            let policy = RUST_POLICY
+            let policy = for_version(&Version::parse(version).unwrap())
                 .packages
                 .iter()
                 .find(|policy| policy.package == name)
@@ -454,7 +488,7 @@ mod tests {
             )
         };
         let mut packages = Vec::new();
-        for policy in RUST_POLICY.packages {
+        for policy in for_version(&Version::parse(version).unwrap()).packages {
             let dependencies = match policy.package {
                 "yaml-sigil-core" => vec![traits_dependency()],
                 "yaml-sigil-transcription" => vec![
@@ -472,9 +506,14 @@ mod tests {
                     local_dependency("yaml-sigil-transcription", version),
                     traits_dependency(),
                 ],
+                "yaml-sigil-wasm" => policy
+                    .internal_dependencies
+                    .iter()
+                    .map(|name| local_dependency(name, version))
+                    .collect(),
                 _ => unreachable!(),
             };
-            packages.push(fixture::package(
+            let mut package = fixture::package(
                 policy.package,
                 version,
                 None,
@@ -486,7 +525,12 @@ mod tests {
                     "lib",
                     &root.join(policy.path_in_vcs).join("src/lib.rs"),
                 )],
-            ));
+            );
+            if policy.package == "yaml-sigil-wasm" {
+                package["targets"][0]["kind"] = serde_json::json!(["cdylib", "rlib"]);
+                package["targets"][0]["crate_types"] = serde_json::json!(["cdylib", "rlib"]);
+            }
+            packages.push(package);
         }
         packages.push(fixture::package(
             TRAITS_PACKAGE,
@@ -731,5 +775,50 @@ mod tests {
                 .to_string()
                 .contains("has an unexpected manifest path")
         );
+    }
+    #[test]
+    fn five_crate_family_accepts_wasm_without_a_direct_traits_dependency() {
+        let root = tempfile::tempdir().unwrap();
+        for value in ["0.6.0-rc.0", "0.6.0-rc.1", "0.6.0", "1.0.0"] {
+            let version = Version::parse(value).unwrap();
+            let metadata = metadata(root.path(), value, value);
+            validate_metadata(root.path(), &metadata, &version, true).unwrap();
+        }
+    }
+
+    #[test]
+    fn five_crate_family_rejects_missing_edges_and_wrong_targets() {
+        let root = tempfile::tempdir().unwrap();
+        let version = Version::parse("0.6.0-rc.1").unwrap();
+        let original = metadata_document(root.path(), "0.6.0-rc.1", "0.6.0-rc.1");
+        for edge in 0..4 {
+            let mut document = original.clone();
+            document["packages"][4]["dependencies"]
+                .as_array_mut()
+                .unwrap()
+                .remove(edge);
+            let metadata = parse_bounded(&fixture::encoded(&document), "fixture").unwrap();
+            assert!(validate_metadata(root.path(), &metadata, &version, true).is_err());
+        }
+        for kinds in [
+            serde_json::json!(["lib"]),
+            serde_json::json!(["cdylib"]),
+            serde_json::json!(["bin"]),
+        ] {
+            let mut document = original.clone();
+            document["packages"][4]["targets"][0]["kind"] = kinds;
+            let metadata = parse_bounded(&fixture::encoded(&document), "fixture").unwrap();
+            assert!(validate_metadata(root.path(), &metadata, &version, true).is_err());
+        }
+        let mut document = original.clone();
+        let traits = document["packages"][0]["dependencies"][0].clone();
+        document["packages"][4]["dependencies"]
+            .as_array_mut()
+            .unwrap()
+            .push(traits);
+        let metadata = parse_bounded(&fixture::encoded(&document), "fixture").unwrap();
+        assert!(validate_metadata(root.path(), &metadata, &version, true).is_err());
+        let metadata = parse_bounded(&fixture::encoded(&original), "fixture").unwrap();
+        assert!(validate_metadata(root.path(), &metadata, &Version::new(0, 5, 1), true).is_err());
     }
 }
