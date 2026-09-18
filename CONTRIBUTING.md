@@ -42,7 +42,7 @@ maintainer release procedure runs pinned `release-plz` to generate them from
 the integrated Conventional Commit history in the dedicated release pull
 request.
 
-All four published crates share `[workspace.package].version`. Never change a
+All published crates share `[workspace.package].version`. Never change a
 member version independently. A version change belongs only in the canonical
 single-commit release pull request and must pass both checks:
 

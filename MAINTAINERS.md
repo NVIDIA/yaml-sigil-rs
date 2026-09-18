@@ -672,6 +672,28 @@ nothing. Opening a line still requires the separately reviewed protection and
 activation transaction. The workflow admits an activated support line only
 through a dispatch on protected main; a support push runs CI without publication.
 
+## Source package families
+
+Release policy selects four source packages before `0.6` and five from `0.6`
+onward, including RCs. The fifth package is `yaml-sigil-wasm`, published after
+core, transcription, signing, and verification. Its crate contains source and
+consumer build instructions; compiled WebAssembly and generated executable
+bindings are never distributed by this repository.
+
+Keep `.release-plz.toml` for historical four-package sources and
+`.release-plz-wasm.toml` for five-package sources. Typed qualification emits
+the fixed selected path; post-approval requalification must agree before the
+sole release-plz publisher runs. Preserve both paths in the protected provenance
+inventory. Recovery, registry confirmation, finalization, and support-baseline
+verification use the source version's package family, even after main moves.
+
+Before first Wasm publication, verify its reservation ownership and Trusted
+Publishing claims for `NVIDIA/yaml-sigil-rs`, `publish.yml`, and `crates-io`.
+Both existing tag rulesets must cover `yaml-sigil-wasm-v*`; retain their other
+fields and verify complete readback. An ordinary prerequisite-policy main push
+must remain a publication no-op. Follow `RELEASING.md` for the separate release
+proposal, exact-head checks, and protected environment gates.
+
 ## Latest selection during finalization
 
 The finalizer reads GitHub's current Latest release before creating a Release
@@ -688,8 +710,9 @@ Release to change its Latest status. Publication remains serialized across
 the repository.
 
 Within one version, the compiled package order remains core, transcription,
-signing, verification. A retry cannot move Latest from a later package back
-to an earlier package of that same version.
+signing, verification, then Wasm for source versions from `0.6` onward. A retry
+cannot move Latest from a later package back to an earlier package of that
+same version.
 
 ## Review support-line contributions
 

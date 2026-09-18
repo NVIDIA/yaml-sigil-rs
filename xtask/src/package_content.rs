@@ -35,7 +35,13 @@ struct InventoryDifference {
 pub(crate) fn run(root: &Path) -> io::Result<()> {
     let mut failures = Vec::new();
 
-    for package in PACKAGE_SPECS {
+    let version =
+        crate::versions::current(root).map_err(|error| io::Error::other(error.to_string()))?;
+    let policy = crate::release_policy::for_version(&version);
+    for package in PACKAGE_SPECS
+        .iter()
+        .filter(|package| policy.packages.iter().any(|p| p.package == package.name))
+    {
         match check_package(root, *package) {
             Ok(count) => eprintln!("{}: package contents match ({count} paths)", package.name),
             Err(error) => failures.push(format!("{}: {error}", package.name)),

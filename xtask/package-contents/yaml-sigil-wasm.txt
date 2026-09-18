@@ -1,0 +1,16 @@
+.cargo_vcs_info.json
+CHANGELOG.md
+CONTRIBUTING.md
+Cargo.lock
+Cargo.toml
+Cargo.toml.orig
+LICENSE
+README.md
+SECURITY.md
+THIRD_PARTY_NOTICES.md
+src/bytes.rs
+src/lib.rs
+src/resource.rs
+tests/byte_inputs.cjs
+tests/generated_api.cjs
+tests/wasm.rs

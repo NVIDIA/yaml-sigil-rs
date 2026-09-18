@@ -23,9 +23,10 @@ impl PackagePolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ReleasePolicy {
     pub(crate) packages: &'static [PackagePolicy],
+    pub(crate) config: &'static str,
 }
 
-const RUST_PACKAGES: &[PackagePolicy] = &[
+pub(crate) const ALL_PACKAGES: &[PackagePolicy] = &[
     PackagePolicy {
         package: "yaml-sigil-core",
         tag_prefix: "yaml-sigil-core-v",
@@ -58,11 +59,51 @@ const RUST_PACKAGES: &[PackagePolicy] = &[
             "yaml-sigil-transcription",
         ],
     },
+    PackagePolicy {
+        package: "yaml-sigil-wasm",
+        tag_prefix: "yaml-sigil-wasm-v",
+        changelog: "crates/yaml-sigil-wasm/CHANGELOG.md",
+        path_in_vcs: "crates/yaml-sigil-wasm",
+        internal_dependencies: &[
+            "yaml-sigil-core",
+            "yaml-sigil-transcription",
+            "yaml-sigil-signing",
+            "yaml-sigil-verification",
+        ],
+    },
 ];
 
+/// Historical source releases retain their original four-package policy.
 pub(crate) const RUST_POLICY: ReleasePolicy = ReleasePolicy {
-    packages: RUST_PACKAGES,
+    packages: &[
+        ALL_PACKAGES[0],
+        ALL_PACKAGES[1],
+        ALL_PACKAGES[2],
+        ALL_PACKAGES[3],
+    ],
+    config: ".release-plz.toml",
 };
+
+/// Select from the validated source version, including prerelease versions.
+pub(crate) fn for_version(version: &semver::Version) -> ReleasePolicy {
+    if (version.major, version.minor) >= (0, 6) {
+        ReleasePolicy {
+            packages: ALL_PACKAGES,
+            config: ".release-plz-wasm.toml",
+        }
+    } else {
+        RUST_POLICY
+    }
+}
+
+impl ReleasePolicy {
+    pub(crate) fn allows_release_path(self, path: &str) -> bool {
+        path == "Cargo.toml"
+            || self.packages.iter().any(|package| {
+                path == format!("{}/Cargo.toml", package.path_in_vcs) || path == package.changelog
+            })
+    }
+}
 
 #[cfg(test)]
 mod tests {
