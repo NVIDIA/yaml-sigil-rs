@@ -170,4 +170,71 @@ static_acceptance_head="$(git -C "${static_acceptance_repo}" rev-parse HEAD)"
     "${script_dir}/check-release-pull-request.sh"
 )
 
-echo "release pull-request path inventory tests passed"
+promotion_repo="${test_root}/promotion"
+promotion_base="$(initialize_release_range "${promotion_repo}")"
+printf '%s\n' '[workspace]' '[workspace.package]' \
+  'version = "0.6.0-rc.0"' > "${promotion_repo}/Cargo.toml"
+git -C "${promotion_repo}" add Cargo.toml
+git -C "${promotion_repo}" -c user.name=fixture \
+  -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+  commit --quiet --message=activation
+printf '%s\n' 'product change' >> "${promotion_repo}/unexpected.txt"
+git -C "${promotion_repo}" add unexpected.txt
+git -C "${promotion_repo}" -c user.name=fixture \
+  -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+  commit --quiet --message=implementation
+promotion_head="$(git -C "${promotion_repo}" rev-parse HEAD)"
+
+check_promotion() {
+  (
+    cd -- "${promotion_repo}"
+    PATH="${test_root}/bin:${PATH}" \
+      BASE_SHA="${promotion_base}" HEAD_SHA="${promotion_head}" \
+      BASE_REF=refs/heads/main YAML_SIGIL_RELEASE_PR_BRANCH='' \
+      YAML_SIGIL_PROMOTION_BRANCH=dev/0.6.0 \
+      env "$@" "${script_dir}/check-release-pull-request.sh"
+  )
+}
+
+reject_promotion() {
+  # An invalid binding must reject before candidate Cargo can execute.
+  if check_promotion "$@" > "${test_root}/promotion.log" 2>&1; then
+    echo "promotion unexpectedly accepted invalid metadata" >&2
+    exit 1
+  fi
+  grep -F '::error::' "${test_root}/promotion.log" >/dev/null
+}
+
+# A bound cumulative promotion admits multiple commits and product paths;
+# the ordinary release contract still rejects the identical unbound range.
+check_promotion
+reject_promotion YAML_SIGIL_PROMOTION_BRANCH=
+reject_promotion YAML_SIGIL_PROMOTION_BRANCH=dev/0.7.0
+reject_promotion YAML_SIGIL_PROMOTION_BRANCH=dev/00.6.0
+reject_promotion YAML_SIGIL_PROMOTION_BRANCH=dev/0x6x0
+reject_promotion YAML_SIGIL_PROMOTION_BRANCH=dev/0.6.0-rc.0
+reject_promotion BASE_REF=
+reject_promotion BASE_REF=refs/heads/dev/0.6.0
+reject_promotion BASE_REF=refs/heads/support/0.6
+reject_promotion YAML_SIGIL_RELEASE_PR_BRANCH=release-plz-manual-0.6.0-rc.0
+reject_promotion BASE_SHA="${promotion_head}"
+
+for version in 0.6.0 0.6.0-rc.1 0.6.0-rc.0+build 0.7.0-rc.0; do
+  printf '%s\n' '[workspace]' '[workspace.package]' \
+    "version = \"${version}\"" > "${promotion_repo}/Cargo.toml"
+  git -C "${promotion_repo}" add Cargo.toml
+  git -C "${promotion_repo}" -c user.name=fixture \
+    -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+    commit --quiet --message=invalid-version
+  reject_promotion HEAD_SHA="$(git -C "${promotion_repo}" rev-parse HEAD)"
+done
+
+git -C "${promotion_repo}" checkout "${promotion_head}" -- Cargo.toml
+chmod 0755 "${promotion_repo}/Cargo.toml"
+git -C "${promotion_repo}" add Cargo.toml
+git -C "${promotion_repo}" -c user.name=fixture \
+  -c user.email=fixture@example.invalid -c commit.gpgsign=false \
+  commit --quiet --message=invalid-mode
+reject_promotion HEAD_SHA="$(git -C "${promotion_repo}" rev-parse HEAD)"
+
+echo "release pull-request and coordination promotion policy tests passed"

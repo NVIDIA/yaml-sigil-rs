@@ -7,6 +7,7 @@ set -euo pipefail
 : "${BASE_SHA:?BASE_SHA must identify current pull request base}"
 : "${HEAD_SHA:?HEAD_SHA must identify the exact pull request head}"
 : "${YAML_SIGIL_RELEASE_PR_BRANCH:=}"
+: "${YAML_SIGIL_PROMOTION_BRANCH:=}"
 
 workspace_version() {
   git show "$1:Cargo.toml" | awk '
@@ -24,6 +25,27 @@ workspace_version() {
 
 base_version="$(workspace_version "${BASE_SHA}")"
 head_version="$(workspace_version "${HEAD_SHA}")"
+
+# The protected binder supplies a promotion only for current main and a live,
+# same-repository canonical dev source. That reviewed cumulative series retains
+# its unpublished rc.0 stub; it is not a release-plz proposal. Commit/DCO checks
+# still run independently, and no promotion input authorizes publication.
+if [[ -n "${YAML_SIGIL_PROMOTION_BRANCH}" ]]; then
+  component='(0|[1-9][0-9]{0,8})'
+  # Keep this exception exclusive to the exact line and reserved non-release
+  # version. Missing/stale metadata must not fall through to ordinary success.
+  if [[ "${BASE_REF:-}" != 'refs/heads/main' \
+    || -n "${YAML_SIGIL_RELEASE_PR_BRANCH}" \
+    || ! "${YAML_SIGIL_PROMOTION_BRANCH}" =~ ^dev/${component}\.${component}\.${component}$ \
+    || "${head_version}" != "${YAML_SIGIL_PROMOTION_BRANCH#dev/}-rc.0" \
+    || "$(git ls-tree --format='%(objectmode)' "${HEAD_SHA}" -- Cargo.toml)" != 100644 \
+    || "${base_version}" == "${head_version}" ]]; then
+    echo "::error::A promotion must retain its line's rc.0 stub on current main."
+    exit 1
+  fi
+  exit 0
+fi
+
 changed=()
 while IFS= read -r -d '' path; do
   changed+=("${path}")
