@@ -463,7 +463,9 @@ The surviving provider helpers have deliberately narrow roles:
 - `check-pull-request-commits.sh` enforces the shared exact-range, linear
   history, and DCO policy across all three YamlSigil repositories.
 - `check-release-pull-request.sh` adds the canonical branch, single-commit, and
-  release-file boundary for explicit version changes.
+  release-file boundary for explicit version changes. A binder-validated
+  repository-owned coordination promotion retains only its line's unpublished
+  `rc.0` stub under the separate maintainer promotion procedure.
 - `attach-release-source.sh` binds an already-qualified source only to local
   selected base refs immediately before the protected release-plz publication call; it
   never updates a remote.

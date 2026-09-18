@@ -325,6 +325,14 @@ It is a separately authorized coordinator operation, not contributor intake.
 
 ### Close and promote a coordination line
 
+Promotion retains the line's unpublished `MAJOR.MINOR.PATCH-rc.0` version.
+The protected binder distinguishes a current repository-owned `dev/` head
+targeting main from a fork or ordinary version-changing contribution. Its
+promotion output permits only that line's exact `rc.0` stub in the release-PR
+policy check; canonical release proposals keep their separate checks.
+Review the active source-line protection before admission. This classification
+does not authorize integration or publication.
+
 1. Freeze the line, remove unready work through review, finish migration
    guidance, replace temporary dependencies, and complete one final
    synchronization.

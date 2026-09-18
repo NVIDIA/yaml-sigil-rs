@@ -236,9 +236,11 @@ jobs:
 
       - name: Check commit and release-PR policy
         env:
+          BASE_REF: ${{ steps.pull.outputs.base_ref }}
           BASE_SHA: ${{ steps.pull.outputs.base_sha }}
           HEAD_SHA: ${{ github.sha }}
           YAML_SIGIL_RELEASE_PR_BRANCH: ${{ steps.pull.outputs.release_branch }}
+          YAML_SIGIL_PROMOTION_BRANCH: ${{ steps.pull.outputs.promotion_branch }}
         run: |
           "${RUNNER_TEMP}/candidate-policy/check-pull-request-commits.sh"
           "${RUNNER_TEMP}/candidate-policy/check-release-pull-request.sh"
