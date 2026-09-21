@@ -51,7 +51,7 @@ free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
-The private backend updates to `noyalib` `0.0.43` and `jsonschema` `0.56`
+The private backend updates to `noyalib` `0.0.46` and `jsonschema` `0.56`
 retain the expected `yaml-signature-conformance/` and `schema-alignment/`
 outcomes. Parser budgets, canonical YAML, and fixture bytes do not change.
 The downstream Serde fixture still uses `noyalib` `0.0.35` to check the public
