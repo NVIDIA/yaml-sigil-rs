@@ -12,7 +12,7 @@ pub(crate) struct PackagePolicy {
     pub(crate) internal_dependencies: &'static [&'static str],
 }
 
-pub(crate) const RELEASE_PLZ_VERSION: &str = "0.3.160";
+pub(crate) const RELEASE_PLZ_VERSION: &str = "0.3.169";
 
 impl PackagePolicy {
     pub(crate) fn tag(&self, version: &str) -> String {
@@ -116,7 +116,7 @@ mod tests {
             RUST_POLICY.packages[0].tag("0.5.0"),
             "yaml-sigil-core-v0.5.0"
         );
-        assert_eq!(RELEASE_PLZ_VERSION, "0.3.160");
+        assert_eq!(RELEASE_PLZ_VERSION, "0.3.169");
     }
 }
 

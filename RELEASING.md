@@ -49,7 +49,7 @@ Install and verify the reviewed release analyzer. The repository does not use
 `release-plz/action`.
 
 ```shell
-cargo binstall --force --locked --no-confirm release-plz@0.3.160
+cargo binstall --force --locked --no-confirm release-plz@0.3.169
 # Confirm that the reviewed analyzer, rather than another installed version,
 # will derive the release transaction.
 release-plz --version
@@ -184,7 +184,7 @@ live_base="$(git ls-remote --exit-code origin "${base_ref}")"
 test "${live_base}" = \
   "$(git rev-parse "refs/remotes/origin/${base_branch}")"$'\t'"${base_ref}"
 # Bind the acceptance evidence to the repository's reviewed analyzer version.
-release-plz --version | grep -Fx 'release-plz 0.3.160'
+release-plz --version | grep -Fx 'release-plz 0.3.169'
 evidence="<APPROVED-EVIDENCE-DIR>/release-plz-dry-run-${reviewed_head}.log"
 umask 077
 redact_exact_token() {
@@ -646,7 +646,7 @@ uses the patch after the last stable release, and advances an existing RC by
 one ordinal or promotes that patch to stable. Duplicate versions, skipped
 patches, `rc.0`, and build metadata are rejected during preparation.
 
-Preparation continues to use release-plz 0.3.160 for version and changelog
+Preparation continues to use release-plz 0.3.169 for version and changelog
 changes. Activation and publication require separate authorization. Read
 [the maintainer procedure](MAINTAINERS.md#support-readiness-commands) for the
 read-only activation proposal and remaining activation boundary.
