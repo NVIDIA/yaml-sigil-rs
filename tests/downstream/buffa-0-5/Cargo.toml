@@ -15,5 +15,5 @@ buffa = "=0.5.2"
 yaml-sigil-core = { path = "../../../crates/yaml-sigil-core" }
 
 [build-dependencies]
-buf-tools = ">=1.73.0-rc.3"
+buf-tools = ">=1.73.0"
 buffa-build = "=0.5.2"
