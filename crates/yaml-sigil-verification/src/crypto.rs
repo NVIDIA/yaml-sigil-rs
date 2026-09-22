@@ -171,6 +171,39 @@ pub(crate) fn verify_ecdsa_p256_sha256(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p256_conversions_preserve_signatures_without_widening_slots() {
+        use signature::Signer;
+
+        let key = p256::ecdsa::SigningKey::from_slice(&[14; 32]).unwrap();
+        let payload = b"converted provider signature\n";
+        let signature: p256::ecdsa::Signature = key.try_sign(payload).unwrap();
+        let low = signature.normalize_s();
+        let high = p256::ecdsa::Signature::from_scalars(low.r().to_bytes(), (-low.s()).to_bytes())
+            .unwrap();
+        let compressed = key.verifying_key().to_sec1_point(true);
+        assert!(super::resolve_p256_verifying_key(compressed.as_bytes()).is_err());
+        let canonical = crate::p256_public_key_to_uncompressed(compressed.as_bytes()).unwrap();
+        assert_eq!(
+            yaml_sigil_signing::p256_public_key_to_uncompressed(compressed.as_bytes()).unwrap(),
+            canonical,
+        );
+        let resolved = super::resolve_p256_verifying_key(&canonical).unwrap();
+        for signature in [low, high] {
+            let der = signature.to_der();
+            assert!(!super::ecdsa_p256_signature_is_well_formed(der.as_bytes()));
+            let raw = crate::p256_der_signature_to_raw(der.as_bytes()).unwrap();
+            assert_eq!(
+                yaml_sigil_signing::p256_der_signature_to_raw(der.as_bytes()).unwrap(),
+                raw,
+            );
+            assert_eq!(raw.as_slice(), signature.to_bytes().as_slice());
+            assert!(super::ecdsa_p256_signature_is_well_formed(&raw));
+            assert!(super::verify_ecdsa_p256_sha256(&resolved, payload, &raw).is_ok());
+            assert!(super::verify_ecdsa_p256_sha256(&resolved, b"another payload", &raw).is_err());
+        }
+    }
+
     use super::{
         EcdsaVerifyError, ed25519_challenge, ed25519_signature_is_canonical,
         ed25519_verifying_key_is_admissible, resolve_ed25519_verifying_key,

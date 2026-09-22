@@ -93,6 +93,10 @@ mod proto_verify;
 pub mod provider;
 mod yaml_verify;
 
+pub use yaml_sigil_core::p256_encoding::{
+    P256EncodingError, p256_der_signature_to_raw, p256_public_key_to_uncompressed,
+};
+
 #[cfg(test)]
 mod async_provider_tests;
 

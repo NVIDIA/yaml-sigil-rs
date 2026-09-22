@@ -60,3 +60,43 @@ holders to disclose them through the IETF process.
 
 The schema and related tests identified above are `yaml-sigil-core`
 adaptations.
+
+## Standards for Efficient Cryptography material
+
+In addition to the RFC 4648 material identified above, the compressed and
+uncompressed public-key selection in `src/p256_encoding.rs` follows
+*Standards for Efficient Cryptography 1 (SEC 1): Elliptic Curve Cryptography*,
+version 2.0, section 2.3.3. Parsing and point validation use the RustCrypto
+dependency. The helper selects the encodings accepted before the algorithm
+boundary and emits the existing uncompressed public-key representation.
+
+The front page of *Standards for Efficient Cryptography 1 (SEC 1)* carries
+this notice:
+
+> Copyright © 2009 Certicom Corp.
+>
+> License to copy this document is granted provided it is identified as
+> "Standards for Efficient Cryptography 1 (SEC 1)", in all material mentioning
+> or referencing it.
+
+Source:
+
+- *Standards for Efficient Cryptography 1 (SEC 1): Elliptic Curve Cryptography*,
+  Version 2.0, May 21, 2009, <https://www.secg.org/sec1-v2.pdf>.
+
+Section 1.5, "Intellectual Property," of
+*Standards for Efficient Cryptography 1 (SEC 1)* states:
+
+> The reader's attention is called to the possibility that compliance with
+> this document may require use of an invention covered by patent rights. By
+> publication of this document, no position is taken with respect to the
+> validity of this claim or of any patent rights in connection therewith. The
+> patent holder(s) may have filed with the SECG a statement of willingness to
+> grant a license under these rights on reasonable and nondiscriminatory terms
+> and conditions to applicants desiring to obtain such a license. Additional
+> details may be obtained from the patent holder and from the SECG website,
+> <http://www.secg.org>.
+
+The SEC 1 material is not relicensed under Apache-2.0.
+`yaml-sigil-core` is not affiliated with, sponsored by, or endorsed by
+SECG or Certicom Corp.

@@ -50,6 +50,33 @@ Ed25519 acceptance difference described above.
 
 ## Why bind a key
 
+### Convert P-256 provider encodings
+
+The signing and verification crates re-export two shared helpers from
+`yaml_sigil_core::p256_encoding`. Core-only callers enable the
+`p256-encoding` feature explicitly.
+
+| Helper | Accepted input | Output |
+|--------|----------------|--------|
+| `p256_der_signature_to_raw` | Strict DER with nonzero `r` and `s` below the curve order. | 64 big-endian `r || s` octets, preserving high-S and low-S values. |
+| `p256_public_key_to_uncompressed` | A valid 33-octet compressed or 65-octet uncompressed P-256 point. | 65 uncompressed public-key octets. |
+
+The point encodings come from
+*Standards for Efficient Cryptography 1 (SEC 1)*. Unsupported tags, malformed
+encodings, invalid points, and invalid signature components return
+`P256EncodingError`. The helpers use RustCrypto's parsers; conversion does not
+prove a signature equation or a provider's nonce behavior. Their rustdoc has
+compiling examples and complete input and error contracts.
+
+Apply conversion before binding a provider key or returning a provider
+signature. Existing slot validators still require uncompressed public keys
+and raw signatures. The helper regressions cover padding, scalar ranges,
+high-S preservation, invalid points, trailing data, and both compressed-key
+parities. Verification regressions check valid converted signatures and
+continued rejection of unconverted forms.
+
+### Bind the canonical public key
+
 Associate each opaque provider handle with one algorithm and its canonical
 public key. The signing builder validates
 the public key and retains that association. Qualified signing verifies every
@@ -324,6 +351,7 @@ adapters. It is narrower than a guarantee about an integrator's provider.
 | Ed25519 valid, invalid, and mixed-order verification cases. | Fixed qualification suite, with sync/async status and call-count parity tests. | Suite intentionally skipped; native generated-key round trips are tested. | Applicable local fixtures exercise only the default implementations. |
 | P-256 high-S/low-S acceptance. | Fixed qualification suite and regressions. | Suite intentionally skipped; operation round trips are tested. | Applicable local fixtures exercise the defaults. |
 | P-256 nonce generation and entropy failure. | Integrator-owned; self-verification cannot establish nonce selection. | Integrator-owned. | Default RustCrypto signers test rejection sampling, entropy failure, and fresh nonces through sync and async operations. Custom implementations remain integrator-owned. |
+| P-256 provider-input conversions. | Shared helpers test DER and point validation, scalar preservation, and strict slot boundaries. | The same helpers are available before the boundary. | Shared helpers are available; custom integrations must select and test their use. |
 | Multiple live handles and cross-key rejection in both directions for Ed25519 and P-256. | Sync and async suites reject cached, retargeted, invalidated, or overly broad key bindings in regressions. | Suite intentionally skipped; the adapter owns binding correctness. | Custom binding behavior is not tested automatically. |
 | Protection against an adapter deliberately evading qualification. | Not provided; the adapter is trusted code. | Not provided. | Not provided by implementing traits. |
 | Runnable YAML examples with fresh keys, file/stdin/default input, and independent checking of printed output. | Native examples test qualified signing for both algorithms and qualified P-256 verification; the async example tests qualified P-256. | The dedicated `ring` example tests both operations unqualified for both algorithms without qualification; the async example tests unqualified P-256. | No runnable custom direct-trait example; default trait implementations run workspace tests. |

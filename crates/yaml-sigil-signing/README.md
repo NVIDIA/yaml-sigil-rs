@@ -41,6 +41,16 @@ material, tokens, or raw signatures on trusted fact surfaces.
 
 ## Local provider signing
 
+`p256_der_signature_to_raw` converts a provider's DER signature into the
+required 64-octet raw form. `p256_public_key_to_uncompressed` validates and
+converts compressed or uncompressed public points into the required 65-octet
+form. Both helpers return `P256EncodingError` on invalid input and preserve
+valid signature scalar values, including high-S. They are re-exported from
+[`yaml-sigil-core`](https://crates.io/crates/yaml-sigil-core); see its
+[encoding contracts and compiling examples](https://docs.rs/yaml-sigil-core/latest/yaml_sigil_core/p256_encoding/index.html).
+Apply these conversions before the provider boundary. The builder still
+rejects compressed keys and the signer still requires raw signatures.
+
 Implement `signature::Signer<[u8; 64]> + Sync` for a type you own that holds or
 borrows your provider's initialized key handle. Add a direct dependency on
 [`signature`](https://crates.io/crates/signature) 3.0. Your `try_sign` method

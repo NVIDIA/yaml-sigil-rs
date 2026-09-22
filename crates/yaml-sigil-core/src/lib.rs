@@ -30,6 +30,8 @@ pub mod algorithm;
 pub mod conformance;
 pub mod decomposition;
 pub mod error;
+#[cfg(feature = "p256-encoding")]
+pub mod p256_encoding;
 pub mod payload;
 pub mod pb;
 pub mod proto_outer;
@@ -50,6 +52,10 @@ pub use decomposition::{
     decompose_artifact_with_resource_limits,
 };
 pub use error::CoreError;
+#[cfg(feature = "p256-encoding")]
+pub use p256_encoding::{
+    P256EncodingError, p256_der_signature_to_raw, p256_public_key_to_uncompressed,
+};
 pub use payload::{PayloadInvariantError, validate_payload_stream};
 pub use proto_outer::{
     ProtoOuterDecomposeOutcome, compose_proto_outer, compose_proto_outer_with_resource_limits,

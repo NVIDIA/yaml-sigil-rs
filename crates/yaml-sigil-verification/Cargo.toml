@@ -46,7 +46,7 @@ p256 = { workspace = true }
 sha2 = { workspace = true }
 signature = { workspace = true }
 tracing = "0.1"
-yaml-sigil-core = { workspace = true, default-features = false }
+yaml-sigil-core = { workspace = true, default-features = false, features = ["p256-encoding"] }
 yaml-sigil-traits = { workspace = true, default-features = false }
 yaml-sigil-transcription = { workspace = true, default-features = false }
 

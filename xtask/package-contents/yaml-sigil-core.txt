@@ -17,6 +17,7 @@ src/conformance.rs
 src/decomposition.rs
 src/error.rs
 src/lib.rs
+src/p256_encoding.rs
 src/payload.rs
 src/pb.rs
 src/proto_outer.rs

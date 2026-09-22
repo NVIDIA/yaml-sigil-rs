@@ -69,6 +69,9 @@ pub use transcription::{
 };
 
 use tracing::instrument;
+pub use yaml_sigil_core::p256_encoding::{
+    P256EncodingError, p256_der_signature_to_raw, p256_public_key_to_uncompressed,
+};
 pub use yaml_sigil_core::pb::{EncodeError, EncodeErrorKind};
 pub use yaml_sigil_core::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,

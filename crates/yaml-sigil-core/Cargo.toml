@@ -43,6 +43,9 @@ include = [
 [package.metadata.cargo-machete]
 ignored = ["buf-tools", "buffa-build"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [lints]
 workspace = true
 
@@ -52,11 +55,14 @@ path = "src/lib.rs"
 [features]
 # Tier A JSON Schema validation helper (`tier_a_schema` module).
 json-schema-validate = ["dep:jsonschema", "dep:serde_json"]
+# Optional provider-input conversions; parsing-only consumers need no crypto.
+p256-encoding = ["dep:p256"]
 
 [dependencies]
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 noyalib = { workspace = true }
+p256 = { workspace = true, optional = true }
 thiserror = "2"
 tracing = "0.1"
 yaml-sigil-traits = { workspace = true, default-features = false }
