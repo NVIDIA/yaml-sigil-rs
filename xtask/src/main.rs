@@ -80,7 +80,7 @@ enum Task {
     },
     /// Run provider-neutral release preparation and verification.
     Release(release::ReleaseArgs),
-    /// Run bounded GitHub release-automation operations.
+    /// Run typed GitHub release operations.
     Github(github::GithubArgs),
     /// Validate browser WebAssembly locally without retaining build output.
     Wasm,

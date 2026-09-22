@@ -47,7 +47,7 @@ committed. Run formatting, Clippy with warnings denied, and the xtask tests for
 every change. Preserve bounded process output, safe-file handling, exact
 package policy, and focused rejection tests.
 
-The existing release commands may compare reviewed path names and opaque Git
+The release commands may compare reviewed path names and opaque Git
 blob identities across exact commits solely to prove release-policy provenance.
 This narrow exception permits no workflow-content parsing, semantic validation,
 provider-policy snapshots, or general workflow checks. Keep the required path

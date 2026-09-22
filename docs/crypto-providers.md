@@ -1,25 +1,24 @@
 # Cryptographic providers
 
-`yaml-sigil-rs` can prepare and verify artifacts while your adapter performs
-the cryptographic operation. Your private key can remain in a native library,
-an HSM, or a KMS. You can also implement the public
+`yaml-sigil-rs` can prepare and verify artifacts while your signing callback
+or provider adapter performs the cryptographic operation. Your private key
+can remain in a native library, an HSM, or a KMS. You can also implement the public
 [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits) contracts
 directly when you need control over the complete operation.
 
-The default convenience APIs continue to accept `ed25519-dalek` and `p256`
-keys. Provider support adds integration choices without requiring a migration
-from those APIs.
+The default convenience APIs accept `ed25519-dalek` and `p256` keys. Choose
+them when your application already holds those RustCrypto key types.
 
-## Three useful integration choices
+## Choose an integration path
 
 | Path | What you gain | What you supply or give up |
 |------|---------------|---------------------------|
-| Qualified provider operations. | This workspace's artifact processing, key and signature checks, per-output signing verification, and finite verification-provider qualification. | An adapter that meets the boundary's cryptographic behavior. Verification qualification needs the exact configured instance to bind the public test keys. |
+| Qualified provider operations. | This workspace's artifact processing, key and signature checks, per-output signing verification, and finite verification-provider qualification. | A signing callback or provider adapter that meets the boundary's cryptographic behavior. Verification qualification needs the exact configured instance to bind the public test keys. |
 | Explicitly unqualified provider operations. | The same artifact processing and structural checks, while using a provider with different cryptographic acceptance behavior or one that cannot run the qualification suite. | Your own evidence that its signing and verification behavior fits your requirements. Signing skips output self-verification; verification skips the fixed suite. |
 | Direct `yaml-sigil-traits` implementation. | Your own associated key types, operations, async strategy, and choice of implementation helpers. No provider wrapper or qualification prerequisite. | The complete operation and evidence for its capabilities and conformance claims. The traits do not automatically run this workspace's checks. |
 
-All three are supported choices. Select the path according to your needs.
-Unqualified operations still perform cryptographic signing or verification;
+Choose a path based on which parts of the operation your application owns.
+Unqualified operations perform cryptographic signing or verification;
 the name identifies which additional evidence this workspace does not require.
 Direct trait implementations can use `yaml-sigil-core` and other helpers
 selectively, or own the operation entirely. Implementing a trait does not
@@ -69,8 +68,8 @@ prove a signature equation or a provider's nonce behavior. Their rustdoc has
 compiling examples and complete input and error contracts.
 
 Apply conversion before binding a provider key or returning a provider
-signature. Existing slot validators still require uncompressed public keys
-and raw signatures. The helper regressions cover padding, scalar ranges,
+signature. The algorithm validators require uncompressed public keys and raw
+signatures. The helper regressions cover padding, scalar ranges,
 high-S preservation, invalid points, trailing data, and both compressed-key
 parities. Verification regressions check valid converted signatures and
 continued rejection of unconverted forms.
@@ -197,9 +196,8 @@ keys. `UnqualifiedProviderAsyncSigner` and
 `UnqualifiedProviderAsyncVerifier` provide the explicit alternatives. Their
 associated keys carry the adapter lifetime. The corresponding async free
 functions cover these operations and expose metadata and pre-verification reuse.
-The existing `DefaultAsyncSigner` and `DefaultAsyncVerifier` still perform
-local synchronous cryptography when polled; introducing these adapters does
-not change their scheduling.
+`DefaultAsyncSigner` and `DefaultAsyncVerifier` perform local synchronous
+cryptography when polled. Their futures do not offload that work.
 
 Parsing, structural checks, output assembly, and qualified signing's local
 self-verification remain synchronous work around the await. Public bound-key
@@ -363,7 +361,7 @@ signing. Pass `(request, limits, callback)`. The async counterparts are
 `sign_with_async_provider_and_resource_limits` and
 `sign_with_unqualified_async_provider_and_resource_limits`.
 
-These functions reuse the existing signing preflight and exact output checks.
+These functions apply the signing preflight and exact output checks.
 After request-shape validation, protobuf output computes the exact encoded
 length before scanning caller buffers or invoking a provider. YAML first
 checks a conclusive lower bound. It checks the exact serialized output size
@@ -372,16 +370,15 @@ artifact. Escaping can make that final check necessary even after a successful
 preflight. Resource rejection is the outer result, a protobuf encoding error
 has its own middle layer, and the existing `SignOutcome` remains inside.
 
-Verification already has an equivalent admission boundary. Call
+For verification, call
 `ArtifactResourceLimits::check_input_size` on the original encoded artifact
 before a provider operation, or call `pre_verify_with_resource_limits` and
 pass its admitted response to a provider `verify_from_pre_verify` operation.
 Both approaches work with sync or async and either qualification choice.
-There is no separate provider verification-limit family because those
-existing checks already reject before artifact-dependent parsing, copying,
-or verification. If binding itself requires remote work, apply admission
-before that work too. Checking extracted payload length afterward is not an
-equivalent encoded-input limit.
+These checks reject oversized artifacts before artifact-dependent parsing,
+copying, or verification. If binding itself requires remote work, apply
+admission before that work too. Checking extracted payload length afterward
+is not an equivalent encoded-input limit.
 
 ## Checklist of checks and evidence
 

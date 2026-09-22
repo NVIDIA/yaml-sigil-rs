@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! YamlSigil v1alpha1 signing: YAML + protobuf artifacts, Ed25519 + ECDSA P-256 SHA-256.
+//! Sign YamlSigil `v1alpha1` YAML and protobuf artifacts with Ed25519 or
+//! ECDSA P-256 SHA-256.
 //! Signed-artifact transcoding lives in [`transcription`].
 //!
 //! Request-shape failures are [`SignInvocationError`]; sign-time failures are
@@ -9,7 +10,8 @@
 //! protobuf output preserves the core facade's [`yaml_sigil_core::pb::EncodeError`]
 //! in a separate inner result layer.
 //!
-//! Convenience wrappers [`sign_yaml`] and [`sign_proto`] call [`sign`] with a fixed [`OutputForm`].
+//! Use [`sign_yaml`] or [`sign_proto`] to call [`sign`] with a fixed
+//! [`OutputForm`].
 //!
 //! Default P-256 signing samples a fresh nonce from the system CSPRNG for each
 //! signature, using Web Crypto on browser and Node.js WebAssembly targets.
@@ -435,7 +437,7 @@ pub fn sign_with_provider_and_resource_limits(
     sign_with_provider_inner(req, Some(limits), None, callback)
 }
 
-/// Sign without output self-verification, applying the existing output policy.
+/// Sign without output self-verification and enforce the selected output policy.
 ///
 /// Retains key and signature-structure checks and the resource behavior of
 /// [`sign_with_provider_and_resource_limits`].

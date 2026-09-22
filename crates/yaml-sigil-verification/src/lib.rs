@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! YamlSigil v1alpha1 verification: five verifier states, invocation errors, Ed25519 + ECDSA P-256 SHA-256.
+//! Verify YamlSigil `v1alpha1` artifacts with Ed25519 or ECDSA P-256 SHA-256.
+//! Results distinguish five verifier states and separate invocation errors.
 //!
 //! Algorithm slot 0 (`ALGORITHM_UNSPECIFIED`) and unknown wire `alg` values map
 //! to [`VerifierState::MalformedAttemptedSigned`]. Slot 1 is
@@ -46,7 +47,7 @@
 //! # }
 //! ```
 //!
-//! Apply the standalone zero-copy input filter before an existing async trait
+//! Apply the standalone zero-copy input filter before an async trait
 //! call when you need the portable trait surface.
 //!
 //! ```no_run
@@ -861,7 +862,7 @@ pub fn pre_verify(
 /// Pre-verify after applying an explicit complete-input policy.
 ///
 /// Enforcement occurs once while the original encoded artifact is available.
-/// Continue with the existing [`verify_from_pre_verify`] function; it neither
+/// Continue with [`verify_from_pre_verify`]; it neither
 /// reconstructs nor rechecks complete-artifact size.
 pub fn pre_verify_with_resource_limits(
     input_bytes: &[u8],

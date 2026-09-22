@@ -51,40 +51,35 @@ free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
-The private backend updates to `noyalib` `0.0.46` and `jsonschema` `0.56`
-retain the expected `yaml-signature-conformance/` and `schema-alignment/`
-outcomes. Parser budgets, canonical YAML, and fixture bytes do not change.
-The downstream Serde fixture still uses `noyalib` `0.0.35` to check the public
-boundary across versions.
+The private backends are `noyalib` `0.0.46` and `jsonschema` `0.56`. The
+`yaml-signature-conformance/` and `schema-alignment/` suites check their
+expected parsing and validation outcomes. The downstream Serde fixture uses
+`noyalib` `0.0.35` to check the public data-model boundary across versions.
 
-The `0.6` crypto dependency update uses `ed25519-dalek` 3, `curve25519-dalek` 5,
+The `0.6` implementation uses `ed25519-dalek` 3, `curve25519-dalek` 5,
 `p256` 0.14, `signature` 3, and `sha2` 0.11. The `alg-ed25519/` and
-`alg-ecdsa/` suites retain their expected outcomes, including canonical
-mixed-order Ed25519 acceptance, noncanonical and small-order key rejection,
-and P-256 high-S/low-S acceptance. Provider qualification and artifact round
-trips exercise the new public key types. Fixture bytes, signature encodings,
-and deliberate divergences do not change.
+`alg-ecdsa/` suites check canonical mixed-order Ed25519 acceptance,
+noncanonical and small-order key rejection, and P-256 high-S/low-S acceptance.
+Provider qualification and artifact round trips exercise the public key
+types.
 
-Default P-256 signing in `crates/yaml-sigil-signing/src/lib.rs` now follows the
+Default P-256 signing in `crates/yaml-sigil-signing/src/lib.rs` follows the
 [profile's nonce-generation requirement](https://github.com/NVIDIA/yaml-sigil-spec/blob/98140c77464af0a1cae2c6a650a1adeb9493e5f2/algorithms/02-ECDSA_SECP256R1_SHA256_RAW_RS64.md#signing).
 It hashes the final payload once with SHA-256 and rejection-samples an
 independent nonce in `1..n` from the system CSPRNG. RustCrypto's prehashed
 primitive consumes that nonce directly. A zero `R` or `S` restarts sampling;
 entropy failure returns `KeyOperationFailure` without an artifact or a
-deterministic fallback. This corrects the previous RFC 6979 signing behavior,
-including for `DefaultSigner`, `DefaultAsyncSigner`, and bounded signing.
-Algorithm identifiers, raw 64-octet signatures, artifact formats, and Ed25519
-behavior remain unchanged.
+deterministic fallback. `DefaultSigner`, `DefaultAsyncSigner`, and bounded
+RustCrypto signing use this nonce-generation policy. Default Ed25519 signing
+is deterministic.
 
 The signing unit tests check that a supplied test nonce determines `R`
 independently of the payload, reject zero and out-of-range candidates, exercise
 a constructed zero-`S` retry, and propagate entropy failure. Default sync and
 async tests verify fresh `R` components and valid signatures for both forms,
 empty payloads, repaired YAML final newlines, and opaque protobuf bytes.
-The existing `alg-ecdsa/two-nonce-instability.*` fixtures retain their expected
-`Verified` outcomes. Those fixed artifacts test verification; the new runtime
-tests exercise nonce generation. No fixture bytes or deliberate divergences
-change.
+The `alg-ecdsa/two-nonce-instability.*` fixtures expect `Verified`. Those fixed
+artifacts test verification; the runtime tests exercise nonce generation.
 
 WebAssembly uses the `getrandom` Web Crypto backend.
 `crates/yaml-sigil-wasm/tests/wasm.rs` checks fresh P-256 `R` components and
@@ -96,18 +91,18 @@ The byte-input regressions in `crates/yaml-sigil-wasm/tests/byte_inputs.cjs`
 verify each fresh P-256 signature and compare payloads, metadata, and artifact
 lengths instead of requiring identical signatures across calls.
 
-The unpublished WebAssembly boundary adds local regression coverage in
+Local WebAssembly regression coverage lives in
 `crates/yaml-sigil-wasm/tests/wasm.rs` and
 `crates/yaml-sigil-wasm/tests/generated_api.cjs`. Its opt-in bounded operations
 accept exact byte ceilings and return `resource_error` above them, while the
-existing operations accept otherwise valid complete artifacts larger than
+unbounded operations accept otherwise valid complete artifacts larger than
 4 MiB. These operational rejections do not classify artifacts as malformed or
 non-conforming. Tests also preserve YAML and protobuf round trips, algorithm
 verification, newline repair, selector errors, and output-copy behavior on
 Node.js and Firefox. Native admission tests in
 `crates/yaml-sigil-wasm/src/resource.rs` verify that rejected sizes never
-invoke the byte-copy or processing closure. Imported fixtures and expected
-conformance outcomes remain unchanged; this adds no deliberate divergence.
+invoke the byte-copy or processing closure. These tests supplement the
+imported conformance fixtures without declaring a divergence.
 
 Byte-input regressions in `crates/yaml-sigil-wasm/src/bytes.rs` and
 `crates/yaml-sigil-wasm/tests/byte_inputs.cjs` exercise intrinsic metadata,
@@ -420,10 +415,10 @@ original raw input.
 
 ## Local cryptographic provider boundaries
 
-`crates/yaml-sigil-core/src/p256_encoding.rs` adds optional conversions for
-provider inputs. Signing and verification re-export the helpers. Tests require
-strict DER, nonzero in-range signature components, valid public points, and
-fixed 64-octet signature and 65-octet public-key outputs. They preserve high-S
+`crates/yaml-sigil-core/src/p256_encoding.rs` provides optional conversions
+for provider inputs. Signing and verification re-export the helpers. Tests
+require strict DER, nonzero in-range signature components, valid public points,
+and fixed 64-octet signature and 65-octet public-key outputs. They preserve high-S
 and low-S values and reject malformed, trailing, and unsupported encodings.
 `crates/yaml-sigil-verification/src/crypto.rs` verifies converted low-S and
 high-S signatures while retaining rejection of unconverted DER and compressed
@@ -495,14 +490,14 @@ signature mismatch, borrowed `Send` futures, and pending/wake/drop behavior.
 Qualification status and call counts match the synchronous fixed suite,
 including mixed-order Ed25519 cases and faulty P-256 key bindings.
 
-`crates/yaml-sigil-conformance/tests/provider_async.rs` adds focused fixture
-coverage through the public provider-backed `AsyncVerifier` facades, with a
+`crates/yaml-sigil-conformance/tests/provider_async.rs` runs focused fixture
+checks through the public provider-backed `AsyncVerifier` facades, with a
 borrowed factory and `Send` futures. Both qualified and unqualified paths
 expect `Verified` for existing `alg-ecdsa/{high-s,low-s}.{yaml,binpb}` fixtures.
 They expect `MalformedAttemptedSigned` without a provider verification call
 for `alg-ecdsa/invalid-r-zero.binpb`, `invalid-s-equals-n.binpb`, and
-`signature-{63,65}-bytes.binpb`. This extends fixture-to-API coverage without
-changing fixture bytes, expected classifications, or declared divergences.
+`signature-{63,65}-bytes.binpb`. Both paths use the same fixture bytes and
+expected classifications as the default implementation.
 
 Bounded signing tests compare sync and async provider behavior for both
 algorithms and forms on qualified and unqualified paths. Oversized preflight
@@ -516,9 +511,9 @@ The [`provider guide`](./crypto-providers.md) maintains the tested and untested
 checklist across qualified providers, unqualified providers, and direct
 `yaml-sigil-traits` implementations. Finite qualification and successful
 signature self-verification do not establish complete conformance, randomness
-quality, SDK scheduling safety, or deployment certification. The complete
-generic fixture harness still specializes its associated keys to RustCrypto;
-it does not automatically test every provider implementation.
+quality, SDK scheduling safety, or deployment certification. The generic
+fixture runners use RustCrypto key types; test each provider implementation
+through the applicable adapter paths.
 
 [`examples/ring_unqualified_provider.rs`](../examples/ring_unqualified_provider.rs)
 tests explicitly unqualified signing and verification with fresh P-256 and

@@ -1,20 +1,21 @@
 # yaml-sigil-transcription
 
-`yaml-sigil-transcription` combines document and signature components into
-[`yaml-sigil`](https://github.com/NVIDIA/yaml-sigil-spec#tldr) documents and
-separates existing documents back into those components. It supports YAML and
-protobuf forms.
+`yaml-sigil-transcription` composes
+[`yaml-sigil`](https://github.com/NVIDIA/yaml-sigil-spec#tldr) artifacts from
+document and signature components. It also decomposes artifacts into those
+components. Both operations support YAML and protobuf forms.
 
 In the API, the document bytes are the `payload` and the encoded signature
-component is the `signature_carrier`. Compose joins them into an artifact,
-while decompose returns their byte ranges. These operations change document
-structure only. They do not verify a signature or authenticate the payload. Use
+component is the `signature_carrier`. `compose` joins them into an artifact,
+while `decompose` recovers the payload and signature-carrier bytes. These
+operations change document structure only. They do not verify a signature or
+authenticate the payload. Use
 [`yaml-sigil-verification`](https://crates.io/crates/yaml-sigil-verification)
 for signature verification.
 
-YAML Compose requires payload bytes that form a valid UTF-8 stream without a
-BOM and with a final line terminator when non-empty. Protobuf Compose treats
-payload bytes as opaque and preserves every accepted byte unchanged.
+YAML composition requires payload bytes that form a valid UTF-8 stream without
+a BOM and with a final line terminator when non-empty. Protobuf composition
+treats payload bytes as opaque and preserves every accepted byte unchanged.
 
 ## API Surface
 
