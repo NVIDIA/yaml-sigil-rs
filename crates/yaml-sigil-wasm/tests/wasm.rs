@@ -27,6 +27,18 @@ fn finite_limit(maximum: usize) -> ArtifactResourceLimits {
         .expect("valid finite policy")
 }
 
+fn p256_r_component(artifact: Uint8Array, form: &str) -> [u8; 32] {
+    let wire = match form {
+        "yaml" => yaml_sigil_signing::signed_yaml_stream_to_proto_wire(&artifact.to_vec()).unwrap(),
+        "protobuf" => artifact.to_vec(),
+        _ => panic!("unexpected artifact form"),
+    };
+    let decoded = yaml_sigil_core::pb::SignedYamlArtifact::decode(&wire).unwrap();
+    decoded.signature().unwrap().signature()[..32]
+        .try_into()
+        .unwrap()
+}
+
 #[wasm_bindgen_test]
 fn bounded_round_trips_use_exact_input_and_output_limits() {
     init();
@@ -58,7 +70,19 @@ fn bounded_round_trips_use_exact_input_and_output_limits() {
                 &exact,
             );
             assert_eq!(signed.status(), "success");
-            assert_eq!(signed.artifact().to_vec(), original.artifact().to_vec());
+            assert_eq!(signed.artifact().length(), original.artifact().length());
+            if algorithm == ED25519 {
+                assert_eq!(signed.artifact().to_vec(), original.artifact().to_vec());
+            } else {
+                assert_ne!(
+                    p256_r_component(signed.artifact(), form),
+                    p256_r_component(original.artifact(), form),
+                );
+            }
+            assert_eq!(
+                verify(original.artifact(), form, algorithm, bytes(&public)).status(),
+                "verified",
+            );
             let rejected = sign_with_limits(
                 bytes(PAYLOAD),
                 algorithm,
@@ -92,7 +116,7 @@ fn bounded_round_trips_use_exact_input_and_output_limits() {
                 &exact,
             );
             assert_eq!(composed.status(), "success");
-            assert_eq!(composed.artifact().to_vec(), original.artifact().to_vec());
+            assert_eq!(composed.artifact().to_vec(), signed.artifact().to_vec());
             let rejected = compose_with_limits(
                 decomposed.payload(),
                 decomposed.signature_carrier(),

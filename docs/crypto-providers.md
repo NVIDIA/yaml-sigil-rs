@@ -323,6 +323,7 @@ adapters. It is narrower than a guarantee about an integrator's provider.
 | Invalid keys, malformed signatures, provider failures, and no fallback. | Tested. | Tested through shared checks and explicit bypass cases. | Custom mappings are not tested automatically. |
 | Ed25519 valid, invalid, and mixed-order verification cases. | Fixed qualification suite, with sync/async status and call-count parity tests. | Suite intentionally skipped; native generated-key round trips are tested. | Applicable local fixtures exercise only the default implementations. |
 | P-256 high-S/low-S acceptance. | Fixed qualification suite and regressions. | Suite intentionally skipped; operation round trips are tested. | Applicable local fixtures exercise the defaults. |
+| P-256 nonce generation and entropy failure. | Integrator-owned; self-verification cannot establish nonce selection. | Integrator-owned. | Default RustCrypto signers test rejection sampling, entropy failure, and fresh nonces through sync and async operations. Custom implementations remain integrator-owned. |
 | Multiple live handles and cross-key rejection in both directions for Ed25519 and P-256. | Sync and async suites reject cached, retargeted, invalidated, or overly broad key bindings in regressions. | Suite intentionally skipped; the adapter owns binding correctness. | Custom binding behavior is not tested automatically. |
 | Protection against an adapter deliberately evading qualification. | Not provided; the adapter is trusted code. | Not provided. | Not provided by implementing traits. |
 | Runnable YAML examples with fresh keys, file/stdin/default input, and independent checking of printed output. | Native examples test qualified signing for both algorithms and qualified P-256 verification; the async example tests qualified P-256. | The dedicated `ring` example tests both operations unqualified for both algorithms without qualification; the async example tests unqualified P-256. | No runnable custom direct-trait example; default trait implementations run workspace tests. |
@@ -388,6 +389,13 @@ with the `p256::elliptic_curve::Generate` trait. The
 `try_generate_from_rng` with `rand` 0.10's fallible `SysRng`.
 Public-key bytes, signature encodings, and the external `yaml-sigil-traits`
 contracts retain their existing formats and behavior.
+
+Default P-256 signing samples a fresh nonce from the system CSPRNG for each
+signature. On browser and Node.js WebAssembly targets, it uses Web Crypto.
+Entropy failure returns `SignError::KeyOperationFailure` without an artifact.
+`DefaultAsyncSigner` performs that same operation on the polling thread.
+Provider adapters retain responsibility for their own nonce generation;
+qualification and output self-verification do not establish that behavior.
 
 You can own an application wrapper and implement `TryFrom` into these existing
 public types when conversion validates public bytes, or `From` when it is

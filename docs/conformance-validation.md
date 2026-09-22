@@ -65,6 +65,37 @@ and P-256 high-S/low-S acceptance. Provider qualification and artifact round
 trips exercise the new public key types. Fixture bytes, signature encodings,
 and deliberate divergences do not change.
 
+Default P-256 signing in `crates/yaml-sigil-signing/src/lib.rs` now follows the
+[profile's nonce-generation requirement](https://github.com/NVIDIA/yaml-sigil-spec/blob/98140c77464af0a1cae2c6a650a1adeb9493e5f2/algorithms/02-ECDSA_SECP256R1_SHA256_RAW_RS64.md#signing).
+It hashes the final payload once with SHA-256 and rejection-samples an
+independent nonce in `1..n` from the system CSPRNG. RustCrypto's prehashed
+primitive consumes that nonce directly. A zero `R` or `S` restarts sampling;
+entropy failure returns `KeyOperationFailure` without an artifact or a
+deterministic fallback. This corrects the previous RFC 6979 signing behavior,
+including for `DefaultSigner`, `DefaultAsyncSigner`, and bounded signing.
+Algorithm identifiers, raw 64-octet signatures, artifact formats, and Ed25519
+behavior remain unchanged.
+
+The signing unit tests check that a supplied test nonce determines `R`
+independently of the payload, reject zero and out-of-range candidates, exercise
+a constructed zero-`S` retry, and propagate entropy failure. Default sync and
+async tests verify fresh `R` components and valid signatures for both forms,
+empty payloads, repaired YAML final newlines, and opaque protobuf bytes.
+The existing `alg-ecdsa/two-nonce-instability.*` fixtures retain their expected
+`Verified` outcomes. Those fixed artifacts test verification; the new runtime
+tests exercise nonce generation. No fixture bytes or deliberate divergences
+change.
+
+WebAssembly uses the `getrandom` Web Crypto backend.
+`crates/yaml-sigil-wasm/tests/wasm.rs` checks fresh P-256 `R` components and
+valid signatures in Node.js and Firefox while retaining exact resource-limit
+checks. `crates/yaml-sigil-wasm/tests/generated_api.cjs` also injects a Web
+Crypto failure and requires `signer_error` with `key_operation_failure` and
+no output artifact through the default and bounded JavaScript operations.
+The byte-input regressions in `crates/yaml-sigil-wasm/tests/byte_inputs.cjs`
+verify each fresh P-256 signature and compare payloads, metadata, and artifact
+lengths instead of requiring identical signatures across calls.
+
 The unpublished WebAssembly boundary adds local regression coverage in
 `crates/yaml-sigil-wasm/tests/wasm.rs` and
 `crates/yaml-sigil-wasm/tests/generated_api.cjs`. Its opt-in bounded operations

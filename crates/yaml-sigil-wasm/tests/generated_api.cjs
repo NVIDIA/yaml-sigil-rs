@@ -133,7 +133,45 @@ const boundedSigned = api.signWithResourceLimits(
   undefined, false, "yaml", exact,
 );
 assert.equal(boundedSigned.status, "success");
-assert.deepEqual(Array.from(boundedSigned.artifact), Array.from(signed.artifact));
+assert.equal(boundedSigned.artifact.length, signed.artifact.length);
+assert.notDeepEqual(Array.from(boundedSigned.artifact), Array.from(signed.artifact));
+assert.equal(api.verify(
+  boundedSigned.artifact, "yaml", P256, verifyingKey,
+).status, "verified");
+
+// Exercise the real default signer when Web Crypto entropy acquisition fails.
+const webCrypto = globalThis.crypto;
+const randomValuesDescriptor = Object.getOwnPropertyDescriptor(webCrypto, "getRandomValues");
+let entropyCalls = 0;
+Object.defineProperty(webCrypto, "getRandomValues", {
+  configurable: true,
+  value() {
+    entropyCalls += 1;
+    throw new Error("test entropy failure");
+  },
+});
+try {
+  for (const form of ["yaml", "protobuf"]) {
+    const args = [
+      encoder.encode("name: entropy-failure\n"), P256, new Uint8Array(32).fill(3),
+      undefined, false, form,
+    ];
+    for (const result of [api.sign(...args), api.signWithResourceLimits(...args, defaults)]) {
+      assert.equal(result.status, "signer_error");
+      assert.equal(result.code, "key_operation_failure");
+      assert.equal(result.hasArtifact, false);
+      assert.equal(result.hasModifiedPayload, false);
+      assert.equal(result.artifact.length, 0);
+    }
+  }
+  assert.equal(entropyCalls, 4);
+} finally {
+  if (randomValuesDescriptor) {
+    Object.defineProperty(webCrypto, "getRandomValues", randomValuesDescriptor);
+  } else {
+    delete webCrypto.getRandomValues;
+  }
+}
 
 // Input admission precedes selectors and key processing for bounded calls.
 const tiny = defaults.withMaxArtifactBytes(1);
