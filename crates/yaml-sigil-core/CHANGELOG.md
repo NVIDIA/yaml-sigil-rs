@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.6.0-rc.1...yaml-sigil-core-v0.6.0-rc.2) - 2026-09-22
+
+### Changed
+
+- Update the private YAML backend requirement from `noyalib` `0.0.43` to
+  `0.0.46` and refresh the backend interoperability documentation.
+- Require stable `buf-tools` `1.73.0` or newer for protobuf build tooling.
+
 ## [0.6.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.5.1...yaml-sigil-core-v0.6.0-rc.1) - 2026-09-18
 
 ### Added
