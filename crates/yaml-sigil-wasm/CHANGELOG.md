@@ -4,6 +4,14 @@ All notable changes to this crate are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-wasm-v0.6.0-rc.1...yaml-sigil-wasm-v0.6.0-rc.2) - 2026-09-22
+
+### Changed
+
+- Raise the `zeroize` dependency requirement from `1.8` to `1.9`.
+- Advance the four implementation-crate dependencies to `0.6.0-rc.2` for the
+  coordinated release.
+
 ## [0.6.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/releases/tag/yaml-sigil-wasm-v0.6.0-rc.1) - 2026-09-18
 
 ### Added

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-verification-v0.6.0-rc.1...yaml-sigil-verification-v0.6.0-rc.2) - 2026-09-22
+
+### Changed
+
+- Advance the `yaml-sigil-core`, `yaml-sigil-transcription`, and test-only
+  `yaml-sigil-signing` dependencies to `0.6.0-rc.2` for the coordinated release.
+  No crate implementation changes.
+
 ## [0.6.0-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-verification-v0.5.1...yaml-sigil-verification-v0.6.0-rc.1) - 2026-09-18
 
 ### Added
