@@ -9,7 +9,7 @@ each signing request.
 
 ## API Surface
 
-- `sign` is the unified in-process signing entry point.
+- `sign` signs either artifact form in process.
 - `sign_yaml` and `sign_proto` provide form-specific convenience wrappers.
 - `sign_with_resource_limits`, `sign_yaml_with_resource_limits`, and
   `sign_proto_with_resource_limits` enforce an explicit complete-output policy.
@@ -37,10 +37,13 @@ each signing request.
 
 The shared traits allow implementations to choose different key types. `sign`,
 its form-specific wrappers, and the default signers use the RustCrypto types
-above. The provider entry points accept your adapter's bound keys.
+above. Synchronous provider calls use public-key bindings and a separate
+callback for each operation. Async provider calls use keys bound to their
+adapters.
 
-`SigningKey` debug output is redacted by design. Do not log private keys, seed
-material, tokens, or raw signatures on trusted fact surfaces.
+`SigningKey` redacts private material from debug output. Keep private keys,
+seed material, tokens, and raw signatures out of logs and trusted verification
+records.
 
 ## Local provider signing
 
@@ -129,9 +132,11 @@ Use `sign_with_provider_and_resource_limits`,
 `sign_with_p256_digest_provider_and_resource_limits` for bounded synchronous
 signing. Pass `(request, limits, callback)`. The async counterparts are
 `sign_with_async_provider_and_resource_limits` and
-`sign_with_unqualified_async_provider_and_resource_limits`. They reuse the
-preflight and exact output checks below. Ordinary provider entry points and
-the async trait facades remain unbounded by that optional policy.
+`sign_with_unqualified_async_provider_and_resource_limits`. They apply the
+preflight and exact output checks described under
+[Resource boundaries](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-signing/README.md#resource-boundaries).
+Ordinary provider entry points and the async trait facades remain unbounded
+by that optional policy.
 
 Async provider operations do not require a synchronous adapter or a library
 runtime. Clients can be borrowed without a `'static` requirement. Local

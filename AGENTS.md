@@ -80,7 +80,7 @@ choose the smallest accurate type. Follow the sign-off requirements in
 
 ## Scope
 
-This repository implements **YamlSigil v1alpha1** for Rust consumers. It is
+This repository implements YamlSigil `v1alpha1` for Rust consumers. It is
 self-contained for normal clone, build, test, and publish workflows.
 
 Local implementation inputs:
@@ -196,17 +196,16 @@ behavior unchanged, but they still require an entry in
 
 These rules apply to Markdown files in this Rust implementation workspace,
 including README files, `docs/`, conformance notes, and release guidance.
-Use GitHub Flavored Markdown as the source dialect unless a file documents a
-narrower renderer requirement.
+Write like you are explaining the implementation to a colleague. Describe the
+relevant behavior and whether this workspace, `yaml-sigil-traits`, or the
+external specification owns it.
 
-Write like you are explaining the implementation to a colleague. Be direct,
-specific, and concise. Be accurate about whether behavior belongs to this
-workspace, `yaml-sigil-traits`, or the external YamlSigil specification.
+Use GitHub Flavored Markdown (GFM), as rendered in GitHub repository views,
+unless a file documents a narrower renderer requirement. Rely on GitHub's
+generated document outline for navigation.
 
-The Markdown dialect target is GitHub Flavored Markdown (GFM), as rendered by
-GitHub repository views. Rely on GitHub's generated document outline for
-navigation. Avoid renderer-specific inline attributes such as `{width=50%}`
-in new content unless the file explicitly targets a separate renderer.
+Avoid renderer-specific inline attributes such as `{width=50%}` in new content
+unless the file explicitly targets a separate renderer.
 
 ### Voice And Tone
 
@@ -517,7 +516,7 @@ permissions, secrets, expressions, Action pins, or historical workflow files.
 Accept tokens only through environment variables; never log them, serialize
 them into fixtures, or pass them as command-line arguments.
 
-The existing release commands may compare reviewed path names and opaque Git
+The release commands may compare reviewed path names and opaque Git
 blob identities across exact commits solely to prove release-policy provenance.
 This narrow exception permits no workflow-content parsing, semantic validation,
 provider-policy snapshots, or general workflow checks. Keep the required path
@@ -575,15 +574,16 @@ The surviving provider helpers have deliberately narrow roles:
   repository-owned coordination promotion retains only its line's unpublished
   `rc.0` stub under the separate maintainer promotion procedure.
 - `attach-release-source.sh` binds an already-qualified source only to local
-  selected base refs immediately before the protected release-plz publication call; it
-  never updates a remote.
+  selected base refs immediately before the protected release-plz publication
+  call; it never updates a remote.
 - `remove-preinstalled-aws-tap.sh` performs one bounded macOS host cleanup
   before Rust setup.
 
-Release qualification, same-source recovery, and deterministic release-object
-finalization belong in the narrow `cargo xtask github release` commands, not in
-additional Python or shell helpers. Local version preparation and content
-validation remain provider-neutral under `cargo xtask release`. The exact
+Implement release qualification, same-source recovery, and deterministic
+release-object finalization in the typed `cargo xtask github release` commands.
+Do not add Python or shell helpers for those operations. Local version
+preparation and content validation are provider-neutral under
+`cargo xtask release`. The exact
 release-plz dry run is a separate maintainer-operated acceptance step because
 release-plz requires read-only forge association context.
 
@@ -810,16 +810,16 @@ separated commit sections when possible.
 `github release rebind-policy` owns the anonymous pre-authority rebind. Pass
 `--base-ref`, `--source-root`, `--source-sha`, `--version`, and
 `--operation fresh|recover` explicitly. Only current protected `main` supplies
-executing
-policy. Source attachment remains the small tested shell helper, identical
-across the two Rust repositories, and changes only the selected local refs.
+executing policy. Use the shared, tested shell helper for source attachment.
+Keep it identical across the two Rust repositories; it changes only selected
+local refs.
 The per-line JSON inventory excludes itself; compare opaque Git blob IDs,
 never workflow contents. Recovery validates historical inventory and retained
 protected-base lineage without demanding current-main content.
 
 ## Support release dispatch boundary
 
-Support push CI runs the existing nonpublishing matrix. The publication workflow
+Support push CI runs the nonpublishing matrix. The publication workflow
 runs only on main; its protected-main input helper binds canonical base, exact
 source, optional initial version, and operation before source checkout. Every
 later authority boundary passes the qualified version explicitly. Keep

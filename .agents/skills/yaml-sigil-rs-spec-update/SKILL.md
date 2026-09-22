@@ -92,10 +92,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    Apply the same review to `crates/yaml-sigil-core/THIRD_PARTY_NOTICES.md`
    when the imported JSON Schema or related conformance material changes.
 
-3. Review the spec delta that can affect this implementation. Treat this as a
-   starting point, not a closed list. If you need a diff, use the managed
-   checkout under `target/spec-update/yaml-sigil-spec` or a separate temporary
-   checkout.
+3. Review the complete specification delta for implementation impact. Use the
+   managed checkout under `target/spec-update/yaml-sigil-spec` or a separate
+   temporary checkout to inspect it.
 
    First inspect the full repository diff stat so unlisted spec files are not
    missed:
@@ -142,8 +141,8 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    irrelevant to this implementation and the omission is recorded in the commit
    or MR description.
 
-5. Map spec changes to the workspace surface. Treat this as a starting point,
-   not a closed list:
+5. Map spec changes to the affected workspace surfaces. Start with the paths
+   below and include any other paths identified by the complete diff:
 
    - `crates/yaml-sigil-core/src/algorithm.rs`: canonical YAML `alg` strings,
      protobuf enum mapping, algorithm additions, and algorithm deprecations.

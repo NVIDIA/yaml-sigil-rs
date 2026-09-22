@@ -183,7 +183,7 @@ the Windows CI runner. See the provider's
 ### Tests
 
 The unpublished `yaml-sigil-examples` workspace member registers both example
-targets with `test = true`. The existing `cargo xtask check` sequence compiles
+targets with `test = true`. `cargo xtask check` compiles
 them during all-target Clippy and executes their tests during
 `cargo test --workspace --all-features`.
 
@@ -281,8 +281,8 @@ the private key.
 The worker uses `p256` message operations with randomized signing and receives
 requests over a bounded channel. Adapters await replies, so the current-thread
 Tokio runtime can make progress while the worker performs cryptography. The
-worker is simulated service plumbing, not a production HSM, KMS, or network
-client. No credentials or external service are needed. Queue capacity does
+worker simulates a service; it requires no credentials or external connection.
+A production HSM, KMS, or network client needs its own adapter. Queue capacity does
 not bound payload size, and dropping an awaiting request does not undo work
 already accepted by the worker. A real adapter owns SDK scheduling, deadlines,
 remote cancellation, concurrency, and retry policy.

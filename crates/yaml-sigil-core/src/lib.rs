@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared YamlSigil v1alpha1 primitives: artifact decomposition, payload invariants,
-//! algorithm string mapping, and stable protobuf wire types.
+//! Shared YamlSigil `v1alpha1` operations for artifact decomposition, payload
+//! validation, algorithm mapping, and protobuf wire types.
 //!
 //! # Resource boundaries
 //!
@@ -11,9 +11,8 @@
 //! callers opt into implementation-local complete-artifact byte limits. The
 //! existing entry points remain unbounded by that policy.
 //!
-//! Publishing these APIs does not protect an existing caller automatically.
-//! Adopt a resource-aware entry point at the affected trust boundary, or
-//! enforce an equivalent earlier bound on the original raw input. The
+//! To enforce a limit, use a resource-aware entry point at the affected trust
+//! boundary or enforce an equivalent earlier bound on the original raw input. The
 //! 16,384-octet YAML signature-carrier constraint remains independent of a
 //! complete-artifact bound. Protobuf format limits, parser safeguards,
 //! address-space limits, allocator limits, and deployment controls still

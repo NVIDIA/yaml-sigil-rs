@@ -10,11 +10,10 @@ public extension-trait contract. This workspace implements signing,
 verification, transcription, protobuf wire helpers, YAML signature-document
 parsing, and local conformance checks.
 
-The repo vendors the implementation inputs it needs: the protobuf schema, the
-signature-document JSON Schema, the curated conformance fixtures, and the
-third-party notices that accompany those fixtures. The normative specification
-lives in [`yaml-sigil-spec`](https://github.com/NVIDIA/yaml-sigil-spec), not
-this repository.
+This repository includes the protobuf schema, signature-document JSON Schema,
+curated conformance fixtures, and their third-party notices. Read
+[`yaml-sigil-spec`](https://github.com/NVIDIA/yaml-sigil-spec) for the normative
+specification.
 
 NVIDIA-authored material is licensed under the
 [Apache License 2.0](./LICENSE). Third-party test data, standards-derived
@@ -41,13 +40,13 @@ crates provide the shared document handling used by those higher-level APIs.
 
 [![yaml-sigil-core on crates.io](https://img.shields.io/crates/v/yaml-sigil-core.svg?label=yaml-sigil-core)](https://crates.io/crates/yaml-sigil-core)
 
-This crate contains the document machinery shared by the other crates. It
-recognizes document boundaries, applies payload rules, reads and writes YAML
-signature documents, handles the protobuf wire format, and maps signature
+This crate provides shared document operations. It recognizes document
+boundaries, applies payload rules, reads and writes YAML signature documents,
+handles the protobuf wire format, and maps signature
 algorithms. It exposes a stable protobuf facade backed by private generated
 code from [`buffa`](https://crates.io/crates/buffa). Its public
 `SignatureDocument` Serde data model and YamlSigil-owned parser and serializer
-keep the concrete YAML backend private. The implementation currently uses
+keep the concrete YAML backend private. The implementation uses
 [`noyalib`](https://crates.io/crates/noyalib). Its optional
 `json-schema-validate` feature validates signature documents against the local
 schema.
@@ -74,11 +73,10 @@ The other implementation crates build on this layer, so most applications use
 
 [![yaml-sigil-transcription on crates.io](https://img.shields.io/crates/v/yaml-sigil-transcription.svg?label=yaml-sigil-transcription)](https://crates.io/crates/yaml-sigil-transcription)
 
-This crate puts the pieces of a signed artifact together or takes them apart.
 `compose` combines a document and its encoded signature information into a
-YAML or protobuf artifact. `decompose` separates the artifact into those pieces
-again. These operations are structural. They do not create or verify a
-signature.
+YAML or protobuf artifact. `decompose` recovers the payload and
+signature-carrier bytes. These operations are structural. They do not create
+or verify a signature.
 
 In a signing flow, `yaml-sigil-signing` uses transcription to assemble a YAML
 artifact after creating its signature. During verification,
@@ -119,12 +117,12 @@ and deciding which public keys are trusted.
 
 ### [`yaml-sigil-wasm`](./crates/yaml-sigil-wasm/README.md)
 
-This crate exposes artifact composition and decomposition to browser and
-Node.js WebAssembly consumers, along with signing and verification. Starting
-with `0.6.0-rc.1`, releases include its source package. The repository does not
-publish or retain generated WebAssembly or an npm package.
-The `0.6.0` bindings also expose explicit resource-aware operations with a
-reusable policy. Existing calls retain their unbounded whole-artifact behavior.
+This crate exposes composition, decomposition, signing, and verification to
+browser and Node.js WebAssembly consumers. Releases from `0.6.0-rc.1` include
+its source package. The repository does not publish or retain generated
+WebAssembly or an npm package. Select resource-aware operations to apply a
+reusable artifact-size policy; the ordinary calls have no whole-artifact
+limit.
 
 ### Signing and verification flow
 
@@ -138,22 +136,23 @@ reusable policy. Existing calls retain their unbounded whole-artifact behavior.
 
 ### Local cryptographic providers
 
-The signing and verification crates retain their RustCrypto convenience APIs
-and also accept synchronous provider adapters through the
-[`signature`](https://crates.io/crates/signature) 3.0 operation traits and
-awaitable adapters through native async provider traits. This
-lets an adapter keep its private key or opaque key handle inside `ring`,
-`aws-lc-rs`, an HSM integration, or another local provider while YamlSigil
-continues to own payload preparation, artifact framing, public-key checks, and
-verifier-state classification.
+Use RustCrypto convenience APIs or supply your own cryptographic provider.
+Synchronous providers use a signing callback for each operation and
+[`signature`](https://crates.io/crates/signature) 3.0 verification adapters.
+Reuse signing adapters for that crate through `signature_signing_callback`.
+Async operations use native provider traits. Your callback or adapter can
+keep its private key or opaque handle in `ring`, `aws-lc-rs`, an HSM, or another
+provider while YamlSigil handles payload preparation, artifact framing,
+public-key checks, and verifier-state classification.
 
-Provider signing binds the opaque signer to canonical public-key bytes. The
-normal builder validates that public key and self-verifies every real output
-against the final payload. It does not issue a synthetic signing request.
-Provider verification qualifies an exact adapter instance with a bounded,
-public-only suite and tracks Ed25519 and P-256 independently. Explicitly named
-unqualified builders and operations are available when a caller deliberately
-accepts the narrower assurance.
+Signing builders validate canonical public-key bytes. Synchronous bindings
+store only public material, and each operation receives its callback
+separately. Async bindings also borrow their adapter. Qualified signing checks
+every returned signature against the bound key and final payload, with no
+synthetic signing request. Provider verification qualifies an exact adapter
+instance with a bounded, public-only suite and tracks Ed25519 and P-256
+independently. Explicitly named unqualified builders and operations are
+available when a caller deliberately accepts the narrower assurance.
 
 Direct `yaml-sigil-traits` implementations are also supported when you need
 to own the complete operation. The [provider guide](./docs/crypto-providers.md)
@@ -398,12 +397,12 @@ an import.
 
 ## Release preparation
 
-The release workflow publishes source packages to crates.io for
-`yaml-sigil-core`, `yaml-sigil-transcription`, `yaml-sigil-signing`, and
-`yaml-sigil-verification`. Starting with `0.6.0-rc.1`, releases also include
-`yaml-sigil-wasm`. The workspace default, conformance, test-key, and xtask
-packages remain unpublished. Publication creates no executable artifacts or
-GitHub Release assets.
+The release workflow publishes crates.io source packages for
+`yaml-sigil-core`, `yaml-sigil-transcription`, `yaml-sigil-signing`,
+`yaml-sigil-verification`, and, from `0.6.0-rc.1`, `yaml-sigil-wasm`. The
+workspace default, conformance, test-key, and xtask packages remain
+unpublished. Publication creates no executable artifacts or GitHub Release
+assets.
 
 Maintainers prepare one local, signed release pull request for an explicitly
 selected version. See [`RELEASING.md`](RELEASING.md) for the complete

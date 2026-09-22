@@ -19,10 +19,10 @@ YAML and checks that the document fields survive the round trip. The sample
 `keyid` contains punctuation and quotes to show how the serializer handles
 string values.
 
-This is the signature document alone. A complete signed YAML artifact also
-contains a payload and document framing. The sample signature encodes the
-illustrative bytes `[1, 2, 3]`. The example neither signs nor verifies a
-payload. See the [cryptographic provider examples](../examples/README.md#local-cryptographic-providers)
+The example operates on the signature document. A complete signed YAML
+artifact also contains a payload and document framing. The sample signature
+encodes the illustrative bytes `[1, 2, 3]`. The example neither signs nor
+verifies a payload. See the [cryptographic provider examples](../examples/README.md#local-cryptographic-providers)
 for complete signing and verification flows.
 
 ## Public data model
@@ -38,9 +38,9 @@ for complete signing and verification flows.
 
 Unknown fields are rejected. Serde is a public integration boundary, so an
 application can use its own serializer with this model. The concrete YAML
-backend remains private to the core crate. Its current Noyalib dependency can
-appear transitively in your dependency graph without requiring you to import
-Noyalib or select its version directly.
+backend remains private to the core crate. Its `noyalib` dependency can appear
+transitively in your dependency graph without requiring a direct dependency
+or an application-selected version.
 
 ## Parsing and serialization boundaries
 

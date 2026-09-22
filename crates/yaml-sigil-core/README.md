@@ -59,8 +59,8 @@ continue to require raw signatures and uncompressed public keys.
 
 `SignatureDocument` and its Serde implementations form the stable public
 data-model boundary. Concrete YAML dependencies remain implementation details.
-This crate currently uses [`noyalib`](https://crates.io/crates/noyalib), but a
-consumer does not need the same `noyalib` release. Consumers can use another
+The backend uses [`noyalib`](https://crates.io/crates/noyalib). Consumers can
+select their own `noyalib` release or use another
 Serde-compatible format or library when it represents the documented field
 contract. This architectural boundary does not imply that independent YAML
 backends accept or emit the same YAML.
@@ -118,12 +118,12 @@ unknown fields and raw unknown algorithm numbers. Call
 does not retain or print payload, signature, carrier, or unknown-field bytes.
 Include a wildcard arm when matching an error category.
 
-Code that previously constructed generated structs with public fields should
-use `SignedYamlArtifact::new`, `YamlSigilSignature::new`, and their mutation
-methods. Replace Buffa `Message` trait calls with the facade's `decode`,
-`encoded_len`, `encode_to_vec`, and `encode_into` methods. All encode methods
-are fallible. Use `AlgorithmId` for recognized values and
-`algorithm_wire_value` when forwarding an unknown protobuf enum number.
+Construct messages with `SignedYamlArtifact::new` and
+`YamlSigilSignature::new`, then update them through their mutation methods.
+Decode and encode with the facade's `decode`, `encoded_len`, `encode_to_vec`,
+and `encode_into` methods. All encode methods are fallible. Use `AlgorithmId`
+for recognized values and `algorithm_wire_value` when forwarding an unknown
+protobuf enum number.
 
 ## Resource boundaries
 

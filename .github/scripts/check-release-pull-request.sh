@@ -123,8 +123,8 @@ for path in "${changed[@]}"; do
 
   entry="$(git ls-tree "${HEAD_SHA}" -- "${path}")"
   IFS=$' \t' read -r mode object_type object_sha listed_path extra <<< "${entry}"
-  # Release-plz may modify existing source files, but it may not delete them,
-  # replace them with links, or change their executable/source-file mode.
+  # Require allowed paths to exist as non-executable regular files.
+  # The path allowlist alone cannot establish their file types.
   if [[ "${mode}" != "100644" \
     || "${object_type}" != "blob" \
     || ! "${object_sha}" =~ ^[0-9a-f]{40}$ \

@@ -3,10 +3,11 @@
 
 //! Build-time key pairs for integration tests.
 //!
-//! Add this crate **only** as a **[`dev-dependencies`]** entry. It is not published and is
-//! not meant for production binaries. Normal `cargo build` / `cargo check` of
-//! `yaml-sigil-verification` or `yaml-sigil-signing` does **not** compile this crate; it is
-//! resolved when building those packages’ tests (or `cargo test -p yaml-sigil-test-keys`).
+//! Add this unpublished crate only under [`dev-dependencies`]. Its keys are for
+//! tests and must not be used in production. Building or checking
+//! `yaml-sigil-verification` or `yaml-sigil-signing` without test targets does
+//! not compile this crate. Building their tests, or running
+//! `cargo test -p yaml-sigil-test-keys`, compiles it.
 //!
 //! [`dev-dependencies`]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#development-dependencies
 
