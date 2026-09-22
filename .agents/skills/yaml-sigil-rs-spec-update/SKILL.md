@@ -191,12 +191,12 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 6. Run the quality loop appropriate to the change:
 
    ```shell
-   cargo xtask ci
+   cargo xtask check
    ```
 
    During fixture iteration, use
    `cargo test -p yaml-sigil-conformance --all-features` as a faster focused
-   check. The final validation remains `cargo xtask ci`.
+   check. The final validation remains `cargo xtask check`.
 
 7. Coordinate release order after review:
 

@@ -63,10 +63,10 @@ jobs:
           .github/scripts/check-trusted-tool-pins.sh
           .github/scripts/test-trusted-tool-pins.sh
 
-      # `cargo xtask ci` runs Markdown, Protobuf, formatting, package-content,
-      # Clippy, test, unused-dependency, dependency-policy, and audit checks.
+      # `cargo xtask check` runs Markdown, Protobuf, formatting, package-content,
+      # compile, Clippy, test, downstream, dependency-policy, and audit checks.
       - name: Run provider-neutral CI
-        run: cargo xtask ci
+        run: cargo xtask check
 
       - name: Test protected reporter policy
         env:

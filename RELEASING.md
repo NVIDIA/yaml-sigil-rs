@@ -87,7 +87,7 @@ previous published entry from `HEAD` alongside it.
 Then run the full provider-neutral validation sequence.
 
 ```shell
-cargo xtask ci
+cargo xtask check
 # Full CI needs an ignored dependency-resolution lock; remove only the regular
 # file it created before committing the source-only release transaction.
 test -f Cargo.lock

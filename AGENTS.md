@@ -36,6 +36,18 @@ artifacts, or reconciling this Rust implementation after spec updates.
 Follow [`xtask/AGENTS.md`](xtask/AGENTS.md) when changing the developer task
 crate or its release-command boundaries.
 
+The standard development handles are `check` (`ci` alias), `coverage`,
+`coverage-open`, `profile`, and `profile-open`. This repository owns no image
+workflow or MCP server; do not add image or MCP tasks. Keep CI, workflows,
+scripts, and command documentation aligned when these handles change without
+making the xtask inspect provider declarations.
+
+Prefer typed, portable Cargo xtasks for Cargo-aware development orchestration.
+Inspect overlapping Python helpers and propose a migration before changing
+one; obtain user approval before replacing a mature script or its callers.
+Retain Python at the existing pre-checkout and protected-reporting boundaries,
+where compiling candidate Rust would violate the trust model.
+
 Follow [`docs/AGENTS.md`](docs/AGENTS.md) when changing documentation or
 implementation behavior covered by a guide. It defines the update triggers
 for the provider guide, conformance record, and YAML backend evaluation.
@@ -208,7 +220,7 @@ review.
 | Unnecessary bold | "This is a **critical** conformance step" on routine instructions. | Reserve bold for UI labels, parameter names, and genuine warnings. |
 | Repeated em dashes | "The fixture import -- which runs through `cargo xtask update-spec` -- refreshes local artifacts." | Use commas or split the sentence. Use em dashes sparingly. |
 | Superlatives | "`yaml-sigil-rs` provides a powerful, robust, seamless signature experience." | Say which crate or API performs the work. |
-| Hedge words | "Simply run `cargo xtask ci`." | Write "Run `cargo xtask ci`." |
+| Hedge words | "Simply run `cargo xtask check`." | Write "Run `cargo xtask check`." |
 | Emoji in prose | "Run tests before publish." with an emoji prefix. | Do not use emoji in documentation prose. |
 | Rhetorical questions | "Want to validate fixtures?" | State the purpose directly. |
 
@@ -224,7 +236,7 @@ review.
   with `$`.
 
   ```shell
-  cargo xtask ci
+  cargo xtask check
   ```
 
 - Use `text` code blocks for transcripts, log output, and examples that should
@@ -271,7 +283,9 @@ review.
 Run from the repository root:
 
 ```shell
-cargo xtask ci
+cargo xtask check
+cargo xtask check --only=fmt,clippy,test
+cargo xtask check --exclude=audit
 cargo xtask package-content
 cargo xtask update-spec
 cargo xtask update-spec --ref origin/dev/example-branch
@@ -283,14 +297,30 @@ cargo xtask wasm
 cargo xtask coverage
 cargo xtask coverage --open
 cargo xtask coverage-open
+cargo xtask coverage --engine=tarpaulin
+cargo xtask coverage-view
 cargo xtask profile
 cargo xtask profile --iterations 250
 cargo xtask profile --open
 cargo xtask profile-open
+cargo xtask profile-view
 ```
 
-`cargo xtask ci` runs the complete provider-neutral non-release validation
-sequence locally. Its exact commands are:
+`cargo xtask check` runs every registered check in this order: `markdown`,
+`protobuf`, `fmt`, `versions`, `package-content`, `check`, `clippy`, `test`,
+`downstream`, `machete`, `deny`, and `audit`. It stops at the first failure.
+`cargo xtask ci` is a visible alias with the same arguments and execution path.
+Use either `--only=<csv>` or `--exclude=<csv>` to select checks. Empty or unknown
+selections fail; duplicates run once in registry order.
+
+Checks and coverage enable all workspace features when no feature option is
+supplied. They accept `--all-features`, `--features=<csv>`, and
+`--no-default-features`; the last two may be combined. The independent locked
+xtask and downstream fixture graphs keep their own feature contracts.
+Dependency checks generate a missing ignored root or downstream lockfile when
+needed, so narrow `deny` and `audit` selections also work from a fresh checkout.
+
+The default command sequence is:
 
 ```shell
 rumdl check .
@@ -305,6 +335,8 @@ cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-trans
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-signing
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-verification
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-wasm
+cargo check --workspace --all-targets --all-features
+cargo check --locked --manifest-path xtask/Cargo.toml --all-targets --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
@@ -314,7 +346,7 @@ cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-noyalib-0-0-35
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-downstream-resource-api
 cargo-machete --with-metadata
-cargo deny check bans licenses sources -D warnings
+cargo deny --all-features check bans licenses sources -D warnings
 cargo deny --manifest-path tests/downstream/Cargo.toml --locked check licenses sources -D warnings -A no-license-field -A unlicensed
 cargo deny --manifest-path xtask/Cargo.toml --locked check bans licenses sources -D warnings -A unnecessary-skip -A unmatched-skip
 cargo audit
@@ -349,11 +381,12 @@ limits, and generated JavaScript result mapping in local WebAssembly tests.
 Copied-ref CI first runs protected commit/release-path policy plus fixed-path
 actionlint, ShellCheck, rumdl, cargo-machete, and `cargo-audit` against the
 committed `xtask/Cargo.lock`. The root lockfile is intentionally absent, so the
-full workspace audit inside the final `cargo xtask ci` phase is candidate
+full workspace audit inside the final `cargo xtask check` phase is candidate
 execution, not trusted pre-execution policy evidence. The Cargo Deny checks
 also run inside that final phase because they resolve candidate dependency
 graphs. The downstream tests generate their separate ignored lockfile before
-the downstream license, source, and RustSec checks consume it. Candidate tools,
+the downstream license, source, and RustSec checks consume it. A narrow
+dependency-check selection resolves a missing lockfile without running tests. Candidate tools,
 Cargo state, targets, temporary files, and materialized source stay under fresh
 runner-temporary paths; no policy or privileged step follows candidate Rust.
 
@@ -461,7 +494,7 @@ and build dependency names across all features, but remains an
 unused-dependency heuristic; retain the all-target, all-feature Clippy and
 test checks as the compilation proof.
 
-Hosted CI runs this sequence through `cargo xtask ci`. Keep its command
+Hosted CI runs this sequence through `cargo xtask check`. Keep its command
 coverage, `xtask/src/ci.rs`, and the exact-command documentation above aligned
 when changing the validation sequence. Do not make the xtask read, parse, or
 test provider-specific workflow files. Validate provider configuration with
@@ -489,7 +522,7 @@ use the mutable `CI` variable or configurable environment values as a trust
 switch. Local mutation commands must take an explicit repository and bind it
 to that same table and checkout.
 
-`cargo xtask ci` and every non-`github` command must remain provider-neutral
+`cargo xtask check` and every non-`github` command must remain provider-neutral
 and credential-free.
 
 Python is permitted here only for the pre-checkout candidate binder, the
@@ -581,7 +614,7 @@ shellcheck .github/scripts/check-pull-request-commits.sh
 ```
 
 Hosted CI runs its pinned ShellCheck Action for these provider-specific scripts.
-Keep this validation outside `cargo xtask ci`.
+Keep this validation outside `cargo xtask check`.
 
 Hosted CI pins its authoritative stable baseline to Rust `1.98.0` and runs an
 independent Rust `1.95.0` lane on NVIDIA's `linux-amd64-cpu8` runner.
@@ -599,7 +632,7 @@ change, even when the workflow inputs remain unchanged. While evaluating a
 candidate update, compare the Action at the current and candidate immutable
 SHAs, including its commands, inputs and defaults, runtime, and transitive
 `uses:` dependencies. Determine whether those changes affect the local
-`cargo xtask ci` equivalent or this exact-command documentation. When an Action
+`cargo xtask check` equivalent or this exact-command documentation. When an Action
 update changes relevant behavior, reify it in hosted CI and, when applicable,
 the xtask command plan and this file in the same change. Document any
 intentional hosted-versus-local difference without making the xtask depend on
@@ -612,38 +645,45 @@ workflow explicitly needs them.
 
 ### Coverage and profiling
 
-Install the Cargo tools used for local reports:
+Install the tools for the report engine you select:
 
 ```shell
-cargo install cargo-llvm-cov
+cargo install --locked cargo-llvm-cov
+cargo install --locked cargo-tarpaulin
 cargo install --locked samply
 ```
 
-The coverage and profiling xtasks check for their required tool before doing
-other work and print the corresponding installation command above when it is
-absent. Keep these commands aligned with the constants and synchronization
-test in `xtask/src/main.rs`.
+Only the selected operation's tools are probed. Missing and installed-but-
+unusable tools receive separate diagnostics with their installation command.
+Keep these commands aligned with `xtask/src/reports.rs` and the guidance test
+in `xtask/src/lib.rs`.
 
-`cargo xtask coverage` tests the workspace with all features and writes an HTML
-coverage report to `target/llvm-cov-html/html/index.html`. It does not open a
-browser unless `--open` is supplied. `cargo xtask coverage-open` opens an
-existing report without rebuilding it.
+`cargo xtask coverage` uses LLVM coverage by default and writes
+`target/llvm-cov-html/html/index.html`. `--engine=tarpaulin` writes
+`target/coverage/tarpaulin/tarpaulin-report.html`. `coverage --open` and
+`coverage-open` both generate a fresh report before opening it and accept the
+same engine and feature options. Use `coverage-view --engine=<ENGINE>` to open
+an existing report without rerunning tests.
 
-`cargo xtask profile` builds the focused E2E test with release-equivalent
-optimization and debug symbols, records it with Samply, and writes Firefox
-Profiler data to `target/profile/profile.json`. The test is very short, so the
-task runs it 100 times by default; use `--iterations` to tune the sample. The
-default is non-interactive. Use `--open` after recording or run
-`cargo xtask profile-open` later to launch the interactive browser UI. Samply
-does not produce a standalone HTML file. On Linux, the host's perf-event policy
-must permit unprivileged profiling; follow local system policy if Samply reports
-that `perf_event_paranoid` is too restrictive.
+Tarpaulin uses `target/coverage/tarpaulin/build` for compilation so its cleanup
+does not remove ordinary build outputs. Reports cover the root workspace;
+Tarpaulin excludes the separate xtask and downstream fixture workspaces.
 
-Agents should begin performance work with focused source inspection, tests,
-benchmarks, or timings that answer the question with less data. Run
-`cargo xtask profile` when investigating a concrete CPU-performance issue, and
-leave it non-interactive unless a human asks to open the browser UI. Report the
-saved profile path so a human can inspect it with `cargo xtask profile-open`.
+`cargo xtask profile` builds the `yaml-sigil-conformance` integration test
+`e2e_buildtime_keys` with release-equivalent optimization and debug symbols.
+It selects the executable from Cargo JSON output, repeats the test 100 times
+by default, and writes `target/profile/profile.json`. Use `--iterations` to
+change the sample size. `profile --open` and `profile-open` both record a
+fresh profile before opening Samply's interactive browser UI. Use
+`profile-view` to inspect an existing profile. Samply does not produce a
+standalone HTML file. On Linux, the task reports `perf_event_paranoid` and
+leaves host permissions unchanged; follow local system policy when recording
+is denied.
+
+Begin performance work with focused source inspection, tests, benchmarks, or
+timings. Run `cargo xtask profile` for a concrete CPU-performance question and
+leave it non-interactive unless a human asks to open the browser. Report the
+saved path for later inspection with `cargo xtask profile-view`.
 
 ## Cargo Features
 

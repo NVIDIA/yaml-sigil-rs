@@ -77,3 +77,4 @@ unsafe_code = "forbid"
 [profile.profiling]
 inherits = "release"
 debug = true
+strip = "none"

@@ -10,7 +10,7 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 # Keep the developer tool's target inventory explicit; only the declared
-# binary below participates in validation.
+# binary and library below participate in validation.
 autobenches = false
 autobins = false
 autoexamples = false
@@ -19,6 +19,9 @@ autotests = false
 build = false
 license = "Apache-2.0"
 description = "Developer-only tasks for yaml-sigil-rs."
+
+[lib]
+path = "src/lib.rs"
 
 [[bin]]
 name = "xtask"

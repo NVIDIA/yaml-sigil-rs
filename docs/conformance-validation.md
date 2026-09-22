@@ -599,4 +599,4 @@ When importing fixtures from a spec checkout:
 3. Update suite code and this document together if fixture names, categories,
    or expected outcomes change.
 4. Run `cargo test -p yaml-sigil-conformance --all-features` while iterating.
-5. Run `cargo xtask ci` as the final validation gate.
+5. Run `cargo xtask check` as the final validation gate.
