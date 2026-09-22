@@ -122,18 +122,31 @@ module.exports = async function byteInputRegressions(api) {
     ];
     try {
       for (const [name, inputs, call] of operations) {
-        const expected = snapshot(call(...inputs));
+        const capture = (result) => {
+          const value = snapshot(result);
+          if (name === "sign" && value.hasArtifact) {
+            // P-256 signatures vary. Preserve the byte-input checks by proving
+            // that each output signs the exact payload with the expected key.
+            const artifact = Uint8Array.from(value.artifact);
+            const verified = snapshot(api.verify(artifact, "protobuf", algorithm, publicKey));
+            assert.equal(verified.status, "verified");
+            assert.deepEqual(verified.payload, Array.from(payload));
+            value.artifact = { byteLength: artifact.length, verified };
+          }
+          return value;
+        };
+        const expected = capture(call(...inputs));
         for (let index = 0; index < inputs.length; index += 1) {
           for (const [variant, make] of variants) {
             const args = inputs.slice();
             args[index] = make(inputs[index]);
-            assert.deepEqual(snapshot(call(...args)), expected, `${name}${suffix} input ${index} ${variant}`);
+            assert.deepEqual(capture(call(...args)), expected, `${name}${suffix} input ${index} ${variant}`);
           }
           for (const make of invalid) {
             const args = inputs.slice();
             args[index] = make();
             rejected(call(...args));
-            assert.deepEqual(snapshot(call(...inputs)), expected, "operation remains usable after rejection");
+            assert.deepEqual(capture(call(...inputs)), expected, "operation remains usable after rejection");
             const nextPolicy = limits.withMaxArtifactBytes(1024);
             assert.equal(nextPolicy.maxArtifactBytes, 1024);
             nextPolicy.free();
@@ -169,9 +182,9 @@ module.exports = async function byteInputRegressions(api) {
             if (change === "detach") rejected(result);
             else {
               assert.equal(args[index].length, inputs[index].length + 8);
-              assert.deepEqual(snapshot(result), expected, "growth keeps the admitted extent");
+              assert.deepEqual(capture(result), expected, "growth keeps the admitted extent");
             }
-            assert.deepEqual(snapshot(call(...inputs)), expected, "operation releases policy borrow");
+            assert.deepEqual(capture(call(...inputs)), expected, "operation releases policy borrow");
           }
         }
       }

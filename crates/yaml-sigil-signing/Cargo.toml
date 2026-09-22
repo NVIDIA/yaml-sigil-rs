@@ -41,7 +41,10 @@ workspace = true
 [dependencies]
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 curve25519-dalek = { workspace = true }
+ecdsa = { version = "0.17", default-features = false, features = ["algorithm"] }
 ed25519-dalek = { workspace = true }
+# Use the system CSPRNG, including Web Crypto on browser/Node.js WebAssembly.
+getrandom = { version = "0.4", features = ["sys_rng", "wasm_js"] }
 p256 = { workspace = true }
 sha2 = { workspace = true }
 signature = { workspace = true }
@@ -50,6 +53,7 @@ tracing = "0.1"
 yaml-sigil-core = { workspace = true, default-features = false }
 yaml-sigil-traits = { workspace = true, default-features = false }
 yaml-sigil-transcription = { workspace = true, default-features = false }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

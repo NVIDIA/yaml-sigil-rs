@@ -11,6 +11,11 @@
 //!
 //! Convenience wrappers [`sign_yaml`] and [`sign_proto`] call [`sign`] with a fixed [`OutputForm`].
 //!
+//! Default P-256 signing samples a fresh nonce from the system CSPRNG for each
+//! signature, using Web Crypto on browser and Node.js WebAssembly targets.
+//! Entropy failure returns [`SignError::KeyOperationFailure`]. Ed25519 signing
+//! remains deterministic.
+//!
 //! # Resource boundaries
 //!
 //! Existing signing entry points retain their unbounded complete-output
@@ -825,14 +830,39 @@ fn sign_digest(
             Ok(sk.sign(payload).to_bytes())
         }
         (AlgorithmId::EcdsaP256Sha256, SigningKey::EcdsaP256Sha256(sk)) => {
-            use p256::ecdsa::signature::Signer;
-            let sig: p256::ecdsa::Signature = sk
-                .try_sign(payload)
-                .map_err(|_| SignError::KeyOperationFailure)?;
-            // Raw R || S 64 octets.
-            Ok(sig.to_bytes().into())
+            sign_p256_with_rng(payload, sk, &mut getrandom::SysRng)
         }
         _ => Err(SignError::InvalidOrUnsupportedAlgorithm),
+    }
+}
+
+fn sign_p256_with_rng<R: getrandom::rand_core::TryCryptoRng + ?Sized>(
+    payload: &[u8],
+    key: &p256::ecdsa::SigningKey,
+    rng: &mut R,
+) -> Result<[u8; 64], SignError> {
+    use p256::elliptic_curve::Generate;
+    use sha2::Digest;
+    use zeroize::Zeroizing;
+
+    // The v1alpha1 P-256 profile requires a CSPRNG-sampled nonce. RustCrypto's
+    // message-signing APIs use RFC 6979, including the randomized variant.
+    // Keep the supplied nonce independent of the key and SHA-256 payload hash.
+    let digest = sha2::Sha256::digest(payload);
+    loop {
+        // RustCrypto rejection-samples uniformly in 1..n; entropy failure must
+        // abort rather than panic or fall back to deterministic signing.
+        let nonce = Zeroizing::new(
+            p256::NonZeroScalar::try_generate_from_rng(rng)
+                .map_err(|_| SignError::KeyOperationFailure)?,
+        );
+        // The primitive rejects zero R or S. The profile requires a fresh
+        // nonce in that case. It consumes the prehash without hashing again.
+        if let Ok((signature, _)) =
+            ecdsa::hazmat::sign_prehashed(key.as_nonzero_scalar(), &nonce, &digest)
+        {
+            return Ok(signature.to_bytes().into());
+        }
     }
 }
 
@@ -857,9 +887,9 @@ impl Signer for DefaultSigner {
 
 /// In-process default async signer that delegates to the crate's free functions.
 ///
-/// The body is `async { sign(req) }` — no `tokio::spawn_blocking`. The signing
-/// path is CPU-bound, deterministic, and short; offloading to a blocking pool
-/// would add latency without protecting any meaningful reactor.
+/// The body is `async { sign(req) }`. It runs cryptography and P-256 system
+/// entropy acquisition on the polling thread without selecting an executor or
+/// a blocking pool. Entropy failure returns [`SignError::KeyOperationFailure`].
 ///
 /// This unit type retains the unconfigured resource behavior of [`sign`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -914,6 +944,255 @@ mod tests {
     fn finite(maximum: usize) -> ArtifactResourceLimits {
         ArtifactResourceLimits::unbounded()
             .with_max_artifact_bytes(std::num::NonZeroUsize::new(maximum).unwrap())
+    }
+
+    fn p256_request<'a>(
+        key: &'a p256::ecdsa::SigningKey,
+        output_form: OutputForm,
+        payload: &'a [u8],
+    ) -> SignRequest<'a> {
+        SignRequest {
+            payload,
+            algorithm: AlgorithmId::EcdsaP256Sha256,
+            key: SigningKey::EcdsaP256Sha256(key),
+            keyid: Some("p256-nonce-test"),
+            append_missing_final_newline: true,
+            output_form,
+            algorithm_parameters: &[],
+        }
+    }
+
+    fn verify_p256_success(
+        outcome: SignOutcome,
+        request: &SignRequest<'_>,
+        key: &p256::ecdsa::SigningKey,
+        expected_payload: &[u8],
+    ) -> [u8; 64] {
+        use signature::Verifier;
+        use yaml_sigil_core::pb::SignedYamlArtifact;
+
+        let SignOutcome::Success(success) = outcome else {
+            panic!("expected a signed artifact, got {outcome:?}");
+        };
+        let wire = match request.output_form {
+            OutputForm::Yaml => signed_yaml_stream_to_proto_wire(&success.artifact).unwrap(),
+            OutputForm::Protobuf => success.artifact,
+        };
+        let artifact = SignedYamlArtifact::decode(&wire).unwrap();
+        assert_eq!(artifact.payload(), expected_payload);
+        let carrier = artifact.signature().unwrap();
+        assert_eq!(carrier.algorithm(), Some(AlgorithmId::EcdsaP256Sha256));
+        assert_eq!(carrier.keyid(), request.keyid);
+        let signature = p256::ecdsa::Signature::from_slice(carrier.signature()).unwrap();
+        key.verifying_key()
+            .verify(expected_payload, &signature)
+            .expect("signature must hash the final payload exactly once");
+        signature.to_bytes().into()
+    }
+
+    fn p256_payload_cases() -> [(OutputForm, &'static [u8], &'static [u8]); 4] {
+        [
+            (OutputForm::Yaml, b"", b""),
+            (OutputForm::Yaml, b"a: b", b"a: b\n"),
+            (OutputForm::Protobuf, b"", b""),
+            (OutputForm::Protobuf, &[0xff, 0, 0x80], &[0xff, 0, 0x80]),
+        ]
+    }
+
+    // Test-only entropy source. Exhaustion models an unavailable system CSPRNG.
+    struct ScriptedRng {
+        candidates: std::vec::IntoIter<[u8; 32]>,
+        calls: usize,
+    }
+
+    impl ScriptedRng {
+        fn new(candidates: impl IntoIterator<Item = [u8; 32]>) -> Self {
+            Self {
+                candidates: candidates.into_iter().collect::<Vec<_>>().into_iter(),
+                calls: 0,
+            }
+        }
+    }
+
+    impl getrandom::rand_core::TryRng for ScriptedRng {
+        type Error = getrandom::Error;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            panic!("nonce sampling must request scalar bytes");
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            panic!("nonce sampling must request scalar bytes");
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            let candidate = self
+                .candidates
+                .next()
+                .ok_or(getrandom::Error::UNSUPPORTED)?;
+            dest.copy_from_slice(&candidate);
+            Ok(())
+        }
+    }
+
+    impl getrandom::rand_core::TryCryptoRng for ScriptedRng {}
+
+    #[test]
+    fn p256_uses_sampled_nonce_without_rfc6979() {
+        use p256::elliptic_curve::point::AffineCoordinates;
+        use signature::Verifier;
+
+        let key = p256::ecdsa::SigningKey::from_slice(&[15; 32]).unwrap();
+        // A test-only nonce of one must produce R = x(G), independently of the
+        // message. RFC 6979 with added entropy would not preserve that R.
+        let expected_r = p256::AffinePoint::GENERATOR.x();
+        for payload in [b"first payload".as_slice(), b"second payload"] {
+            let mut rng = ScriptedRng::new([p256::Scalar::ONE.to_bytes().into()]);
+            let bytes = sign_p256_with_rng(payload, &key, &mut rng).unwrap();
+            assert_eq!(rng.calls, 1);
+            assert_eq!(&bytes[..32], expected_r.as_slice());
+            key.verifying_key()
+                .verify(
+                    payload,
+                    &p256::ecdsa::Signature::from_slice(&bytes).unwrap(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn p256_rejects_zero_and_out_of_range_nonces() {
+        use p256::elliptic_curve::{Curve, point::AffineCoordinates};
+        use signature::Verifier;
+
+        let key = p256::ecdsa::SigningKey::from_slice(&[16; 32]).unwrap();
+        let mut rng = ScriptedRng::new([
+            [0; 32],
+            p256::NistP256::ORDER.to_be_bytes().into(),
+            [0xff; 32],
+            (-p256::Scalar::ONE).to_bytes().into(),
+        ]);
+        let payload = b"nonce range rejection\n";
+        let bytes = sign_p256_with_rng(payload, &key, &mut rng).unwrap();
+        assert_eq!(rng.calls, 4);
+        // n - 1 is admissible and produces the same x coordinate as G.
+        assert_eq!(&bytes[..32], p256::AffinePoint::GENERATOR.x().as_slice());
+        key.verifying_key()
+            .verify(
+                payload,
+                &p256::ecdsa::Signature::from_slice(&bytes).unwrap(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn p256_entropy_failure_returns_no_artifact() {
+        let key = p256::ecdsa::SigningKey::from_slice(&[17; 32]).unwrap();
+        for form in [OutputForm::Yaml, OutputForm::Protobuf] {
+            for candidates in [vec![], vec![[0; 32]]] {
+                let expected_calls = candidates.len() + 1;
+                let mut rng = ScriptedRng::new(candidates);
+                let request = p256_request(&key, form, b"a: b\n");
+                let outcome = sign_after_invocation_validation(&request, None, |payload| {
+                    sign_p256_with_rng(payload, &key, &mut rng)
+                })
+                .unwrap();
+                assert!(matches!(
+                    outcome,
+                    SignOutcome::Signer(SignError::KeyOperationFailure)
+                ));
+                assert_eq!(rng.calls, expected_calls);
+            }
+        }
+    }
+
+    #[test]
+    fn p256_retries_zero_s_with_a_fresh_nonce() {
+        use p256::elliptic_curve::{ops::Reduce, point::AffineCoordinates};
+        use sha2::Digest;
+        use signature::Verifier;
+
+        let payload = b"zero-s retry\n";
+        let digest = sha2::Sha256::digest(payload);
+        let z = <p256::Scalar as Reduce<p256::U256>>::reduce(&p256::U256::from_be_slice(&digest));
+        let r = <p256::Scalar as Reduce<p256::U256>>::reduce(&p256::U256::from_be_slice(
+            &p256::AffinePoint::GENERATOR.x(),
+        ));
+        // Construct a synthetic test key for which nonce one gives S = 0.
+        let secret = -(z * r.invert().unwrap());
+        let key = p256::ecdsa::SigningKey::from_bytes(&secret.to_bytes()).unwrap();
+        let one: [u8; 32] = p256::Scalar::ONE.to_bytes().into();
+        let nonce = p256::NonZeroScalar::from_repr(one.into()).unwrap();
+        assert!(ecdsa::hazmat::sign_prehashed(key.as_nonzero_scalar(), &nonce, &digest).is_err());
+
+        let mut rng = ScriptedRng::new([one, p256::Scalar::from(2u64).to_bytes().into()]);
+        let bytes = sign_p256_with_rng(payload, &key, &mut rng).unwrap();
+        assert_eq!(rng.calls, 2);
+        key.verifying_key()
+            .verify(
+                payload,
+                &p256::ecdsa::Signature::from_slice(&bytes).unwrap(),
+            )
+            .unwrap();
+
+        let mut exhausted = ScriptedRng::new([one]);
+        assert!(matches!(
+            sign_p256_with_rng(payload, &key, &mut exhausted),
+            Err(SignError::KeyOperationFailure)
+        ));
+        assert_eq!(exhausted.calls, 2);
+    }
+
+    #[test]
+    fn default_p256_signer_uses_fresh_nonces() {
+        let key = p256::ecdsa::SigningKey::from_slice(&[13; 32]).unwrap();
+        for (form, payload, expected) in p256_payload_cases() {
+            let request = p256_request(&key, form, payload);
+            let first = verify_p256_success(
+                Signer::sign(&DefaultSigner, &request),
+                &request,
+                &key,
+                expected,
+            );
+            let second = verify_p256_success(
+                Signer::sign(&DefaultSigner, &request),
+                &request,
+                &key,
+                expected,
+            );
+            assert_ne!(&first[..32], &second[..32], "P-256 must use a fresh nonce");
+            let bounded = verify_p256_success(
+                sign_with_resource_limits(&request, &ArtifactResourceLimits::unbounded())
+                    .unwrap()
+                    .unwrap(),
+                &request,
+                &key,
+                expected,
+            );
+            assert_ne!(&first[..32], &bounded[..32]);
+        }
+    }
+
+    #[tokio::test]
+    async fn default_async_p256_signer_uses_fresh_nonces() {
+        let key = p256::ecdsa::SigningKey::from_slice(&[14; 32]).unwrap();
+        for (form, payload, expected) in p256_payload_cases() {
+            let request = p256_request(&key, form, payload);
+            let first = verify_p256_success(
+                AsyncSigner::sign(&DefaultAsyncSigner, &request).await,
+                &request,
+                &key,
+                expected,
+            );
+            let second = verify_p256_success(
+                AsyncSigner::sign(&DefaultAsyncSigner, &request).await,
+                &request,
+                &key,
+                expected,
+            );
+            assert_ne!(&first[..32], &second[..32], "P-256 must use a fresh nonce");
+        }
     }
 
     #[test]
