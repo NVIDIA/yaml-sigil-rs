@@ -1,88 +1,124 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! Local cryptographic-provider signing adapters.
+//! Public-key bindings for synchronous signing callbacks.
 //!
-//! Adapters implement `signature::Signer<[u8; 64]> + Sync`; YamlSigil passes the
-//! exact final message bytes and never asks for a prehash. Ed25519 output is
-//! canonical RFC 8032 `R || S`. P-256 output is big-endian `r || s`, and the
-//! adapter applies SHA-256 exactly once.
+//! Bind the selected algorithm and canonical public key before signing, then
+//! supply a callback to each operation. The binding stores no provider handle.
+//! Bindings and requests remain [`Send`] and [`Sync`]; callbacks may borrow
+//! mutable, thread-confined state without either bound. A callback runs
+//! synchronously on the calling thread and may block it. YamlSigil adds no
+//! executor, signing probe, or retry.
 //!
-//! [`ProviderSigningKeyBuilder::build`] validates the canonical public key
-//! bound to the opaque signer and self-verifies every real output. It does not
-//! issue a synthetic signing request. The explicitly unqualified builder
-//! retains public-key and signature-structure checks but skips output
-//! self-verification.
+//! [`crate::sign_with_provider`] passes the final payload bytes, after any
+//! authorized YAML final-newline handling. Protobuf payloads stay unchanged.
+//! Ed25519 output is canonical RFC 8032 `R || S`. P-256 output is big-endian
+//! `r || s`, and a message callback applies SHA-256 exactly once. The separate
+//! [`crate::sign_with_p256_digest_provider`] operation computes that hash and
+//! passes `&[u8; 32]`; its callback must sign the digest without hashing again.
+//! P-256 callbacks remain responsible for the profile's CSPRNG nonce sampling.
 //!
-//! # Implement a signing adapter
+//! [`ProviderSigningKeyBuilder::build`] validates the public key. Qualified
+//! operations validate and independently verify each returned signature
+//! against that key and the final payload before emitting an artifact.
+//! [`ProviderSigningKeyBuilder::build_unqualified`] retains key and signature
+//! structure checks but skips that verification. Operation failures should
+//! return [`SignError::KeyOperationFailure`]; validation failures and resource
+//! rejection before signing make no callback calls. An admitted signing
+//! operation calls once, including when a later YAML size check rejects output.
 //!
-//! Implement [`signature::Signer<[u8; 64]>`](signature::Signer) for a type you
-//! own that holds or borrows your provider's initialized key handle. Add a
-//! direct dependency on `signature` 3.0 to implement this contract. The adapter
-//! must be [`Sync`], and its `try_sign` method returns exactly 64 signature
-//! octets or a [`signature::Error`]. Operation errors become
-//! [`SignError::KeyOperationFailure`].
+//! # Borrow mutable local state
 //!
-//! This example wraps a borrowed `p256` 0.14 key. Replace the wrapper's field
-//! and signing call with your provider's handle and message-signing operation.
-//! The builder receives an adapter reference and public-key bytes without
-//! requiring private-key export. The `p256` signing call applies SHA-256, so
-//! the adapter passes `message` to it unchanged.
+//! Replace the example key operation with your initialized SDK session. Public
+//! bytes bind the callback's output without requiring private-key export.
+//!
+//! ```
+//! use std::{cell::RefCell, rc::Rc};
+//! use yaml_sigil_core::AlgorithmId;
+//! use yaml_sigil_signing::{
+//!     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
+//!     ProviderSigningKeys, SignError, SignOutcome, sign_with_provider,
+//! };
+//!
+//! // A fixed key is only a documentation fixture.
+//! let native_key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+//! let key = ProviderSigningKeyBuilder::ed25519(native_key.verifying_key().as_bytes())
+//!     .build()?;
+//! let request = ProviderSignRequest {
+//!     payload: b"example: signed",
+//!     algorithm: AlgorithmId::Ed25519,
+//!     key: ProviderSigningKeys::Ed25519(&key),
+//!     keyid: None,
+//!     append_missing_final_newline: true,
+//!     output_form: OutputForm::Yaml,
+//!     algorithm_parameters: &[],
+//! };
+//! let local_messages = Rc::new(RefCell::new(Vec::new()));
+//! let mut calls = 0;
+//! for _ in 0..2 {
+//!     let outcome = sign_with_provider(&request, |message| {
+//!         calls += 1;
+//!         local_messages.borrow_mut().push(message.to_vec());
+//!         let signature: ed25519_dalek::Signature =
+//!             signature::Signer::try_sign(&native_key, message)
+//!                 .map_err(|_| SignError::KeyOperationFailure)?;
+//!         Ok(signature.to_bytes())
+//!     });
+//!     assert!(matches!(outcome, SignOutcome::Success(_)));
+//! }
+//! assert_eq!(calls, 2);
+//! assert_eq!(local_messages.borrow()[0], b"example: signed\n");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! # Share a provider across threads
+//!
+//! Existing `signature` 3.0 adapters can use [`signature_signing_callback`].
+//! Only a callback moved to another thread needs the corresponding thread
+//! bounds. Each operation supplies its own callback and shares the binding.
 //!
 //! ```
 //! use yaml_sigil_core::AlgorithmId;
 //! use yaml_sigil_signing::{
 //!     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
-//!     ProviderSigningKeyError, ProviderSigningKeys, SignOutcome, sign_with_provider,
+//!     ProviderSigningKeys, SignOutcome, sign_with_provider, signature_signing_callback,
 //! };
 //!
-//! struct P256Signer<'a>(&'a p256::ecdsa::SigningKey);
-//!
-//! impl signature::Signer<[u8; 64]> for P256Signer<'_> {
+//! struct Adapter(ed25519_dalek::SigningKey);
+//! impl signature::Signer<[u8; 64]> for Adapter {
 //!     fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], signature::Error> {
-//!         let signature: p256::ecdsa::Signature =
-//!             signature::Signer::try_sign(self.0, message)?;
-//!         Ok(signature.to_bytes().into())
+//!         let signature: ed25519_dalek::Signature =
+//!             signature::Signer::try_sign(&self.0, message)?;
+//!         Ok(signature.to_bytes())
 //!     }
 //! }
-//!
-//! fn sign_document(
-//!     native_key: &p256::ecdsa::SigningKey,
-//!     payload: &[u8],
-//! ) -> Result<SignOutcome, ProviderSigningKeyError> {
-//!     let adapter = P256Signer(native_key);
-//!     let public_key = native_key.verifying_key().to_sec1_point(false);
-//!     let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(
-//!         &adapter,
-//!         public_key.as_bytes(),
-//!     )
+//! let adapter = Adapter(ed25519_dalek::SigningKey::from_bytes(&[8; 32]));
+//! let key = ProviderSigningKeyBuilder::ed25519(adapter.0.verifying_key().as_bytes())
 //!     .build()?;
-//!     let request = ProviderSignRequest {
-//!         payload,
-//!         algorithm: AlgorithmId::EcdsaP256Sha256,
-//!         key: ProviderSigningKeys::EcdsaP256Sha256(&key),
-//!         keyid: None,
-//!         append_missing_final_newline: false,
-//!         output_form: OutputForm::Protobuf,
-//!         algorithm_parameters: &[],
-//!     };
-//!     Ok(sign_with_provider(&request))
-//! }
-//! # // A fixed key is used only to execute this documentation test.
-//! # let native_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
-//! # assert!(matches!(sign_document(&native_key, b"example: signed\n").unwrap(),
-//! #     SignOutcome::Success(_)));
+//! let request = ProviderSignRequest {
+//!     payload: b"shared payload",
+//!     algorithm: AlgorithmId::Ed25519,
+//!     key: ProviderSigningKeys::Ed25519(&key),
+//!     keyid: None,
+//!     append_missing_final_newline: false,
+//!     output_form: OutputForm::Protobuf,
+//!     algorithm_parameters: &[],
+//! };
+//! std::thread::scope(|scope| {
+//!     for _ in 0..2 {
+//!         scope.spawn(|| {
+//!             assert!(matches!(
+//!                 sign_with_provider(&request, signature_signing_callback(&adapter)),
+//!                 SignOutcome::Success(_),
+//!             ));
+//!         });
+//!     }
+//! });
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! For Ed25519, implement the same operation trait, return canonical `R || S`,
-//! and use [`ProviderSigningKeyBuilder::ed25519`] with the corresponding
-//! 32-octet public key and [`ProviderSigningKeys::Ed25519`].
-//!
-//! The builder and request types are public and re-exported at the crate
-//! root. Pass the opaque bound key to [`crate::sign_with_provider`], which owns
-//! payload preparation and artifact construction. Implementing the separate
-//! high-level [`crate::Signer`] trait means providing that complete operation;
-//! a cryptographic adapter only needs the `signature` operation trait above.
+//! These callbacks supply only cryptography. The separate high-level
+//! [`crate::Signer`] trait owns the complete signing operation.
 
 use std::fmt;
 
@@ -106,7 +142,7 @@ pub enum ProviderSigningKeyErrorKind {
     InvalidPublicKey,
 }
 
-/// Redacted failure while binding a provider signer to its public key.
+/// Redacted failure while validating a provider's public-key binding.
 #[derive(Error)]
 #[error("provider signing key could not be constructed")]
 pub struct ProviderSigningKeyError {
@@ -142,14 +178,12 @@ impl fmt::Debug for ProviderSigningKeyError {
     }
 }
 
-/// Builder that binds an initialized provider signer to canonical public-key
-/// bytes without requesting an extra signature.
+/// Builder that validates canonical public-key bytes before provider signing.
 ///
-/// The borrowed signer must be `Sync` so the builder and its bound keys can
-/// be shared across worker threads. Stateful adapters synchronize internally.
-pub struct ProviderSigningKeyBuilder<'a> {
+/// No signer or callback is stored or invoked. The caller supplies the signing
+/// operation separately, and qualified operations check each real output.
+pub struct ProviderSigningKeyBuilder {
     algorithm: AlgorithmId,
-    signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
     public_key_bytes: Vec<u8>,
 }
 
@@ -165,35 +199,23 @@ pub(crate) fn bounded_public_key_copy(algorithm: AlgorithmId, public_key_bytes: 
     }
 }
 
-impl<'a> ProviderSigningKeyBuilder<'a> {
-    /// Bind an Ed25519 signer to its 32-octet compressed public key.
-    ///
-    /// `public_key_bytes` must correspond to `signer`. The qualified build
-    /// path enforces that relationship by checking each real output.
-    pub fn ed25519(
-        signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
-        public_key_bytes: &[u8],
-    ) -> Self {
+impl ProviderSigningKeyBuilder {
+    /// Select Ed25519 with its 32-octet compressed public key.
+    pub fn ed25519(public_key_bytes: &[u8]) -> Self {
         Self {
             algorithm: AlgorithmId::Ed25519,
-            signer,
             public_key_bytes: bounded_public_key_copy(AlgorithmId::Ed25519, public_key_bytes),
         }
     }
 
-    /// Bind a P-256 signer to its 65-octet uncompressed public key from
+    /// Select P-256 with its 65-octet uncompressed public key from
     /// *Standards for Efficient Cryptography 1 (SEC 1)*.
     ///
-    /// The signer receives message bytes and must apply SHA-256 once before
-    /// producing the fixed-width signature. `public_key_bytes` must
-    /// correspond to `signer`.
-    pub fn ecdsa_p256_sha256(
-        signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
-        public_key_bytes: &[u8],
-    ) -> Self {
+    /// The binding supports both message and digest callbacks. The operation
+    /// selects which input the callback receives.
+    pub fn ecdsa_p256_sha256(public_key_bytes: &[u8]) -> Self {
         Self {
             algorithm: AlgorithmId::EcdsaP256Sha256,
-            signer,
             public_key_bytes: bounded_public_key_copy(
                 AlgorithmId::EcdsaP256Sha256,
                 public_key_bytes,
@@ -203,27 +225,22 @@ impl<'a> ProviderSigningKeyBuilder<'a> {
 
     /// Build the preferred key, which self-verifies every real provider
     /// signature before an artifact can be returned.
-    pub fn build(self) -> Result<ProviderSigningKey<'a>, ProviderSigningKeyError> {
+    pub fn build(self) -> Result<ProviderSigningKey, ProviderSigningKeyError> {
         let public_key = self.resolve_public_key()?;
-        Ok(ProviderSigningKey {
-            signer: self.signer,
-            public_key,
-        })
+        Ok(ProviderSigningKey { public_key })
     }
 
     /// Build an explicitly unqualified key that skips cryptographic
     /// self-verification of provider output.
     ///
     /// Public-key admissibility and signature-structure validation still run.
-    /// The caller remains responsible for the signer-to-public-key binding.
+    /// The caller remains responsible for binding callback output to this key
+    /// and the final payload.
     pub fn build_unqualified(
         self,
-    ) -> Result<UnqualifiedProviderSigningKey<'a>, ProviderSigningKeyError> {
+    ) -> Result<UnqualifiedProviderSigningKey, ProviderSigningKeyError> {
         let public_key = self.resolve_public_key()?;
-        Ok(UnqualifiedProviderSigningKey {
-            signer: self.signer,
-            public_key,
-        })
+        Ok(UnqualifiedProviderSigningKey { public_key })
     }
 
     fn resolve_public_key(&self) -> Result<ProviderPublicKey, ProviderSigningKeyError> {
@@ -236,34 +253,41 @@ impl<'a> ProviderSigningKeyBuilder<'a> {
     }
 }
 
-impl fmt::Debug for ProviderSigningKeyBuilder<'_> {
+impl fmt::Debug for ProviderSigningKeyBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProviderSigningKeyBuilder")
             .field("algorithm", &self.algorithm)
-            .field("signer", &"***")
             .field("public_key", &"***")
             .finish()
     }
 }
 
-/// Provider signer whose real outputs are self-verified by YamlSigil.
-pub struct ProviderSigningKey<'a> {
-    signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
+/// Validated public key used to self-verify each real callback output.
+pub struct ProviderSigningKey {
     public_key: ProviderPublicKey,
 }
 
-impl ProviderSigningKey<'_> {
-    pub(crate) fn algorithm(&self) -> AlgorithmId {
-        self.public_key.algorithm()
+// Store only public key material so bindings and requests stay Send + Sync.
+// Provider handles belong to per-operation closures; Rust enforces each
+// closure's thread restrictions without weakening the shared binding types.
+pub(crate) trait BoundKey {
+    const SELF_VERIFY: bool;
+
+    fn public_key(&self) -> &ProviderPublicKey;
+
+    fn algorithm(&self) -> AlgorithmId {
+        self.public_key().algorithm()
     }
 
-    pub(crate) fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], SignError> {
-        let signature = self
-            .signer
-            .try_sign(message)
-            .map_err(|_| SignError::KeyOperationFailure)?;
+    fn try_sign(
+        &self,
+        message: &[u8],
+        callback: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
+    ) -> Result<[u8; 64], SignError> {
+        let signature = callback(message)?;
         if !provider_signature_is_structurally_valid(self.algorithm(), &signature)
-            || !verify_provider_signature(&self.public_key, message, &signature)
+            || (Self::SELF_VERIFY
+                && !verify_provider_signature(self.public_key(), message, &signature))
         {
             return Err(SignError::KeyOperationFailure);
         }
@@ -271,64 +295,78 @@ impl ProviderSigningKey<'_> {
     }
 }
 
-impl fmt::Debug for ProviderSigningKey<'_> {
+impl BoundKey for ProviderSigningKey {
+    const SELF_VERIFY: bool = true;
+
+    fn public_key(&self) -> &ProviderPublicKey {
+        &self.public_key
+    }
+}
+
+impl fmt::Debug for ProviderSigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProviderSigningKey")
             .field("algorithm", &self.algorithm())
-            .field("signer", &"***")
             .field("public_key", &"***")
             .finish()
     }
 }
 
-/// Provider signer that deliberately skips cryptographic self-verification.
-pub struct UnqualifiedProviderSigningKey<'a> {
-    signer: &'a (dyn signature::Signer<[u8; 64]> + Sync),
+/// Validated public key for signing that skips output self-verification.
+pub struct UnqualifiedProviderSigningKey {
     public_key: ProviderPublicKey,
 }
 
-impl UnqualifiedProviderSigningKey<'_> {
-    pub(crate) fn algorithm(&self) -> AlgorithmId {
-        self.public_key.algorithm()
-    }
+impl BoundKey for UnqualifiedProviderSigningKey {
+    const SELF_VERIFY: bool = false;
 
-    pub(crate) fn try_sign(&self, message: &[u8]) -> Result<[u8; 64], SignError> {
-        let signature = self
-            .signer
-            .try_sign(message)
-            .map_err(|_| SignError::KeyOperationFailure)?;
-        if !provider_signature_is_structurally_valid(self.algorithm(), &signature) {
-            return Err(SignError::KeyOperationFailure);
-        }
-        Ok(signature)
+    fn public_key(&self) -> &ProviderPublicKey {
+        &self.public_key
     }
 }
 
-impl fmt::Debug for UnqualifiedProviderSigningKey<'_> {
+impl fmt::Debug for UnqualifiedProviderSigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UnqualifiedProviderSigningKey")
             .field("algorithm", &self.algorithm())
-            .field("signer", &"***")
             .field("public_key", &"***")
             .finish()
     }
 }
 
 /// Algorithm-indexed qualified provider signing keys.
-pub type ProviderSigningKeys<'a> =
-    GenericSigningKey<'a, ProviderSigningKey<'a>, ProviderSigningKey<'a>>;
+pub type ProviderSigningKeys<'a> = GenericSigningKey<'a, ProviderSigningKey, ProviderSigningKey>;
 
 /// Unified request using qualified provider signing keys.
-pub type ProviderSignRequest<'a> =
-    GenericSignRequest<'a, ProviderSigningKey<'a>, ProviderSigningKey<'a>>;
+pub type ProviderSignRequest<'a> = GenericSignRequest<'a, ProviderSigningKey, ProviderSigningKey>;
 
 /// Algorithm-indexed explicitly unqualified provider signing keys.
 pub type UnqualifiedProviderSigningKeys<'a> =
-    GenericSigningKey<'a, UnqualifiedProviderSigningKey<'a>, UnqualifiedProviderSigningKey<'a>>;
+    GenericSigningKey<'a, UnqualifiedProviderSigningKey, UnqualifiedProviderSigningKey>;
 
 /// Unified request using explicitly unqualified provider signing keys.
 pub type UnqualifiedProviderSignRequest<'a> =
-    GenericSignRequest<'a, UnqualifiedProviderSigningKey<'a>, UnqualifiedProviderSigningKey<'a>>;
+    GenericSignRequest<'a, UnqualifiedProviderSigningKey, UnqualifiedProviderSigningKey>;
+
+/// Forward one message-signing operation to a `signature` 3.0 adapter.
+///
+/// Adapter errors become [`SignError::KeyOperationFailure`]. This helper
+/// neither hashes the message nor changes the returned bytes. P-256 adapters
+/// must hash once and return big-endian `r || s`; Ed25519 adapters return
+/// canonical `R || S`. The borrowed adapter needs no unconditional thread
+/// bound. See the [module examples](self) for local and shared operations.
+pub fn signature_signing_callback<S>(
+    signer: &S,
+) -> impl FnOnce(&[u8]) -> Result<[u8; 64], SignError> + '_
+where
+    S: signature::Signer<[u8; 64]> + ?Sized,
+{
+    |message| {
+        signer
+            .try_sign(message)
+            .map_err(|_| SignError::KeyOperationFailure)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -377,9 +415,9 @@ mod tests {
     fn provider_keys_and_requests_are_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
 
-        assert_send_sync::<ProviderSigningKeyBuilder<'static>>();
-        assert_send_sync::<ProviderSigningKey<'static>>();
-        assert_send_sync::<UnqualifiedProviderSigningKey<'static>>();
+        assert_send_sync::<ProviderSigningKeyBuilder>();
+        assert_send_sync::<ProviderSigningKey>();
+        assert_send_sync::<UnqualifiedProviderSigningKey>();
         assert_send_sync::<ProviderSignRequest<'static>>();
         assert_send_sync::<UnqualifiedProviderSignRequest<'static>>();
     }
@@ -389,12 +427,17 @@ mod tests {
         let signer = RecordingEd25519Signer::new(3);
         let public_key = signer.key.verifying_key().to_bytes();
 
-        let key = ProviderSigningKeyBuilder::ed25519(&signer, &public_key)
+        let key = ProviderSigningKeyBuilder::ed25519(&public_key)
             .build()
             .unwrap();
 
         assert_eq!(signer.calls.load(Ordering::Relaxed), 0);
-        assert_eq!(key.try_sign(b"real payload\n").unwrap().len(), 64);
+        assert_eq!(
+            key.try_sign(b"real payload\n", signature_signing_callback(&signer))
+                .unwrap()
+                .len(),
+            64
+        );
         assert_eq!(signer.calls.load(Ordering::Relaxed), 1);
         assert_eq!(
             signer.messages.lock().unwrap().as_slice(),
@@ -406,12 +449,12 @@ mod tests {
     fn qualified_key_rejects_output_for_another_bound_public_key() {
         let signer = RecordingEd25519Signer::new(4);
         let other = SigningKey::from_bytes(&[5; 32]);
-        let key = ProviderSigningKeyBuilder::ed25519(&signer, other.verifying_key().as_bytes())
+        let key = ProviderSigningKeyBuilder::ed25519(other.verifying_key().as_bytes())
             .build()
             .unwrap();
 
         assert!(matches!(
-            key.try_sign(b"payload"),
+            key.try_sign(b"payload", signature_signing_callback(&signer)),
             Err(SignError::KeyOperationFailure)
         ));
         assert_eq!(signer.calls.load(Ordering::Relaxed), 1);
@@ -421,21 +464,19 @@ mod tests {
     fn unqualified_key_still_rejects_malformed_signature_octets() {
         let signer = FixedSigner([0xff; 64]);
         let signing_key = SigningKey::from_bytes(&[6; 32]);
-        let key =
-            ProviderSigningKeyBuilder::ed25519(&signer, signing_key.verifying_key().as_bytes())
-                .build_unqualified()
-                .unwrap();
+        let key = ProviderSigningKeyBuilder::ed25519(signing_key.verifying_key().as_bytes())
+            .build_unqualified()
+            .unwrap();
 
         assert!(matches!(
-            key.try_sign(b"payload"),
+            key.try_sign(b"payload", signature_signing_callback(&signer)),
             Err(SignError::KeyOperationFailure)
         ));
     }
 
     #[test]
     fn builders_reject_inadmissible_public_key_encodings() {
-        let signer = FixedSigner([0; 64]);
-        let ed_error = ProviderSigningKeyBuilder::ed25519(&signer, &[0; 31])
+        let ed_error = ProviderSigningKeyBuilder::ed25519(&[0; 31])
             .build()
             .unwrap_err();
         assert_eq!(
@@ -446,10 +487,9 @@ mod tests {
 
         let p256_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
         let compressed = p256_key.verifying_key().to_sec1_point(true);
-        let p256_error =
-            ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, compressed.as_bytes())
-                .build_unqualified()
-                .unwrap_err();
+        let p256_error = ProviderSigningKeyBuilder::ecdsa_p256_sha256(compressed.as_bytes())
+            .build_unqualified()
+            .unwrap_err();
         assert_eq!(
             p256_error.kind(),
             ProviderSigningKeyErrorKind::InvalidPublicKey
@@ -472,18 +512,22 @@ mod tests {
             .into();
         let signer = FixedSigner(high_signature);
         let public_key = signing_key.verifying_key().to_sec1_point(false);
-        let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
+        let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key.as_bytes())
             .build()
             .unwrap();
 
-        assert_eq!(key.try_sign(message).unwrap(), high_signature);
+        assert_eq!(
+            key.try_sign(message, signature_signing_callback(&signer))
+                .unwrap(),
+            high_signature
+        );
     }
 
     #[test]
     fn provider_signing_debug_output_is_redacted() {
         let signer = RecordingEd25519Signer::new(8);
         let public_key = signer.key.verifying_key().to_bytes();
-        let builder = ProviderSigningKeyBuilder::ed25519(&signer, &public_key);
+        let builder = ProviderSigningKeyBuilder::ed25519(&public_key);
         let debug = format!("{builder:?}");
         assert!(debug.contains("***"));
         assert!(!debug.contains(&format!("{public_key:?}")));
@@ -493,7 +537,7 @@ mod tests {
         assert!(debug.contains("***"));
         assert!(!debug.contains(&format!("{public_key:?}")));
 
-        let error = ProviderSigningKeyBuilder::ed25519(&signer, &[9; 31])
+        let error = ProviderSigningKeyBuilder::ed25519(&[9; 31])
             .build()
             .unwrap_err();
         assert_eq!(

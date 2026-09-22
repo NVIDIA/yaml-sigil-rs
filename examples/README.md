@@ -163,6 +163,12 @@ generated-key demonstration. It still checks signatures and retains structural
 validation. The output labels that path and its limitation; a successful round
 trip does not qualify the provider. Neither path retries a verification failure.
 
+Both native signing examples validate public bytes with the builder, then
+borrow their `signature` adapter through `signature_signing_callback` for each
+operation. The binding stores no private-key handle. See the
+[provider guide](../docs/crypto-providers.md#synchronous-signing-calls)
+for public-key binding and callback usage.
+
 The `aws-lc-rs` example uses the same pinned `non-fips` build as the workspace's
 provider tests. This choice avoids FIPS-specific build-tool and platform
 requirements while demonstrating the adapter contracts. These examples
@@ -205,6 +211,8 @@ signing and verification operations. It supports P-256 and Ed25519 and generates
 a fresh random key on each run. The native adapters come from
 [`cli-common/ring.rs`](./cli-common/ring.rs). Neither the operation nor its
 tests require qualification, and it never retries through another path.
+Its signing call also supplies a per-operation forwarding callback while
+retaining the explicitly unqualified output checks.
 
 ```shell
 cargo run --package yaml-sigil-examples --example ring-unqualified-provider

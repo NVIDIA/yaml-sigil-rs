@@ -691,11 +691,22 @@ documented.
 
 ## Local cryptographic providers
 
-Keep synchronous provider interoperability on the `signature` 3.0 message
-operation traits. Do not add a prehash provider entry point. Ed25519 provider
-signatures use canonical 64-octet `R || S`; P-256 provider signatures use
-64-octet big-endian `r || s`, never DER. P-256 providers apply SHA-256 exactly
-once to the message bytes supplied by YamlSigil.
+Synchronous signing binds canonical public-key bytes without storing a signer
+and accepts a per-operation `FnOnce` callback without unconditional `Send` or
+`Sync` bounds. Keep bindings and requests `Send + Sync`; callback captures
+retain their own thread restrictions. Preserve `signature` 3.0 adapter reuse
+through the forwarding helper. Synchronous verification retains its
+`signature` operation traits.
+
+Ed25519 provider signatures use canonical 64-octet `R || S`; P-256 provider
+signatures use 64-octet big-endian `r || s`, never DER. Message callbacks apply
+SHA-256 exactly once for P-256. The qualified P-256 digest operation hashes
+the final complete payload once and supplies `&[u8; 32]`; its callback must
+not hash again. It rejects other algorithms before calling and independently
+verifies output against the final payload. Both callback forms leave the
+profile's nonce sampling to the provider. Keep preparation, validation,
+resource preflight, and framing shared, with zero calls on rejection before
+signing and exactly one on an admitted signing operation.
 
 Async providers implement the native `AsyncProviderSigner`,
 `AsyncProviderVerifier`, and `AsyncProviderVerifierFactory` contracts. Keep
@@ -704,10 +715,11 @@ requirement. Do not add a library-selected executor, synchronous shim, hidden
 retry, or cancellation guarantee for an already submitted remote operation.
 Retain the same qualified and explicitly unqualified choices for both modes.
 
-Signing adapters bind their opaque handle to canonical public-key bytes. The
-normal builder validates that key and self-verifies every real output without
-issuing a synthetic signing request. Keep the bypass named `unqualified`, and
-retain public-key and signature-structure checks there.
+Signing operations bind callback or adapter output to canonical public-key
+bytes. The normal builder validates that key, and the operation self-verifies
+every real output without issuing a synthetic signing request. Keep the
+message-signing bypass named `unqualified`, and retain public-key and
+signature-structure checks there.
 
 Verification qualification remains bounded, public-only, non-serializable,
 and owned by the exact adapter instance it tested. Track algorithm slots

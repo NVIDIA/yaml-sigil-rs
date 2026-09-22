@@ -437,11 +437,14 @@ imported notice and conformance fixture notices remain unchanged.
 The sync and async provider-aware operations reuse the same payload extraction,
 signature-structure checks, public-key admissibility rules, artifact framing,
 and verifier-state mapping as the RustCrypto convenience operations. The
-provider receives final message bytes and a fixed 64-octet signature. The
-boundary does not expose a prehash form.
+message operation receives final payload bytes and exchanges fixed 64-octet
+signatures. The synchronous P-256 digest operation instead supplies the
+SHA-256 digest of those final bytes to its signing callback. It retains the
+complete payload in the request and emitted artifact.
 
-Qualified signing validates the canonical public key bound to the provider
-handle and self-verifies every real output before returning an artifact.
+Qualified signing validates the canonical public-key binding and self-verifies
+every real output before returning an artifact. Synchronous keys store only
+public material; each operation supplies its callback separately.
 Qualified verification runs a bounded, public-only fixed suite for each
 algorithm slot on one exact configured adapter instance. Qualification is an
 implementation-local interoperability check, not a YamlSigil conformance
@@ -467,6 +470,20 @@ evasion by trusted adapter code. Provider key types also have
 compile-time `Send + Sync` checks and a test that signs and verifies across
 worker threads. These checks add no conformance fixture or change to artifact
 classification.
+
+`crates/yaml-sigil-signing/src/callback_tests.rs` tests borrowed mutable
+callbacks with thread-confined state, callbacks that consume their captures,
+adapter error mapping, final payload bytes and digests, malformed output,
+wrong-key and wrong-message rejection, and double-hash rejection. Resource
+tests require zero calls on preflight rejection and one call on admitted
+signing, including late YAML exact-size rejection. The digest cases in
+`crates/yaml-sigil-verification/tests/provider_paths.rs` expect `Verified` for
+YAML and protobuf artifacts, including empty inputs and opaque protobuf
+bytes, through the existing verifier. Shared-key concurrency and sync/async
+parity tests remain in place. These callback APIs add no imported fixture,
+expected fixture outcome, or conformance divergence. Deterministic signatures
+in callback tests isolate byte binding; they do not establish nonce compliance
+for an integration.
 
 `crates/yaml-sigil-verification/src/async_provider_tests.rs` exercises both
 algorithms and artifact forms through the public async provider functions and

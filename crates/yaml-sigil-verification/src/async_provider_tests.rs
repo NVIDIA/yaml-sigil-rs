@@ -989,11 +989,9 @@ async fn bounded_signing_matches_sync_early_and_final_output_checks() {
                 let sync_signer = SyncSigner(&signer);
                 let bytes = signer.public_key();
                 let sync_builder = match algorithm {
-                    AlgorithmId::Ed25519 => {
-                        signing::ProviderSigningKeyBuilder::ed25519(&sync_signer, &bytes)
-                    }
+                    AlgorithmId::Ed25519 => signing::ProviderSigningKeyBuilder::ed25519(&bytes),
                     AlgorithmId::EcdsaP256Sha256 => {
-                        signing::ProviderSigningKeyBuilder::ecdsa_p256_sha256(&sync_signer, &bytes)
+                        signing::ProviderSigningKeyBuilder::ecdsa_p256_sha256(&bytes)
                     }
                 };
                 macro_rules! compare_limits {
@@ -1009,7 +1007,11 @@ async fn bounded_signing_matches_sync_early_and_final_output_checks() {
                             let actual = signing::$async_bounded(&req, &policy).await;
                             let async_calls = control.sign_calls.load(Ordering::SeqCst) - before;
                             let before = control.sign_calls.load(Ordering::SeqCst);
-                            let expected = signing::$sync_bounded(&native_req, &policy);
+                            let expected = signing::$sync_bounded(
+                                &native_req,
+                                &policy,
+                                signing::signature_signing_callback(&sync_signer),
+                            );
                             assert_eq!(
                                 control.sign_calls.load(Ordering::SeqCst) - before,
                                 async_calls

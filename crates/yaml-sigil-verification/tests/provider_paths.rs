@@ -23,7 +23,7 @@ use yaml_sigil_signing::{
     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys, SignOutcome,
     SignProtoParams, SignYamlParams, SigningKey, UnqualifiedProviderSignRequest,
     UnqualifiedProviderSigningKeys, sign_proto, sign_with_provider, sign_with_unqualified_provider,
-    sign_yaml,
+    sign_yaml, signature_signing_callback,
 };
 use yaml_sigil_verification::{
     ArtifactForm, InvocationError, PreVerifyOutcome, PreVerifyResponse, ProviderPublicKeys,
@@ -354,10 +354,8 @@ fn exercise_qualified_pair<F: ProviderVerifierFactory>(
     output_form: OutputForm,
 ) {
     let signing_key = match algorithm {
-        AlgorithmId::Ed25519 => ProviderSigningKeyBuilder::ed25519(signer, public_key),
-        AlgorithmId::EcdsaP256Sha256 => {
-            ProviderSigningKeyBuilder::ecdsa_p256_sha256(signer, public_key)
-        }
+        AlgorithmId::Ed25519 => ProviderSigningKeyBuilder::ed25519(public_key),
+        AlgorithmId::EcdsaP256Sha256 => ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key),
     }
     .build()
     .unwrap();
@@ -373,7 +371,9 @@ fn exercise_qualified_pair<F: ProviderVerifierFactory>(
         output_form,
         algorithm_parameters: &[],
     };
-    let SignOutcome::Success(success) = sign_with_provider(&request) else {
+    let SignOutcome::Success(success) =
+        sign_with_provider(&request, signature_signing_callback(signer))
+    else {
         panic!("qualified provider signing failed for {algorithm:?}");
     };
 
@@ -479,7 +479,7 @@ fn real_provider_qualification_and_cross_provider_matrix() {
 fn provider_keys_can_be_shared_across_workers() {
     let signer = RustCryptoEd25519Signer(ed25519_dalek::SigningKey::from_bytes(&[74; 32]));
     let public_key = signer.0.verifying_key().to_bytes();
-    let signing_key = ProviderSigningKeyBuilder::ed25519(&signer, &public_key)
+    let signing_key = ProviderSigningKeyBuilder::ed25519(&public_key)
         .build()
         .unwrap();
     let provider = VerificationProviderBuilder::new(ReferenceFactory).qualify();
@@ -501,7 +501,9 @@ fn provider_keys_can_be_shared_across_workers() {
     std::thread::scope(|scope| {
         for _ in 0..2 {
             scope.spawn(|| {
-                let SignOutcome::Success(success) = sign_with_provider(&request) else {
+                let SignOutcome::Success(success) =
+                    sign_with_provider(&request, signature_signing_callback(&signer))
+                else {
                     panic!("shared provider signing failed");
                 };
                 assert_eq!(
@@ -789,7 +791,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             calls: Arc::clone(&calls),
         };
         let public_key = signer.key.verifying_key().to_sec1_point(false);
-        let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
+        let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key.as_bytes())
             .build()
             .unwrap();
         let request = ProviderSignRequest {
@@ -801,7 +803,9 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             output_form,
             algorithm_parameters: &[],
         };
-        let SignOutcome::Success(success) = sign_with_provider(&request) else {
+        let SignOutcome::Success(success) =
+            sign_with_provider(&request, signature_signing_callback(&signer))
+        else {
             panic!("qualified P-256 signing failed");
         };
         assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -838,7 +842,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
 fn qualified_p256_signing_rejects_an_adapter_that_hashes_twice() {
     let signer = DoubleHashP256Signer(p256::ecdsa::SigningKey::from_slice(&[44; 32]).unwrap());
     let public_key = signer.0.verifying_key().to_sec1_point(false);
-    let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key.as_bytes())
+    let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key.as_bytes())
         .build()
         .unwrap();
     let request = ProviderSignRequest {
@@ -852,7 +856,7 @@ fn qualified_p256_signing_rejects_an_adapter_that_hashes_twice() {
     };
 
     assert!(matches!(
-        sign_with_provider(&request),
+        sign_with_provider(&request, signature_signing_callback(&signer)),
         SignOutcome::Signer(yaml_sigil_signing::SignError::KeyOperationFailure)
     ));
 }
@@ -901,10 +905,104 @@ fn provider_metadata_and_exact_message_paths_remain_available() {
 }
 
 #[test]
+fn p256_digest_callbacks_preserve_payloads_through_both_artifact_verifiers() {
+    use signature::hazmat::PrehashSigner as _;
+    use yaml_sigil_signing::{
+        ArtifactResourceLimits, SignError, sign_with_p256_digest_provider,
+        sign_with_p256_digest_provider_and_resource_limits,
+    };
+    use yaml_sigil_verification::{PublicKeys, verify};
+
+    // Deterministic signatures isolate payload/encoding equivalence in this
+    // regression; production callbacks own the profile's nonce sampling.
+    let native = p256::ecdsa::SigningKey::from_slice(&[46; 32]).unwrap();
+    let public = native.verifying_key().to_sec1_point(false);
+    let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(public.as_bytes())
+        .build()
+        .unwrap();
+    let keys = PublicKeys {
+        ed25519: None,
+        p256: Some(native.verifying_key()),
+    };
+    for (form, payload, expected) in [
+        (
+            OutputForm::Yaml,
+            b"digest: value".as_slice(),
+            b"digest: value\n".as_slice(),
+        ),
+        (
+            OutputForm::Yaml,
+            b"key: value\r\n".as_slice(),
+            b"key: value\r\n".as_slice(),
+        ),
+        (OutputForm::Yaml, b"".as_slice(), b"".as_slice()),
+        (
+            OutputForm::Protobuf,
+            b"\xff\0\x80".as_slice(),
+            b"\xff\0\x80".as_slice(),
+        ),
+        (OutputForm::Protobuf, b"".as_slice(), b"".as_slice()),
+    ] {
+        let req = ProviderSignRequest {
+            payload,
+            algorithm: AlgorithmId::EcdsaP256Sha256,
+            key: ProviderSigningKeys::EcdsaP256Sha256(&key),
+            keyid: Some("digest-provider"),
+            append_missing_final_newline: true,
+            output_form: form,
+            algorithm_parameters: &[],
+        };
+        for bounded in [false, true] {
+            let mut calls = 0;
+            let callback = |digest: &[u8; 32]| {
+                calls += 1;
+                let expected_digest: [u8; 32] = Sha256::digest(expected).into();
+                assert_eq!(digest, &expected_digest);
+                let signature: p256::ecdsa::Signature = native
+                    .sign_prehash(digest)
+                    .map_err(|_| SignError::KeyOperationFailure)?;
+                Ok(signature.to_bytes().into())
+            };
+            let outcome = if bounded {
+                sign_with_p256_digest_provider_and_resource_limits(
+                    &req,
+                    &ArtifactResourceLimits::default(),
+                    callback,
+                )
+                .unwrap()
+                .unwrap()
+            } else {
+                sign_with_p256_digest_provider(&req, callback)
+            };
+            let SignOutcome::Success(signed) = outcome else {
+                panic!("digest signing failed");
+            };
+            assert_eq!(calls, 1);
+            let artifact_form = match form {
+                OutputForm::Yaml => ArtifactForm::Yaml,
+                OutputForm::Protobuf => ArtifactForm::Proto,
+            };
+            assert_eq!(
+                verify(
+                    &signed.artifact,
+                    artifact_form,
+                    &keys,
+                    VerifierOptions::default()
+                ),
+                Ok(VerifierState::Verified {
+                    payload: expected.to_vec(),
+                    algorithm: AlgorithmId::EcdsaP256Sha256,
+                }),
+            );
+        }
+    }
+}
+
+#[test]
 fn unqualified_provider_signing_accepts_protobuf_output() {
     let signer = RustCryptoEd25519Signer(ed25519_dalek::SigningKey::from_bytes(&[45; 32]));
     let signer_public_key = signer.0.verifying_key().to_bytes();
-    let signing_key = ProviderSigningKeyBuilder::ed25519(&signer, &signer_public_key)
+    let signing_key = ProviderSigningKeyBuilder::ed25519(&signer_public_key)
         .build_unqualified()
         .unwrap();
     let request = UnqualifiedProviderSignRequest {
@@ -917,7 +1015,7 @@ fn unqualified_provider_signing_accepts_protobuf_output() {
         algorithm_parameters: &[],
     };
     assert!(matches!(
-        sign_with_unqualified_provider(&request),
+        sign_with_unqualified_provider(&request, signature_signing_callback(&signer)),
         SignOutcome::Success(_)
     ));
 }
