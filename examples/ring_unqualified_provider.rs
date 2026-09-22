@@ -34,7 +34,7 @@ use yaml_io::{PayloadArgs, print_public_key, print_section, print_signed, print_
 use yaml_sigil_core::AlgorithmId;
 use yaml_sigil_signing::{
     OutputForm, ProviderSigningKeyBuilder, SignOutcome, UnqualifiedProviderSignRequest,
-    UnqualifiedProviderSigningKeys, sign_with_unqualified_provider,
+    UnqualifiedProviderSigningKeys, sign_with_unqualified_provider, signature_signing_callback,
 };
 use yaml_sigil_verification::{
     ArtifactForm, UnqualifiedProviderPublicKeys, VerificationProviderBuilder, VerifierOptions,
@@ -80,10 +80,8 @@ fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()> {
     print_public_key(&mut output, "ring", args.key_type.label(), public_key)?;
 
     let builder = match algorithm {
-        AlgorithmId::Ed25519 => ProviderSigningKeyBuilder::ed25519(&signer, public_key),
-        AlgorithmId::EcdsaP256Sha256 => {
-            ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key)
-        }
+        AlgorithmId::Ed25519 => ProviderSigningKeyBuilder::ed25519(public_key),
+        AlgorithmId::EcdsaP256Sha256 => ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key),
     };
     // WARNING: This deliberately skips independent verification of each real
     // signature. Canonical admissible keys and signature structure are still
@@ -96,17 +94,22 @@ fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()> {
             UnqualifiedProviderSigningKeys::EcdsaP256Sha256(&signing_key)
         }
     };
-    let signed = match sign_with_unqualified_provider(&UnqualifiedProviderSignRequest {
-        payload: payload.as_bytes(),
-        algorithm,
-        key,
-        keyid: None,
-        // YAML needs a final newline. The library appends it when missing,
-        // then signs those final message bytes through the native adapter.
-        append_missing_final_newline: true,
-        output_form: OutputForm::Yaml,
-        algorithm_parameters: &[],
-    }) {
+    // The forwarding callback borrows the adapter for this operation. The
+    // public-key binding does not store the provider's private-key handle.
+    let signed = match sign_with_unqualified_provider(
+        &UnqualifiedProviderSignRequest {
+            payload: payload.as_bytes(),
+            algorithm,
+            key,
+            keyid: None,
+            // YAML needs a final newline. The library appends it when missing,
+            // then signs those final message bytes through the native adapter.
+            append_missing_final_newline: true,
+            output_form: OutputForm::Yaml,
+            algorithm_parameters: &[],
+        },
+        signature_signing_callback(&signer),
+    ) {
         SignOutcome::Success(signed) => signed,
         SignOutcome::Invocation(error) => bail!("signing invocation failed: {error}"),
         SignOutcome::Signer(error) => bail!("signing failed: {error}"),

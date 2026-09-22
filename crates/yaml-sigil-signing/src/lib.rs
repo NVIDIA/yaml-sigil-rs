@@ -27,13 +27,14 @@
 //!
 //! # Local providers
 //!
-//! [`ProviderSigningKeyBuilder`] accepts synchronous `signature` 3.0 adapters
-//! without exposing private-key material. [`sign_with_provider`] uses the
-//! qualified key path, which validates the bound public key and self-verifies
-//! every real output. [`sign_with_unqualified_provider`] names the deliberate
-//! bypass. The provider receives message bytes, not a prehash.
-//! See [`provider`] for the public extension contract and a complete adapter
-//! example.
+//! [`ProviderSigningKeyBuilder`] validates public-key bytes without storing a
+//! signer. [`sign_with_provider`] accepts a callback for each operation and
+//! independently verifies its output. [`sign_with_unqualified_provider`] names
+//! the deliberate bypass. Message callbacks receive the final payload bytes;
+//! [`sign_with_p256_digest_provider`] supplies their SHA-256 digest instead.
+//! Callbacks may borrow mutable local state. [`signature_signing_callback`]
+//! forwards existing `signature` 3.0 adapters. See [`provider`] for the public
+//! contract and compiling local and shared examples.
 //!
 //! [`async_provider`] supplies an awaitable signing contract and provider-backed
 //! implementations of [`AsyncSigner`]. Sync and async provider signing also
@@ -48,6 +49,9 @@ pub mod provider;
 mod provider_crypto;
 pub mod transcription;
 
+#[cfg(test)]
+mod callback_tests;
+
 pub use async_provider::{
     AsyncProviderSignRequest, AsyncProviderSigner, AsyncProviderSigningKey,
     AsyncProviderSigningKeyBuilder, AsyncProviderSigningKeys, ProviderAsyncSigner,
@@ -60,7 +64,7 @@ pub use async_provider::{
 pub use provider::{
     ProviderSignRequest, ProviderSigningKey, ProviderSigningKeyBuilder, ProviderSigningKeyError,
     ProviderSigningKeyErrorKind, ProviderSigningKeys, UnqualifiedProviderSignRequest,
-    UnqualifiedProviderSigningKey, UnqualifiedProviderSigningKeys,
+    UnqualifiedProviderSigningKey, UnqualifiedProviderSigningKeys, signature_signing_callback,
 };
 pub use transcription::{
     TranscodeError, proto_wire_to_signed_yaml_stream,
@@ -68,6 +72,7 @@ pub use transcription::{
     signed_yaml_stream_to_proto_wire_with_resource_limits,
 };
 
+use sha2::{Digest, Sha256};
 use tracing::instrument;
 pub use yaml_sigil_core::p256_encoding::{
     P256EncodingError, p256_der_signature_to_raw, p256_public_key_to_uncompressed,
@@ -376,88 +381,43 @@ pub fn sign_with_resource_limits(
     )?))
 }
 
-fn qualified_provider_key_matches_request(req: &ProviderSignRequest<'_>) -> bool {
-    match (&req.algorithm, &req.key) {
-        (AlgorithmId::Ed25519, GenericSigningKey::Ed25519(key))
-        | (AlgorithmId::EcdsaP256Sha256, GenericSigningKey::EcdsaP256Sha256(key)) => {
-            key.algorithm() == req.algorithm
-        }
-        _ => false,
-    }
-}
-
-fn unqualified_provider_key_matches_request(req: &UnqualifiedProviderSignRequest<'_>) -> bool {
-    match (&req.algorithm, &req.key) {
-        (AlgorithmId::Ed25519, GenericSigningKey::Ed25519(key))
-        | (AlgorithmId::EcdsaP256Sha256, GenericSigningKey::EcdsaP256Sha256(key)) => {
-            key.algorithm() == req.algorithm
-        }
-        _ => false,
-    }
-}
-
-fn sign_with_qualified_provider_key(
-    payload: &[u8],
-    req: &ProviderSignRequest<'_>,
-) -> Result<[u8; 64], SignError> {
-    match (req.algorithm, &req.key) {
-        (AlgorithmId::Ed25519, GenericSigningKey::Ed25519(key))
-        | (AlgorithmId::EcdsaP256Sha256, GenericSigningKey::EcdsaP256Sha256(key)) => {
-            key.try_sign(payload)
-        }
-        _ => Err(SignError::InvalidOrUnsupportedAlgorithm),
-    }
-}
-
-fn sign_with_unqualified_provider_key(
-    payload: &[u8],
-    req: &UnqualifiedProviderSignRequest<'_>,
-) -> Result<[u8; 64], SignError> {
-    match (req.algorithm, &req.key) {
-        (AlgorithmId::Ed25519, GenericSigningKey::Ed25519(key))
-        | (AlgorithmId::EcdsaP256Sha256, GenericSigningKey::EcdsaP256Sha256(key)) => {
-            key.try_sign(payload)
-        }
-        _ => Err(SignError::InvalidOrUnsupportedAlgorithm),
-    }
-}
-
-/// Sign with a local provider key that self-verifies every real signature.
+/// Sign through a callback and independently verify its output.
 ///
-/// The provider receives the final payload bytes, after any permitted YAML
-/// line-ending normalization. No additional qualification message is signed.
+/// The callback receives the final payload bytes after any authorized YAML
+/// final-newline handling. Protobuf payloads are unchanged. Return 64 canonical
+/// Ed25519 `R || S` octets or P-256 big-endian `r || s` octets. P-256 callbacks
+/// hash the message with SHA-256 once and own the profile's nonce sampling.
+///
+/// The callback may borrow mutable local state. It runs on the calling thread,
+/// may block, and is invoked exactly once if validation reaches signing. No
+/// probe or retry is performed. Callback errors become [`SignOutcome::Signer`];
+/// malformed or incorrectly bound output becomes [`SignError::KeyOperationFailure`].
 /// This entry point has the resource behavior documented on [`sign`].
-#[instrument(level = "info", skip(req), fields(alg = ?req.algorithm, form = ?req.output_form))]
-pub fn sign_with_provider(req: &ProviderSignRequest<'_>) -> SignOutcome {
-    if let Err(error) = validate_invocation(req) {
-        return SignOutcome::Invocation(error);
-    }
-    if !qualified_provider_key_matches_request(req) {
-        return SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm);
-    }
-    sign_after_invocation_validation(req, None, |payload| {
-        sign_with_qualified_provider_key(payload, req)
-    })
-    .expect("the unbounded signing path cannot return a resource error")
+/// See [`provider`] for compiling local and shared provider examples.
+#[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+pub fn sign_with_provider(
+    req: &ProviderSignRequest<'_>,
+    callback: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
+) -> SignOutcome {
+    sign_with_provider_inner(req, None, None, callback)
+        .expect("the unbounded signing path cannot return a resource error")
+        .expect("the unbounded signing path cannot return a preflight encoding error")
 }
 
 /// Sign through the explicitly unqualified provider path.
 ///
 /// This path validates the bound public key and provider signature structure,
 /// but it does not cryptographically confirm that a produced signature
-/// corresponds to the bound public key and payload.
-#[instrument(level = "info", skip(req), fields(alg = ?req.algorithm, form = ?req.output_form))]
-pub fn sign_with_unqualified_provider(req: &UnqualifiedProviderSignRequest<'_>) -> SignOutcome {
-    if let Err(error) = validate_invocation(req) {
-        return SignOutcome::Invocation(error);
-    }
-    if !unqualified_provider_key_matches_request(req) {
-        return SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm);
-    }
-    sign_after_invocation_validation(req, None, |payload| {
-        sign_with_unqualified_provider_key(payload, req)
-    })
-    .expect("the unbounded signing path cannot return a resource error")
+/// corresponds to the bound public key and payload. The callback input,
+/// encoding, error, blocking, and call-count contracts match [`sign_with_provider`].
+#[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+pub fn sign_with_unqualified_provider(
+    req: &UnqualifiedProviderSignRequest<'_>,
+    callback: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
+) -> SignOutcome {
+    sign_with_provider_inner(req, None, None, callback)
+        .expect("the unbounded signing path cannot return a resource error")
+        .expect("the unbounded signing path cannot return a preflight encoding error")
 }
 
 /// Sign with qualified provider output checks and an explicit output policy.
@@ -465,30 +425,14 @@ pub fn sign_with_unqualified_provider(req: &UnqualifiedProviderSignRequest<'_>) 
 /// Uses the request-shape, projected-size, and final exact-size checks of
 /// [`sign_with_resource_limits`]. A conclusive size rejection avoids signing.
 /// YAML's final check runs after signing but before complete-artifact allocation.
+/// All callback contracts match [`sign_with_provider`].
 #[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
 pub fn sign_with_provider_and_resource_limits(
     req: &ProviderSignRequest<'_>,
     limits: &ArtifactResourceLimits,
+    callback: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
 ) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
-    if let Err(error) = validate_invocation_shape(req) {
-        return Ok(Ok(SignOutcome::Invocation(error)));
-    }
-    if !qualified_provider_key_matches_request(req) {
-        return Ok(Ok(SignOutcome::Invocation(
-            SignInvocationError::InvalidOrUnsupportedAlgorithm,
-        )));
-    }
-    if let Err(error) = preflight_signing_output(req, limits)? {
-        return Ok(Err(error));
-    }
-    if let Err(error) = validate_keyid_content(req) {
-        return Ok(Ok(SignOutcome::Invocation(error)));
-    }
-    Ok(Ok(sign_after_invocation_validation(
-        req,
-        Some(limits),
-        |payload| sign_with_qualified_provider_key(payload, req),
-    )?))
+    sign_with_provider_inner(req, Some(limits), None, callback)
 }
 
 /// Sign without output self-verification, applying the existing output policy.
@@ -499,25 +443,150 @@ pub fn sign_with_provider_and_resource_limits(
 pub fn sign_with_unqualified_provider_and_resource_limits(
     req: &UnqualifiedProviderSignRequest<'_>,
     limits: &ArtifactResourceLimits,
+    callback: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
 ) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
-    if let Err(error) = validate_invocation_shape(req) {
+    sign_with_provider_inner(req, Some(limits), None, callback)
+}
+
+/// Sign the SHA-256 digest of the final payload through a P-256 callback.
+///
+/// Supply the complete payload in `req`. YamlSigil prepares it exactly as in
+/// [`sign_with_provider`], then hashes it once for the callback's `&[u8; 32]`
+/// input. The callback must sign those digest bytes without hashing them again
+/// and return 64 big-endian `r || s` octets. It owns CSPRNG nonce sampling and
+/// provider error mapping. Independent output verification checks the bound
+/// public key and final payload, which may hash that payload again.
+///
+/// Only [`AlgorithmId::EcdsaP256Sha256`] requests are admitted. An Ed25519
+/// request returns [`SignInvocationError::InvalidOrUnsupportedAlgorithm`]
+/// without invoking the callback. The callback's thread, blocking, error, and
+/// call-count contracts match [`sign_with_provider`]. This API does not accept
+/// a caller-computed digest in place of the payload.
+///
+/// # Example
+///
+/// Wrap your initialized device's digest operation in `device_sign_digest`.
+/// Map an SDK failure to [`SignError::KeyOperationFailure`]. The operation must
+/// return fixed-width signature bytes and satisfy the profile's nonce rules.
+///
+/// ```
+/// use yaml_sigil_core::AlgorithmId;
+/// use yaml_sigil_signing::{
+///     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
+///     ProviderSigningKeyError, ProviderSigningKeys, SignError, SignOutcome,
+///     sign_with_p256_digest_provider,
+/// };
+///
+/// fn sign_document(
+///     public_key: &[u8],
+///     payload: &[u8],
+///     device_sign_digest: impl FnOnce(&[u8; 32]) -> Result<[u8; 64], SignError>,
+/// ) -> Result<SignOutcome, ProviderSigningKeyError> {
+///     let key = ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key).build()?;
+///     let request = ProviderSignRequest {
+///         payload,
+///         algorithm: AlgorithmId::EcdsaP256Sha256,
+///         key: ProviderSigningKeys::EcdsaP256Sha256(&key),
+///         keyid: None,
+///         append_missing_final_newline: true,
+///         output_form: OutputForm::Yaml,
+///         algorithm_parameters: &[],
+///     };
+///     // The callback receives SHA-256(payload with its final newline).
+///     Ok(sign_with_p256_digest_provider(&request, device_sign_digest))
+/// }
+/// # // Deterministic signing is only a test fixture for this callback example.
+/// # use signature::hazmat::PrehashSigner;
+/// # let native_key = p256::ecdsa::SigningKey::from_slice(&[9; 32]).unwrap();
+/// # let public_key = native_key.verifying_key().to_sec1_point(false);
+/// # let outcome = sign_document(public_key.as_bytes(), b"device: signed", |digest| {
+/// #     let signature: p256::ecdsa::Signature = native_key.sign_prehash(digest)
+/// #         .map_err(|_| SignError::KeyOperationFailure)?;
+/// #     Ok(signature.to_bytes().into())
+/// # }).unwrap();
+/// # assert!(matches!(outcome, SignOutcome::Success(_)));
+/// ```
+#[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+pub fn sign_with_p256_digest_provider(
+    req: &ProviderSignRequest<'_>,
+    callback: impl FnOnce(&[u8; 32]) -> Result<[u8; 64], SignError>,
+) -> SignOutcome {
+    sign_with_provider_inner(
+        req,
+        None,
+        Some(AlgorithmId::EcdsaP256Sha256),
+        p256_digest_callback(callback),
+    )
+    .expect("the unbounded signing path cannot return a resource error")
+    .expect("the unbounded signing path cannot return a preflight encoding error")
+}
+
+/// Sign a P-256 digest with qualified output checks and an output policy.
+///
+/// Uses the callback contract of [`sign_with_p256_digest_provider`] and the
+/// resource checks of [`sign_with_provider_and_resource_limits`]. A conclusive
+/// preflight rejection performs neither digest preparation nor a callback call.
+/// YAML's final exact-size rejection may occur after the single callback call.
+#[instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+pub fn sign_with_p256_digest_provider_and_resource_limits(
+    req: &ProviderSignRequest<'_>,
+    limits: &ArtifactResourceLimits,
+    callback: impl FnOnce(&[u8; 32]) -> Result<[u8; 64], SignError>,
+) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
+    sign_with_provider_inner(
+        req,
+        Some(limits),
+        Some(AlgorithmId::EcdsaP256Sha256),
+        p256_digest_callback(callback),
+    )
+}
+
+fn p256_digest_callback(
+    callback: impl FnOnce(&[u8; 32]) -> Result<[u8; 64], SignError>,
+) -> impl FnOnce(&[u8]) -> Result<[u8; 64], SignError> {
+    // This adapter changes only the callback input. Preparation, validation,
+    // and output verification continue to use the final complete payload.
+    |payload| callback(&Sha256::digest(payload).into())
+}
+
+fn sign_with_provider_inner<K: provider::BoundKey>(
+    req: &GenericSignRequest<'_, K, K>,
+    limits: Option<&ArtifactResourceLimits>,
+    required_algorithm: Option<AlgorithmId>,
+    callback: impl FnOnce(&[u8]) -> Result<[u8; 64], SignError>,
+) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
+    // Bounded operations preserve shape -> size -> content validation order.
+    // Unbounded operations retain their existing invocation error precedence.
+    let validation = if limits.is_some() {
+        validate_invocation_shape(req)
+    } else {
+        validate_invocation(req)
+    };
+    if let Err(error) = validation {
         return Ok(Ok(SignOutcome::Invocation(error)));
     }
-    if !unqualified_provider_key_matches_request(req) {
+    let key = match &req.key {
+        GenericSigningKey::Ed25519(key) | GenericSigningKey::EcdsaP256Sha256(key) => *key,
+    };
+    if key.algorithm() != req.algorithm
+        || required_algorithm.is_some_and(|algorithm| algorithm != req.algorithm)
+    {
         return Ok(Ok(SignOutcome::Invocation(
             SignInvocationError::InvalidOrUnsupportedAlgorithm,
         )));
     }
-    if let Err(error) = preflight_signing_output(req, limits)? {
-        return Ok(Err(error));
-    }
-    if let Err(error) = validate_keyid_content(req) {
-        return Ok(Ok(SignOutcome::Invocation(error)));
+    if let Some(limits) = limits {
+        if let Err(error) = preflight_signing_output(req, limits)? {
+            return Ok(Err(error));
+        }
+        if let Err(error) = validate_keyid_content(req) {
+            return Ok(Ok(SignOutcome::Invocation(error)));
+        }
     }
     Ok(Ok(sign_after_invocation_validation(
         req,
-        Some(limits),
-        |payload| sign_with_unqualified_provider_key(payload, req),
+        limits,
+        |payload| key.try_sign(payload, callback),
     )?))
 }
 
@@ -1510,7 +1579,7 @@ mod tests {
     fn qualified_provider_receives_exact_final_yaml_and_protobuf_payloads() {
         let signer = CapturingEd25519Signer::new(20);
         let public_key = signer.key.verifying_key().to_bytes();
-        let key = ProviderSigningKeyBuilder::ed25519(&signer, &public_key)
+        let key = ProviderSigningKeyBuilder::ed25519(&public_key)
             .build()
             .unwrap();
         let yaml_request = ProviderSignRequest {
@@ -1522,7 +1591,9 @@ mod tests {
             output_form: OutputForm::Yaml,
             algorithm_parameters: &[],
         };
-        let SignOutcome::Success(yaml_success) = sign_with_provider(&yaml_request) else {
+        let SignOutcome::Success(yaml_success) =
+            sign_with_provider(&yaml_request, signature_signing_callback(&signer))
+        else {
             panic!("qualified YAML provider signing failed");
         };
         assert_eq!(yaml_success.modified_payload, b"provider: yaml\n");
@@ -1540,7 +1611,7 @@ mod tests {
             algorithm_parameters: &[],
         };
         assert!(matches!(
-            sign_with_provider(&protobuf_request),
+            sign_with_provider(&protobuf_request, signature_signing_callback(&signer)),
             SignOutcome::Success(_)
         ));
         assert_eq!(signer.messages.lock().unwrap()[1], protobuf_payload);
@@ -1550,10 +1621,9 @@ mod tests {
     fn provider_output_self_verification_is_mandatory_on_qualified_path() {
         let signer = CapturingEd25519Signer::new(21);
         let other_key = EdSk::from_bytes(&[22; 32]);
-        let qualified =
-            ProviderSigningKeyBuilder::ed25519(&signer, other_key.verifying_key().as_bytes())
-                .build()
-                .unwrap();
+        let qualified = ProviderSigningKeyBuilder::ed25519(other_key.verifying_key().as_bytes())
+            .build()
+            .unwrap();
         let request = ProviderSignRequest {
             payload: b"provider: mismatch\n",
             algorithm: AlgorithmId::Ed25519,
@@ -1564,14 +1634,13 @@ mod tests {
             algorithm_parameters: &[],
         };
         assert!(matches!(
-            sign_with_provider(&request),
+            sign_with_provider(&request, signature_signing_callback(&signer)),
             SignOutcome::Signer(SignError::KeyOperationFailure)
         ));
 
-        let unqualified =
-            ProviderSigningKeyBuilder::ed25519(&signer, other_key.verifying_key().as_bytes())
-                .build_unqualified()
-                .unwrap();
+        let unqualified = ProviderSigningKeyBuilder::ed25519(other_key.verifying_key().as_bytes())
+            .build_unqualified()
+            .unwrap();
         let request = UnqualifiedProviderSignRequest {
             payload: b"provider: mismatch\n",
             algorithm: AlgorithmId::Ed25519,
@@ -1582,7 +1651,7 @@ mod tests {
             algorithm_parameters: &[],
         };
         assert!(matches!(
-            sign_with_unqualified_provider(&request),
+            sign_with_unqualified_provider(&request, signature_signing_callback(&signer)),
             SignOutcome::Success(_)
         ));
     }
@@ -1591,7 +1660,7 @@ mod tests {
     fn provider_invocation_validation_precedes_payload_scan_and_signing() {
         let signer = CapturingEd25519Signer::new(23);
         let public_key = signer.key.verifying_key().to_bytes();
-        let key = ProviderSigningKeyBuilder::ed25519(&signer, &public_key)
+        let key = ProviderSigningKeyBuilder::ed25519(&public_key)
             .build()
             .unwrap();
         let invalid_shape = ProviderSignRequest {
@@ -1604,7 +1673,7 @@ mod tests {
             algorithm_parameters: &[1],
         };
         assert!(matches!(
-            sign_with_provider(&invalid_shape),
+            sign_with_provider(&invalid_shape, signature_signing_callback(&signer)),
             SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters)
         ));
 
@@ -1619,7 +1688,7 @@ mod tests {
                 algorithm_parameters: &[],
             };
             assert!(matches!(
-                sign_with_provider(&request),
+                sign_with_provider(&request, signature_signing_callback(&signer)),
                 SignOutcome::Invocation(SignInvocationError::InvalidKeyid)
             ));
         }

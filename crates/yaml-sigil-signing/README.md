@@ -15,10 +15,13 @@ each signing request.
   `sign_proto_with_resource_limits` enforce an explicit complete-output policy.
 - `EncodeError` and `EncodeErrorKind` re-export the common protobuf format
   error used by resource-aware protobuf output.
-- `sign_with_provider` accepts a qualified provider key, while
+- `sign_with_provider` accepts a qualified public-key binding and a callback, while
   `sign_with_unqualified_provider` makes the deliberate bypass explicit.
-- `ProviderSigningKeyBuilder` binds a synchronous `signature` 3.0 signer to
-  canonical public-key bytes and offers `build` and `build_unqualified`.
+- `ProviderSigningKeyBuilder` validates canonical public-key bytes and offers
+  `build` and `build_unqualified`. It does not store a signer.
+- `sign_with_p256_digest_provider` passes the final payload's SHA-256 digest to
+  a P-256 callback and independently verifies its output.
+- `signature_signing_callback` forwards existing `signature` 3.0 adapters.
 - `AsyncProviderSigner` and `AsyncProviderSigningKeyBuilder` support awaitable
   operations. `ProviderAsyncSigner` and `UnqualifiedProviderAsyncSigner`
   implement `AsyncSigner` with the corresponding bound keys.
@@ -48,21 +51,23 @@ form. Both helpers return `P256EncodingError` on invalid input and preserve
 valid signature scalar values, including high-S. They are re-exported from
 [`yaml-sigil-core`](https://crates.io/crates/yaml-sigil-core); see its
 [encoding contracts and compiling examples](https://docs.rs/yaml-sigil-core/latest/yaml_sigil_core/p256_encoding/index.html).
-Apply these conversions before the provider boundary. The builder still
-rejects compressed keys and the signer still requires raw signatures.
+Convert public keys before binding and DER signatures before a callback
+returns. The builder still rejects compressed keys, and callbacks still return
+raw signatures.
 
-Implement `signature::Signer<[u8; 64]> + Sync` for a type you own that holds or
-borrows your provider's initialized key handle. Add a direct dependency on
-[`signature`](https://crates.io/crates/signature) 3.0. Your `try_sign` method
-performs the provider operation and returns the fixed-width signature or
-`signature::Error`, which becomes `SignError::KeyOperationFailure`.
+Validate your provider's public key with `ProviderSigningKeyBuilder`, construct
+`ProviderSignRequest`, and pass a callback to each `sign_with_provider` call.
+The callback has the shape `FnOnce(&[u8]) -> Result<[u8; 64], SignError>` and
+may borrow mutable state without `Send` or `Sync`. It runs synchronously on
+your calling thread and may block. Map an SDK failure to
+`SignError::KeyOperationFailure`; callback errors remain in `SignOutcome::Signer`.
 
-Follow the
-[compiling adapter example](https://docs.rs/yaml-sigil-signing/latest/yaml_sigil_signing/provider/index.html#implement-a-signing-adapter)
-to implement the trait, bind its public key, construct `ProviderSignRequest`,
-and call `sign_with_provider`. The provider types are available at the crate
-root and in its public `provider` module. The bound key is an opaque input to
-the artifact operation. Implementing the separate
+The [compiling examples](https://docs.rs/yaml-sigil-signing/latest/yaml_sigil_signing/provider/index.html)
+cover mutable local state, borrowed handle reuse, and concurrent signing.
+Existing `signature::Signer<[u8; 64]>` adapters can use
+`signature_signing_callback(&adapter)`, which maps `signature::Error` to
+`SignError::KeyOperationFailure`. The provider types are available at the crate
+root and in `provider`. Implementing the separate
 `yaml_sigil_traits::signing::Signer` contract means supplying the complete
 signing operation, including artifact processing.
 
@@ -79,17 +84,17 @@ and explicitly unqualified adapters as well as direct trait implementations.
 Use `ProviderSigningKeyBuilder::ed25519` with a 32-octet canonical compressed
 public key or `ProviderSigningKeyBuilder::ecdsa_p256_sha256` with a 65-octet
 uncompressed public key from *Standards for Efficient Cryptography 1 (SEC 1)*.
-The builder receives only a synchronous `signature::Signer<[u8; 64]>` adapter
-and the corresponding public key. It does not request or expose private-key
-bytes.
+The builder receives only public bytes. It does not request private-key bytes
+or hold a provider handle. Requests borrow these bindings. Both qualified and
+unqualified keys and requests are `Send + Sync`. Each callback retains the
+thread restrictions of its captures. Shared providers can use one binding from
+multiple threads; local callbacks can borrow the same mutable session on
+successive calls.
 
-The shared signer must implement `Sync`. Both qualified and unqualified bound
-keys implement `Send + Sync`, so you can share them across worker threads.
-Adapters with mutable state synchronize that state internally.
-
-`build` is the preferred path. It validates the public key and self-verifies
-every signature produced for a real request before returning an artifact. It
-does not ask the signer to process a hidden qualification message.
+`build` selects the qualified path. It validates the public key, and each
+operation self-verifies the returned signature before emitting an artifact.
+Requests rejected before signing make zero callback calls; admitted signing
+operations make one. The library adds no probe signature or retry.
 `build_unqualified` skips cryptographic output verification, but still
 validates the public key and requires structurally valid signature octets. Use
 the explicitly named unqualified signing functions with that key type.
@@ -100,19 +105,29 @@ real payload. The provider remains responsible for private-key generation
 quality, entropy, storage, access policy, and other properties hidden behind
 its opaque handle.
 
-The provider receives the final message bytes. YAML signing applies any
-authorized final-line-feed normalization first. Protobuf payload bytes remain
-unchanged. The boundary does not accept a prehash. A P-256 adapter applies
-SHA-256 exactly once and returns raw 64-octet big-endian `r || s`; DER is not a
-provider output format. Ed25519 returns canonical 64-octet `R || S`.
+Message callbacks receive final payload bytes after authorized YAML
+final-newline handling. Protobuf bytes remain unchanged. A P-256 message
+callback applies SHA-256 once. Ed25519 returns canonical 64-octet `R || S`;
+P-256 returns 64-octet big-endian `r || s`, never DER.
+
+For a device that signs a digest, use `sign_with_p256_digest_provider` with
+`FnOnce(&[u8; 32]) -> Result<[u8; 64], SignError>`. The library computes SHA-256
+over the prepared payload once for that callback. Sign those digest bytes
+without hashing again. Supply the complete payload in the request so the
+library can verify and emit it. The digest path requires a qualified P-256
+binding and rejects Ed25519 before calling. Both P-256 callback choices own
+the profile's CSPRNG nonce sampling; output verification cannot establish how
+the nonce was generated. See the
+[compiling digest example](https://docs.rs/yaml-sigil-signing/latest/yaml_sigil_signing/fn.sign_with_p256_digest_provider.html).
 
 Provider support or successful output self-verification does not establish or
 imply FIPS validation. Such a claim depends on the complete provider build,
 configuration, platform, operational boundary, and deployment.
 
-Use `sign_with_provider_and_resource_limits` or
-`sign_with_unqualified_provider_and_resource_limits` for bounded provider
-signing. The async counterparts are
+Use `sign_with_provider_and_resource_limits`,
+`sign_with_unqualified_provider_and_resource_limits`, or
+`sign_with_p256_digest_provider_and_resource_limits` for bounded synchronous
+signing. Pass `(request, limits, callback)`. The async counterparts are
 `sign_with_async_provider_and_resource_limits` and
 `sign_with_unqualified_async_provider_and_resource_limits`. They reuse the
 preflight and exact output checks below. Ordinary provider entry points and

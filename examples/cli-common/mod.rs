@@ -15,7 +15,7 @@ use clap::{CommandFactory, FromArgMatches, Parser};
 use yaml_sigil_core::AlgorithmId;
 use yaml_sigil_signing::{
     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys, SignOutcome,
-    sign_with_provider,
+    sign_with_provider, signature_signing_callback,
 };
 use yaml_sigil_verification::{
     ArtifactForm, ProviderPublicKeys, ProviderVerifierFactory, UnqualifiedProviderPublicKeys,
@@ -118,31 +118,32 @@ fn run<P: ProviderExample>(args: &Args, stdin: impl Read, mut output: impl Write
     let algorithm = args.key_type.algorithm();
     print_public_key(&mut output, P::NAME, args.key_type.label(), public_key)?;
 
-    // Both algorithms use the normal signing builder. It validates the public
-    // key and self-verifies each real signature before returning an artifact.
-    // The provider keeps the native private key behind the operation trait.
+    // The builder validates public bytes without storing a signer. The normal
+    // operation independently verifies each real callback output. A forwarding
+    // callback borrows the native adapter separately for this operation.
     let signing_key = match algorithm {
-        AlgorithmId::Ed25519 => ProviderSigningKeyBuilder::ed25519(&signer, public_key),
-        AlgorithmId::EcdsaP256Sha256 => {
-            ProviderSigningKeyBuilder::ecdsa_p256_sha256(&signer, public_key)
-        }
+        AlgorithmId::Ed25519 => ProviderSigningKeyBuilder::ed25519(public_key),
+        AlgorithmId::EcdsaP256Sha256 => ProviderSigningKeyBuilder::ecdsa_p256_sha256(public_key),
     }
     .build()?;
     let key = match algorithm {
         AlgorithmId::Ed25519 => ProviderSigningKeys::Ed25519(&signing_key),
         AlgorithmId::EcdsaP256Sha256 => ProviderSigningKeys::EcdsaP256Sha256(&signing_key),
     };
-    let signed = match sign_with_provider(&ProviderSignRequest {
-        payload: payload.as_bytes(),
-        algorithm,
-        key,
-        keyid: None,
-        // Allow a missing final newline to be appended before YAML signing.
-        // Compare the verified payload with those normalized bytes below.
-        append_missing_final_newline: true,
-        output_form: OutputForm::Yaml,
-        algorithm_parameters: &[],
-    }) {
+    let signed = match sign_with_provider(
+        &ProviderSignRequest {
+            payload: payload.as_bytes(),
+            algorithm,
+            key,
+            keyid: None,
+            // Allow a missing final newline to be appended before YAML signing.
+            // Compare the verified payload with those normalized bytes below.
+            append_missing_final_newline: true,
+            output_form: OutputForm::Yaml,
+            algorithm_parameters: &[],
+        },
+        signature_signing_callback(&signer),
+    ) {
         SignOutcome::Success(signed) => signed,
         SignOutcome::Invocation(error) => bail!("signing invocation failed: {error}"),
         SignOutcome::Signer(error) => bail!("signing failed: {error}"),

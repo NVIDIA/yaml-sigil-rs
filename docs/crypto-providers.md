@@ -77,12 +77,13 @@ continued rejection of unconverted forms.
 
 ### Bind the canonical public key
 
-Associate each opaque provider handle with one algorithm and its canonical
-public key. The signing builder validates
-the public key and retains that association. Qualified signing verifies every
-real output against that key and the final message before returning an
-artifact. A valid signature made with the wrong private key therefore fails.
-The builder never asks for a synthetic signing challenge or private-key bytes.
+Select one algorithm and its canonical public key before signing. The
+synchronous signing builder validates and stores only that public material;
+each operation supplies a callback separately. The async builder also borrows
+its adapter. Qualified signing verifies every real output against the bound
+key and final message before returning an artifact. A valid signature made
+with the wrong private key therefore fails. Neither builder requests a
+synthetic signing challenge or private-key bytes.
 
 A verification factory binds exactly the supplied public key to a handle.
 Each handle must preserve its own binding when the factory creates another
@@ -112,19 +113,70 @@ and trusted keys from application context before verification.
 
 | Operation | Synchronous contract | Asynchronous contract |
 |-----------|----------------------|-----------------------|
-| Sign with an initialized handle. | `signature::Signer<[u8; 64]> + Sync`. | `AsyncProviderSigner`. |
+| Sign a message with an initialized handle. | Per-operation `FnOnce(&[u8]) -> Result<[u8; 64], SignError>`. | `AsyncProviderSigner`. |
+| Sign a P-256 digest. | Qualified `FnOnce(&[u8; 32]) -> Result<[u8; 64], SignError>`. | No separate digest operation. |
 | Verify with a bound handle. | `signature::Verifier<[u8; 64]>` and `ProviderVerifier`. | `AsyncProviderVerifier`. |
 | Bind public bytes to a verifier. | `ProviderVerifierFactory`. | `AsyncProviderVerifierFactory`. |
 | Select qualification. | `VerificationProviderBuilder::qualify` or `build_unqualified`. | `AsyncVerificationProviderBuilder::qualify().await` or `build_unqualified`. |
 
-The operation receives the final message bytes. Do not prehash them before
-calling the adapter. YAML signing applies
-authorized final-newline normalization before the operation. Protobuf payload
-bytes remain unchanged. A P-256 adapter hashes those message bytes with
-SHA-256 exactly once and exchanges fixed-width signatures, never DER. Its
-verifier must accept both high-S and low-S for qualification. Ed25519
-qualification includes canonical mixed-order inputs accepted by the slot's
-cofactored verification equation.
+Pass the complete payload in every signing request. The library applies
+authorized YAML final-newline handling before invoking the provider; protobuf
+bytes remain unchanged. A message-signing callback or async adapter receives
+those final bytes. For P-256 it hashes them with SHA-256 once and returns
+64-octet big-endian `r || s`, never DER. Ed25519 returns canonical `R || S`.
+
+`sign_with_p256_digest_provider` prepares the same payload and computes
+SHA-256 once for a typed `&[u8; 32]` callback input. The callback signs that
+digest without hashing again. The library checks its signature against the
+bound key and complete final payload before emission. Independent verification
+may hash the payload again. This operation rejects Ed25519 before calling;
+there is no Ed25519 prehash or unqualified digest mode. Both P-256 callback
+choices leave the profile's CSPRNG nonce sampling to the integration.
+The [digest rustdoc example](../crates/yaml-sigil-signing/src/lib.rs) compiles
+as part of the signing crate's tests.
+
+Synchronous callbacks can borrow mutable sessions or thread-confined handles.
+Bindings and requests remain `Send + Sync` because they store no callback or
+private handle. Rust applies thread bounds to each callback's captures when
+you move or share it. A shared provider can sign concurrently against the same
+binding; local code can create successive callbacks borrowing one mutable
+handle. The callback runs synchronously on the calling thread and can block it.
+The library invokes it exactly once when the request reaches signing, with no
+probe or retry. Earlier rejection makes no call.
+
+Use `signature_signing_callback(&adapter)` to forward an existing
+`signature::Signer<[u8; 64]>` implementation. It maps the adapter's error to
+`SignError::KeyOperationFailure`, and it adds no unconditional thread bound.
+The [compiling provider examples](../crates/yaml-sigil-signing/src/provider.rs)
+show local mutable captures, handle reuse, and shared signing.
+
+Verification adapters continue to receive the complete extracted message and
+fixed-width signature. P-256 verification qualification requires both high-S
+and low-S acceptance. Ed25519 qualification includes canonical mixed-order
+inputs accepted by the slot's cofactored verification equation.
+
+### Synchronous signing calls
+
+Construct the public-key binding before signing, then supply a callback to
+each operation. Builders and keys own only public-key material; requests
+borrow the keys.
+
+| Operation | Call |
+|-----------|------|
+| Bind an Ed25519 public key. | `ProviderSigningKeyBuilder::ed25519(bytes)` |
+| Bind a P-256 public key. | `ProviderSigningKeyBuilder::ecdsa_p256_sha256(bytes)` |
+| Sign with a qualified key. | `sign_with_provider(&request, callback)` |
+| Sign with an unqualified key. | `sign_with_unqualified_provider(&request, callback)` |
+| Sign a P-256 digest. | `sign_with_p256_digest_provider(&request, callback)` |
+| Apply resource limits. | Pass `(&request, &limits, callback)` to the corresponding resource-aware operation. |
+
+Supply your own closure or `signature_signing_callback(&adapter)` as the
+callback. Callback failures propagate as
+`SignOutcome::Signer`; use `SignError::KeyOperationFailure` for SDK failures.
+Wrong-key, wrong-message, or malformed qualified output maps to the same
+failure.
+
+### Async operation boundaries
 
 The async traits use native returned futures with `Send` guarantees and
 `Send + Sync` adapters. An async adapter does not need a synchronous trait
@@ -238,6 +290,7 @@ remote binding costs depend on that adapter.
 | Operation | Qualified provider | Unqualified provider | Direct traits |
 |-----------|--------------------|----------------------|---------------|
 | Sign an admitted message successfully. | One provider sign and one local cryptographic verification of its output. | One provider sign; no local cryptographic output verification. | Depends on the implementation and selected helpers. |
+| Sign an admitted P-256 digest successfully. | One local SHA-256 pass to prepare the digest, one callback, and one local cryptographic output verification. | No digest operation. | Implementation-owned. |
 | Verify an admitted, structurally valid signed artifact with a bound key. | One provider verification after local checks. Qualification is not repeated. | One provider verification after the same local checks. | Depends on the implementation and selected helpers. |
 | Reuse a bound key. | No repeated builder or qualification calls. | No repeated builder calls. | Implementation-owned. |
 
@@ -252,8 +305,10 @@ Both provider paths share artifact parsing, payload copying, framing, and
 structural checks. Scanning, copying, and message hashing grow with payload
 size; public-key and signature validation operate on fixed-size inputs.
 Reusing a bound key avoids binding work, but verification still validates its
-canonical public bytes at use. Provider operations use dynamic dispatch;
-synchronous verification factories return boxed handles.
+canonical public bytes at use. Synchronous signing accepts a generic callback
+and adds no callback allocation or dynamic dispatch. The forwarding helper
+can borrow a trait object when the caller chooses one. Synchronous verification
+uses dynamic dispatch and factories return boxed handles.
 
 Async provider operations add a boxed future for each sign or verification
 call. The private verification bridge also boxes each bound handle, including
@@ -281,9 +336,11 @@ becomes `SignedButFailedVerification`; `ProviderFailure` becomes
 `InvocationError::KeyResolutionFailure`. Synchronous `ProviderVerifier` has
 a default classification that treats every `signature::Error` as mismatch.
 Override it when the provider can fail operationally. Async verification
-requires an explicit classified outcome. Signing operation errors, malformed
-signatures, and failed qualified output checks become
-`SignError::KeyOperationFailure`.
+requires an explicit classified outcome. Async signing errors and errors from
+the synchronous `signature` forwarding helper become
+`SignError::KeyOperationFailure`. Custom callbacks return `SignError` directly;
+use `KeyOperationFailure` for SDK errors. Malformed signatures and failed
+qualified output checks also become `SignError::KeyOperationFailure`.
 
 An early malformed-input rejection or an opted-in resource preflight can
 avoid provider calls. That does not imply zero local parsing or validation
@@ -299,9 +356,10 @@ conformance and do not alter the separate 16,384-octet YAML signature-carrier
 constraint. Ordinary provider operations and trait facades remain unbounded
 by this optional policy.
 
-Use `sign_with_provider_and_resource_limits` or
-`sign_with_unqualified_provider_and_resource_limits` for bounded synchronous
-signing. Their async counterparts are
+Use `sign_with_provider_and_resource_limits`,
+`sign_with_unqualified_provider_and_resource_limits`, or
+`sign_with_p256_digest_provider_and_resource_limits` for bounded synchronous
+signing. Pass `(request, limits, callback)`. The async counterparts are
 `sign_with_async_provider_and_resource_limits` and
 `sign_with_unqualified_async_provider_and_resource_limits`.
 
@@ -338,6 +396,7 @@ adapters. It is narrower than a guarantee about an integrator's provider.
 | Artifact framing, parsing, options, and verifier-state mapping. | Applied by this workspace. | Applied by this workspace. | Implementation-owned; helpers are optional. |
 | Canonical admissible public keys and signature structure. | Applied locally. | Applied locally. | Implementation-owned. |
 | Every real signature matches the bound key and final message. | Self-verified before returning an artifact. | No local cryptographic output check. | Implementation-owned. |
+| P-256 digest callback input matches the final complete payload. | SHA-256 prepared locally after final payload handling. | No digest operation. | Implementation-owned. |
 | Fixed verification qualification suite. | Required per algorithm and instance. | Not run. | Not required by the traits. |
 | Bound provider verdict without fallback. | Authoritative. | Authoritative. | Implementation-owned. |
 | Whole-artifact resource admission. | Only when explicitly selected. | Only when explicitly selected. | Implementation-owned. |
@@ -356,15 +415,19 @@ adapters. It is narrower than a guarantee about an integrator's provider.
 | Protection against an adapter deliberately evading qualification. | Not provided; the adapter is trusted code. | Not provided. | Not provided by implementing traits. |
 | Runnable YAML examples with fresh keys, file/stdin/default input, and independent checking of printed output. | Native examples test qualified signing for both algorithms and qualified P-256 verification; the async example tests qualified P-256. | The dedicated `ring` example tests both operations unqualified for both algorithms without qualification; the async example tests unqualified P-256. | No runnable custom direct-trait example; default trait implementations run workspace tests. |
 | Borrowed clients and keys, `Send + Sync`, pending/wake/drop behavior. | Tested with controllable async adapters. | Borrowed-key round trips are tested; shared async plumbing retains the same contracts. | External traits require `Send`; runtime behavior of custom implementations is not tested here. |
+| Mutable local message callbacks, borrowed session reuse, and callbacks that consume captures. | Tested without `Send` or `Sync` requirements; bindings and requests retain compile-time `Send + Sync` checks and concurrent signing tests. | Shares the callback contract; rejection, error, structural, and resource cases are tested. | Custom callback behavior is not tested automatically. |
+| Exact P-256 digest after YAML normalization, opaque protobuf input, and empty payloads. | Tested through digest callbacks and both artifact verifiers, including double-hash, wrong-message, and wrong-key rejection. | No digest operation. | Custom digest operations are not tested automatically. |
 | SSH-agent Ed25519 signing with a selected public key. | `github-keys` tests exact messages, key selection, refusals, malformed replies, wrong-key signatures, timeout, and cancellation. An opt-in Unix test uses an isolated OpenSSH agent. | No agent example. | No custom agent trait implementation. |
 | Bounded signing rejects early and checks the exact final output. | Tested for both algorithms and forms, sync and async. | Tested for both algorithms and forms, sync and async. | Custom operations must implement their own policy. |
+| Digest resource rejection and callback counts. | Zero calls on early rejection; one call on success or late YAML rejection, at exact and exceeded limits. | No digest operation. | Implementation-owned. |
 | Input-size rejection before artifact-dependent provider verification. | Existing shared admission helper is available. | Tested with an operation counter. | Custom operations must select and test admission. |
 | Every applicable conformance fixture against each provider. | Not tested. | Not tested. | Default implementations run the workspace fixture suites; arbitrary associated key types need test-driver adaptation. |
 | RNG quality, nonce-generation policy, constant-time behavior, side channels, key storage, and service authorization. | Not established by qualification or output self-verification. | Not established. | Not established by implementing traits. |
 | Real SDK scheduling, network cancellation, timeouts, rate limits, and all deployment platforms. | Integrator-owned; the agent example's focused tests do not cover every agent or platform. | Not tested. | Integrator-owned. |
 | FIPS validation or other certification. | Not established. | Not established. | Not established. |
 
-Evidence lives in the signing unit tests,
+Evidence lives in the signing unit tests, including
+[`callback_tests.rs`](../crates/yaml-sigil-signing/src/callback_tests.rs),
 [`provider_paths.rs`](../crates/yaml-sigil-verification/tests/provider_paths.rs),
 [`async_provider_tests.rs`](../crates/yaml-sigil-verification/src/async_provider_tests.rs),
 compiling API rustdoc, and the runnable examples, including
@@ -406,7 +469,8 @@ build, or deployment as FIPS validated.
 ## Existing RustCrypto types
 
 The `0.6` convenience APIs expose `ed25519-dalek` 3.x and `p256` 0.14
-key types. Synchronous provider adapters implement `signature` 3.x traits.
+key types. Synchronous verification and optional signing adapters implement
+`signature` 3.x traits; signing callbacks can call SDK operations directly.
 Update your direct dependencies together; Cargo treats types and traits from
 incompatible versions as distinct. See Cargo's
 [version incompatibility guidance](https://doc.rust-lang.org/cargo/reference/resolver.html#version-incompatibility-hazards).
