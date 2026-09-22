@@ -1,16 +1,16 @@
 # yaml-sigil-wasm
 
 > [!IMPORTANT]
-> WebAssembly support is currently experimental.
+> WebAssembly support is experimental.
 
 `yaml-sigil-wasm` exposes YAML Sigil artifact composition and decomposition
 to browser and Node.js JavaScript through `wasm32-unknown-unknown`. It also
 provides signing and verification. Protocol processing runs in this workspace's
 Rust implementation crates.
 
-This experimental crate is distributed as a crates.io source package starting
-with `0.6.0-rc.1`. Its JavaScript API may change before stabilization. The repository
-does not publish an npm package, prebuilt WebAssembly, or another executable
+Releases from `0.6.0-rc.1` distribute this crate as a crates.io source package.
+Its JavaScript API may change before stabilization. The repository does not
+publish an npm package, prebuilt WebAssembly, or another executable
 artifact. Run `cargo xtask wasm` for local validation. The task puts generated
 WebAssembly and JavaScript in a temporary directory and removes that directory
 before returning.
@@ -166,7 +166,7 @@ suite.
 
 ## Build for JavaScript
 
-You build the WebAssembly module and bindings locally from source. Install
+Build the WebAssembly module and bindings locally from source. Install
 Rust 1.95.0 or newer with `wasm32-unknown-unknown`, and `wasm-pack` 0.15.0.
 The dependency build obtains its pinned Buf tool, so the first build needs
 network access and a writable Cargo and Buf cache. A separate system `protoc`

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! Emits fixed signing-key bytes at compile time for the `yaml-sigil-test-keys` crate.
+//! Generate signing-key bytes at compile time for `yaml-sigil-test-keys`.
 //!
-//! This crate is intended only as a **dev-dependency** so key material is not built for
-//! normal `cargo build` / `cargo check` of `yaml-sigil-verification` or `yaml-sigil-signing`.
+//! Use this crate only as a development dependency. Building or checking the
+//! signing and verification libraries without test targets does not compile it.
 
 use p256::elliptic_curve::Generate;
 use rand::SeedableRng;

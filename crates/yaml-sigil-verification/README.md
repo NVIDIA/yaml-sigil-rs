@@ -6,8 +6,7 @@ their signatures in YAML and protobuf forms.
 
 Use this crate to check document structure, verify Ed25519 or ECDSA P-256
 SHA-256 signatures, and retrieve payload bytes only after successful
-verification. The public results classify each attempt into the `yaml-sigil`
-verifier states.
+verification. The result identifies the applicable `yaml-sigil` verifier state.
 
 ## API Surface
 
@@ -15,7 +14,7 @@ verifier states.
 - Their `_with_resource_limits` variants apply an explicit complete-input
   policy before verification work.
 - `pre_verify`, `pre_verify_yaml`, and `pre_verify_proto` run structural checks
-  without crypto.
+  without cryptography.
 - Their `_with_resource_limits` variants and
   `can_pre_verify_with_resource_limits` check the original encoded input.
 - `verify_from_pre_verify` and its form-specific helpers reuse successful
@@ -145,9 +144,8 @@ establish or imply FIPS validation.
 To bound provider verification, admit the original artifact with
 `ArtifactResourceLimits::check_input_size` before calling a provider operation.
 A bounded pre-verification response can also be passed to
-`verify_from_pre_verify_with_provider`. The same admission and reuse work for
-the async and explicitly unqualified variants, so no additional provider
-verification-limit wrappers are needed. Admit the original input before any
+`verify_from_pre_verify_with_provider`. Use the same admission and reuse with
+async or explicitly unqualified variants. Admit the original input before any
 artifact-dependent remote work.
 
 Async binding can suspend and return a handle that borrows its factory or

@@ -58,10 +58,9 @@ In particular, `keyid` is an `Option<String>` in the application model, so
 its absence survives both interoperability directions. The algorithm field
 stores its raw `i32` value, following Prost's enum representation.
 
-Exchange encoded bytes across this boundary. The example needs no conversion
-adapter between generated Rust types and the core facade. It compares
-decoded fields, since interoperability does not require identical encoded
-bytes.
+Exchange encoded bytes between the libraries using each library's encode and
+decode methods. Compare decoded fields; interoperable encodings need not
+contain identical bytes.
 
 The owned core facade preserves unknown fields and raw unknown algorithm
 numbers when decoding and re-encoding. This example checks the declared

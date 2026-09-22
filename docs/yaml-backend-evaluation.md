@@ -95,7 +95,7 @@ budgets, document-count rule, and duplicate-key, merge-key, anchor, and tag
 policies. Serde compatibility therefore does not promise identical YAML
 acceptance or resource policy.
 
-`serialize_signature_document` remains the canonical YAML emitter. Serde
+Use `serialize_signature_document` for canonical YAML emission. Serde
 interoperability preserves `SignatureDocument` values, not comments, scalar
 style, field order, presentation, or byte identity. Callers that need lossless
 forwarding must retain the original carrier bytes. The text inside
