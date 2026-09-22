@@ -61,6 +61,17 @@ signature document inside those bytes remains payload content.
 
 ## Local provider verification
 
+`p256_der_signature_to_raw` converts strict DER signatures to 64-octet raw
+`r || s` without changing high-S or low-S values.
+`p256_public_key_to_uncompressed` validates compressed or uncompressed public
+points and returns the required 65-octet uncompressed form. Both helpers return
+`P256EncodingError` on invalid input. They are re-exported from
+[`yaml-sigil-core`](https://crates.io/crates/yaml-sigil-core); see its
+[encoding contracts and compiling examples](https://docs.rs/yaml-sigil-core/latest/yaml_sigil_core/p256_encoding/index.html).
+Use them before the algorithm boundary. Verification does not automatically
+convert DER signatures or compressed keys found in an artifact or provider
+binding.
+
 Add a direct dependency on
 [`signature`](https://crates.io/crates/signature) 3.0. Implement
 `signature::Verifier<[u8; 64]>` and `ProviderVerifier` for your bound provider

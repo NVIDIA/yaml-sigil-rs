@@ -22,6 +22,7 @@ unless they need these lower-level helpers directly.
 - Opt-in complete-artifact resource limits for YAML and protobuf boundaries.
 - Algorithm mapping for the `yaml-sigil` wire and YAML names.
 - Optional JSON Schema validation with the `json-schema-validate` feature.
+- Optional P-256 provider-input conversions with the `p256-encoding` feature.
 
 The public extension-trait contract lives in
 [`yaml-sigil-traits`](https://crates.io/crates/yaml-sigil-traits). This crate
@@ -33,6 +34,26 @@ Code generation obtains a verified Buf executable from the Cargo-resolved
 descriptor set to [`buffa-build`](https://crates.io/crates/buffa-build).
 The workspace manifest declares the minimum `buf-tools` version requirement.
 Neither a system `buf` nor a system `protoc` installation is required.
+
+## P-256 provider encodings
+
+Enable `p256-encoding` to use `p256_der_signature_to_raw` and
+`p256_public_key_to_uncompressed`. The first helper parses a strict DER
+signature into 64 big-endian `r || s` octets without changing high-S or low-S
+values. The second validates a 33-octet compressed or 65-octet uncompressed
+public point from *Standards for Efficient Cryptography 1 (SEC 1)* and returns
+the required 65-octet uncompressed encoding.
+
+Both helpers return fixed-size arrays or `P256EncodingError`. They delegate
+encoding and point validation to RustCrypto and do not verify a signature
+against a message. Malformed inputs, out-of-range signature components,
+invalid points, and unsupported encodings are rejected. See the
+[compiling examples and error contracts](https://docs.rs/yaml-sigil-core/latest/yaml_sigil_core/p256_encoding/index.html).
+
+The feature is disabled by default for core-only consumers. The signing and
+verification crates enable it and re-export the same helpers. Convert provider
+bytes before building a key or returning a signature; algorithm boundaries
+continue to require raw signatures and uncompressed public keys.
 
 ## YAML and Serde boundary
 

@@ -420,6 +420,20 @@ original raw input.
 
 ## Local cryptographic provider boundaries
 
+`crates/yaml-sigil-core/src/p256_encoding.rs` adds optional conversions for
+provider inputs. Signing and verification re-export the helpers. Tests require
+strict DER, nonzero in-range signature components, valid public points, and
+fixed 64-octet signature and 65-octet public-key outputs. They preserve high-S
+and low-S values and reject malformed, trailing, and unsupported encodings.
+`crates/yaml-sigil-verification/src/crypto.rs` verifies converted low-S and
+high-S signatures while retaining rejection of unconverted DER and compressed
+public keys at the existing slot boundaries. Fixture bytes, expected outcomes,
+algorithm identifiers, and artifact formats do not change.
+
+The core crate's notice now includes the applicable existing point-encoding
+terms from *Standards for Efficient Cryptography 1 (SEC 1)*. The canonical
+imported notice and conformance fixture notices remain unchanged.
+
 The sync and async provider-aware operations reuse the same payload extraction,
 signature-structure checks, public-key admissibility rules, artifact framing,
 and verifier-state mapping as the RustCrypto convenience operations. The
