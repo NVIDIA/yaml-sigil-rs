@@ -522,7 +522,7 @@ round trip. It does not implement or test P-256 agent signing.
 
 ```shell
 cargo test --package yaml-sigil-examples --example github-keys
-cargo xtask ci
+cargo xtask check
 ```
 
 The target's `test = true` registration makes the existing workspace CI run

@@ -130,7 +130,7 @@ before committing. Run these commands from the repository root.
 
 ```shell
 cargo test --package yaml-sigil-examples
-cargo xtask ci
+cargo xtask check
 ```
 
 Keep executable build outputs local and ephemeral. Follow the repository-root

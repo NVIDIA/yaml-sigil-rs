@@ -2,10 +2,69 @@
 
 These instructions apply to the developer-only `xtask` crate.
 
-Keep `cargo xtask ci` and every namespace except `github` provider-neutral and
+Keep `cargo xtask check` and every namespace except `github` provider-neutral and
 credential-free. Development commands may validate, package, import, profile,
 or prepare local source, but they must not inspect GitHub, GitLab, runner, or
 workflow environment state.
+
+## Standard development commands
+
+The xtask is an isolated workspace with its own committed `Cargo.lock`, Rust
+1.95 minimum, and explicit library and binary targets. The root Cargo alias
+runs `cargo run --locked --manifest-path xtask/Cargo.toml --`. Keep this
+separation from the untracked product-workspace lockfile and release policy.
+Use Clap derive, a thin binary entry point, testable command construction, and
+the root parser's `CommandFactory::debug_assert()` invariant test.
+
+`cargo xtask check` and its visible `ci` alias share one parser and execution
+path. The canonical registry order is `markdown`, `protobuf`, `fmt`,
+`versions`, `package-content`, `check`, `clippy`, `test`, `downstream`,
+`machete`, `deny`, and `audit`. Run all steps by default and fail fast. Accept
+mutually exclusive CSV `--only` and `--exclude` selectors; reject unknown,
+empty, and fully excluded selections and deduplicate in registry order.
+
+Share feature options between checks, coverage, and coverage-open. Default to
+all features only without explicit options; allow `--features` with
+`--no-default-features`. Keep all-feature locked xtask compilation and the
+independent downstream fixture contracts outside product feature selection.
+Do not forward features to formatting. Generate missing ignored lockfiles for
+selected dependency checks without requiring the tests to run first.
+
+LLVM coverage writes `target/llvm-cov-html/html/index.html`; Tarpaulin writes
+`target/coverage/tarpaulin/tarpaulin-report.html`. Both `coverage --open` and
+`coverage-open` generate and verify a fresh report before opening it.
+`coverage-view` retains the existing-report viewer with engine selection.
+
+Tarpaulin uses `target/coverage/tarpaulin/build` for compilation so its cleanup
+does not remove ordinary build outputs. Reports cover the root workspace;
+Tarpaulin excludes the separate xtask and downstream fixture workspaces.
+
+Profiling builds the `yaml-sigil-conformance` integration test
+`e2e_buildtime_keys` with the `profiling` Cargo profile. Select its executable
+from Cargo JSON messages and run it with `--test-threads=1` through Samply.
+Preserve the 100-iteration default, `--iterations` option, and
+`target/profile/profile.json` report. Both `profile --open` and `profile-open`
+record a fresh profile; `profile-view` opens the saved result. Report the
+Linux perf-event setting without modifying it.
+
+Probe only selected tools. Distinguish a missing executable from a failed
+launch or version probe, preserve the failure diagnostic, and give the exact
+Cargo or rustup install instruction. See the root report and validation tool
+instructions. Browser opening must pass paths as data, including through the
+native Windows API; a missing desktop opener should print the report path.
+
+Keep provider declarations and scripts aligned by review, never by parsing
+workflow files in the xtask. Retain the existing Python candidate binder and
+protected reporter because they run before candidate execution or credential
+creation. Do not replace mature helpers or their callers without approval.
+No image workflow or MCP server exists here, so omit those task handles.
+
+Run formatting, Clippy with warnings denied, and tests for both workspaces via
+`cargo xtask check`. Exercise narrowed selectors, feature combinations,
+report generation, aliases, tool errors, and profiling artifact selection.
+Optional report tools and browser access are not required by the default gate.
+
+## Release boundaries
 
 The only provider-specific namespace is `cargo xtask github`. Limit it to typed
 release qualification and finalization for the exact compiled repository and

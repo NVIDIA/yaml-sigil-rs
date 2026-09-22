@@ -183,7 +183,7 @@ the Windows CI runner. See the provider's
 ### Tests
 
 The unpublished `yaml-sigil-examples` workspace member registers both example
-targets with `test = true`. The existing `cargo xtask ci` sequence compiles
+targets with `test = true`. The existing `cargo xtask check` sequence compiles
 them during all-target Clippy and executes their tests during
 `cargo test --workspace --all-features`.
 

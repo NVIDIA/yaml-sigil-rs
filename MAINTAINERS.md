@@ -135,7 +135,7 @@ from a coordination ref.
    git switch --detach "${main_sha}"
    git switch --create "activate-${target}"
    cargo xtask release activate --version "${target}"
-   cargo xtask ci
+   cargo xtask check
    test -f Cargo.lock
    test ! -L Cargo.lock
    rm -- Cargo.lock
@@ -310,7 +310,7 @@ It is a separately authorized coordinator operation, not contributor intake.
      --reapply-cherry-picks --empty=ask \
      --onto "${main_sha}" "${previous_main_sha}"
    new_line_sha="$(git rev-parse HEAD)"
-   cargo xtask ci
+   cargo xtask check
    ```
 
    An empty-commit stop requires explicit reconciliation; never silently skip
@@ -673,6 +673,13 @@ choose the smallest accurate type. Follow the sign-off requirements in
 `CONTRIBUTING.md`.
 
 ## Repository development guidance
+
+Run `cargo xtask check` for the complete local validation sequence; `ci` is an
+alias. The authoritative trusted Linux job and terminal candidate phase use
+that same command. Keep their scope, fixed preflight checks, and candidate
+execution ordering aligned when changing the registry. MSRV and advisory
+jobs retain their separate public-workspace checks. Coverage and profiling
+remain optional local operations.
 
 Repository scope, commands, documentation and style, third-party material
 and attribution, coordinated Buf upgrades, and other working guidance remain

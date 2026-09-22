@@ -304,43 +304,79 @@ headless Firefox, and exercises the generated Node.js API. All generated
 executable output stays in a temporary directory that the task removes before
 returning. It also rejects any `.wasm` file retained in the workspace.
 
-## Coverage and profiling
+## Development checks
 
-Install the report tools with Cargo:
+Run the full local validation gate or select checks while iterating:
 
 ```shell
-cargo install cargo-llvm-cov
+cargo xtask check
+cargo xtask check --only=fmt,clippy,test
+cargo xtask check --exclude=audit
+```
+
+The registry runs in this order: `markdown`, `protobuf`, `fmt`, `versions`,
+`package-content`, `check`, `clippy`, `test`, `downstream`, `machete`, `deny`,
+and `audit`. It stops at the first failure. `cargo xtask ci` accepts the same
+options and runs the same checks. Selectors are mutually exclusive, reject
+unknown or empty selections, and run duplicate names only once in registry
+order.
+
+Checks and coverage enable all workspace features by default. Use
+`--features=json-schema-validate` or `--no-default-features` for a narrower
+product build; those two flags may be combined. The separate xtask and
+downstream fixture workspaces keep their own feature settings.
+
+## Coverage and profiling
+
+Install the tools for the reports you need:
+
+```shell
+cargo install --locked cargo-llvm-cov
+cargo install --locked cargo-tarpaulin
 cargo install --locked samply
 ```
 
-The coverage and profiling xtasks check for their required tool before doing
-other work and print the corresponding installation command above when it is
-absent. Keep these commands aligned with the constants and synchronization
-test in `xtask/src/main.rs`.
+The selected task probes its required tool before doing other work. A missing
+tool or a failed launch produces a diagnostic and an installation command.
 
-Generate the workspace coverage report and optionally open its HTML index:
+Generate coverage with LLVM by default or choose Tarpaulin:
 
 ```shell
 cargo xtask coverage
+cargo xtask coverage --engine=tarpaulin
+cargo xtask coverage --features=json-schema-validate --no-default-features
 cargo xtask coverage --open
-cargo xtask coverage-open
+cargo xtask coverage-open --engine=tarpaulin
+cargo xtask coverage-view
 ```
+
+LLVM writes `target/llvm-cov-html/html/index.html`; Tarpaulin writes
+`target/coverage/tarpaulin/tarpaulin-report.html`. Both `coverage --open` and
+`coverage-open` generate a fresh report before opening it. Use
+`coverage-view --engine=<ENGINE>` to open an existing report without rerunning
+tests. Both generators accept the same feature options as `check`.
+
+Tarpaulin uses `target/coverage/tarpaulin/build` for compilation so its cleanup
+does not remove ordinary build outputs. Reports cover the root workspace;
+Tarpaulin excludes the separate xtask and downstream fixture workspaces.
 
 Record the focused E2E test with release-equivalent optimization and retained
 debug symbols:
 
 ```shell
 cargo xtask profile
+cargo xtask profile --iterations 250
 cargo xtask profile --open
 cargo xtask profile-open
+cargo xtask profile-view
 ```
 
 The non-interactive default repeats the short E2E test 100 times and writes
-Firefox Profiler data to `target/profile/profile.json`. Use
-`--iterations <COUNT>` when a different sample size is useful. `--open` and
-`profile-open` launch Samply's interactive browser UI; Samply does not generate
-a standalone profiling HTML file. On Linux, the host's perf-event policy must
-permit unprivileged profiling.
+Firefox Profiler data to `target/profile/profile.json`. Both `profile --open`
+and `profile-open` record a fresh profile before launching Samply's browser
+UI. Use `profile-view` to inspect a saved profile. Samply does not generate a
+standalone HTML file. On Linux, the task reports the host's perf-event setting;
+recording requires permission under the local system policy.
 
 ## Specification and conformance
 
@@ -384,7 +420,7 @@ workspace root. The per-crate list commands show the README, `LICENSE`, and
 other files Cargo would place in each source package.
 
 ```shell
-cargo xtask ci
+cargo xtask check
 cargo xtask package-content
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-core
 cargo package --list --allow-dirty --exclude-lockfile --package yaml-sigil-transcription

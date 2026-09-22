@@ -320,7 +320,7 @@ jobs:
             "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- \
               release check --base-ref "${RELEASE_BASE_REF}" --version "${release_version}"
           fi
-          "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- ci
+          "${CARGO_BIN}" run --locked --manifest-path xtask/Cargo.toml -- check
         working-directory: ${{ runner.temp }}/candidate-source
 
   candidate_msrv:
