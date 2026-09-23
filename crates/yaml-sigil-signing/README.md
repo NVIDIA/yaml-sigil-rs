@@ -7,6 +7,14 @@ Use this crate to sign payload bytes with Ed25519 or ECDSA P-256 SHA-256 and
 emit a `yaml-sigil` artifact. Choose YAML or protobuf output explicitly for
 each signing request.
 
+## Select the contract
+
+Use `yaml_sigil_signing::v1alpha1` for explicit specification selection,
+including provider modules and resource-aware operations. The unqualified
+paths remain the `v1alpha1` default and name the same traits, key bindings,
+requests, and implementations. Values work through either path without
+conversion. The specification identifier is independent of the crate's SemVer.
+
 ## API Surface
 
 - `sign` signs either artifact form in process.

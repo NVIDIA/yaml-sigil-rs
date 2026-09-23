@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, ensure};
 use ed25519_dalek::VerifyingKey;
 use russh::keys::ssh_key::{Fingerprint, HashAlg, PublicKey};
-use yaml_sigil_verification::resolve_ed25519_verifying_key;
+use yaml_sigil_verification::v1alpha1::resolve_ed25519_verifying_key;
 
 #[derive(Clone)]
 pub(super) struct Candidate {

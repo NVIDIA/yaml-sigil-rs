@@ -34,8 +34,8 @@
 //!
 //! ```
 //! use std::{cell::RefCell, rc::Rc};
-//! use yaml_sigil_core::AlgorithmId;
-//! use yaml_sigil_signing::{
+//! use yaml_sigil_core::v1alpha1::AlgorithmId;
+//! use yaml_sigil_signing::v1alpha1::{
 //!     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
 //!     ProviderSigningKeys, SignError, SignOutcome, sign_with_provider,
 //! };
@@ -78,8 +78,8 @@
 //! bounds. Each operation supplies its own callback and shares the binding.
 //!
 //! ```
-//! use yaml_sigil_core::AlgorithmId;
-//! use yaml_sigil_signing::{
+//! use yaml_sigil_core::v1alpha1::AlgorithmId;
+//! use yaml_sigil_signing::v1alpha1::{
 //!     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
 //!     ProviderSigningKeys, SignOutcome, sign_with_provider, signature_signing_callback,
 //! };

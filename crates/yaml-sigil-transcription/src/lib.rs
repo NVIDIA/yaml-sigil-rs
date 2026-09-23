@@ -3,6 +3,10 @@
 
 //! YamlSigil v1alpha1 Transcription API for bytes-only compose and decompose.
 //!
+//! Select [`v1alpha1`] explicitly. The unqualified paths remain the
+//! `v1alpha1` default and name the same types, traits, and operations.
+//! The specification identifier is independent of the crate's SemVer.
+//!
 //! # Resource boundaries
 //!
 //! [`compose_with_resource_limits`] checks exact prospective output size before
@@ -13,6 +17,8 @@
 //! Existing entry points retain their unbounded behavior. The 16,384-octet
 //! YAML signature-carrier constraint remains a separate rule at metadata
 //! parsing boundaries.
+
+pub mod v1alpha1;
 
 use tracing::instrument;
 use yaml_sigil_core::{
@@ -230,7 +236,7 @@ pub fn compose_with_resource_limits(
 /// Both forms accept a complete artifact without adding an implementation-local
 /// limit. YAML decomposition scans the complete input. Protobuf decomposition
 /// has the resource behavior documented on
-/// [`yaml_sigil_core::decompose_proto_outer`]. Both return owned component
+/// [`yaml_sigil_core::v1alpha1::decompose_proto_outer`]. Both return owned component
 /// buffers. Use [`decompose_with_resource_limits`] to check the original input
 /// first.
 #[instrument(level = "info", skip(req), fields(form = ?req.form))]

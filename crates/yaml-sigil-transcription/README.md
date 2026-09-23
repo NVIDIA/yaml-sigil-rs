@@ -17,6 +17,14 @@ YAML composition requires payload bytes that form a valid UTF-8 stream without
 a BOM and with a final line terminator when non-empty. Protobuf composition
 treats payload bytes as opaque and preserves every accepted byte unchanged.
 
+## Select the contract
+
+Use `yaml_sigil_transcription::v1alpha1` for explicit specification selection.
+The unqualified paths remain the `v1alpha1` default and name the same traits,
+requests, results, and implementations. Values work through either path
+without conversion. The specification identifier is independent of the
+crate's SemVer.
+
 ## API Surface
 
 - `compose` and `decompose` perform the byte operations.

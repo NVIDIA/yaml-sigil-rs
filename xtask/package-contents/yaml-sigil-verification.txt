@@ -14,6 +14,7 @@ src/crypto.rs
 src/lib.rs
 src/proto_verify.rs
 src/provider.rs
+src/v1alpha1.rs
 src/yaml_verify.rs
 tests/provider_paths.rs
 tests/verify_paths.rs

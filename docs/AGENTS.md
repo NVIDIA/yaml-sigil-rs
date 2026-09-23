@@ -35,6 +35,12 @@ public API examples synchronized with compiling rustdoc or executable example
 coverage. Follow [`examples/AGENTS.md`](../examples/AGENTS.md) when changing
 runnable examples and their index.
 
+Prefer each implementation crate's `v1alpha1` namespace in guides. Explain
+that default paths name the same definitions and that specification versions
+are separate from crate SemVer. For bindings, document the generated
+JavaScript namespace as well as the Rust surface and keep examples aligned
+with the generated-API tests.
+
 Run the repository Markdown check for documentation changes. When prose
 claims a runtime behavior or test outcome changed, run the corresponding
 focused tests and the repository's required validation. Keep historical

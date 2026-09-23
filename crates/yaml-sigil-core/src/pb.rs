@@ -19,7 +19,7 @@
 //! string fields in the input buffer.
 //!
 //! ```
-//! use yaml_sigil_core::{
+//! use yaml_sigil_core::v1alpha1::{
 //!     AlgorithmId,
 //!     pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
 //! };
@@ -55,7 +55,7 @@
 //! payload and signature bytes in the admitted input allocation.
 //!
 //! ```
-//! use yaml_sigil_core::{
+//! use yaml_sigil_core::v1alpha1::{
 //!     AlgorithmId, ArtifactResourceLimits,
 //!     pb::{
 //!         SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature,
@@ -91,7 +91,7 @@
 //!
 //! ```
 //! use core::num::NonZeroUsize;
-//! use yaml_sigil_core::{
+//! use yaml_sigil_core::v1alpha1::{
 //!     AlgorithmId, ArtifactResourceLimits,
 //!     pb::{SignedYamlArtifact, YamlSigilSignature},
 //! };
@@ -907,7 +907,7 @@ impl FacadeEncode for SignedYamlArtifact {
 /// The view cannot outlive the input buffer:
 ///
 /// ```compile_fail
-/// use yaml_sigil_core::pb::SignedYamlArtifactRef;
+/// use yaml_sigil_core::v1alpha1::pb::SignedYamlArtifactRef;
 ///
 /// fn invalid() -> SignedYamlArtifactRef<'static> {
 ///     let wire = vec![0x12, 0x00];

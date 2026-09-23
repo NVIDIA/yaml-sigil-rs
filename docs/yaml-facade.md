@@ -5,6 +5,10 @@ importing a YAML library. `parse_signature_document` returns the public
 `SignatureDocument` data model, and `serialize_signature_document` writes
 canonical YAML from that model.
 
+Select these operations through `yaml_sigil_core::v1alpha1`. The example uses
+that namespace; unqualified paths accept the same `SignatureDocument` values
+and preserve the same parsing and serialization behavior.
+
 ## Run the example
 
 Run this command from the repository root.

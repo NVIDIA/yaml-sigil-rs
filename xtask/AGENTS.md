@@ -60,6 +60,11 @@ protected reporter because they run before candidate execution or credential
 creation. Do not replace mature helpers or their callers without approval.
 No image workflow or MCP server exists here, so omit those task handles.
 
+The downstream registry includes `tests/downstream/v1alpha1-api` to exercise
+explicit and default paths against the same selected traits dependency. Keep
+it independent from product feature selection, alongside the protobuf,
+Serde, and resource-policy fixtures.
+
 Run formatting, Clippy with warnings denied, and tests for both workspaces via
 `cargo xtask check`. Exercise narrowed selectors, feature combinations,
 report generation, aliases, tool errors, and profiling artifact selection.

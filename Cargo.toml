@@ -20,6 +20,7 @@ exclude = [
     "tests/downstream/core-only",
     "tests/downstream/noyalib-0-0-35",
     "tests/downstream/resource-api",
+    "tests/downstream/v1alpha1-api",
 ]
 
 [workspace.package]

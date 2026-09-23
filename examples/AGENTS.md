@@ -21,6 +21,11 @@ example source so readers can follow the code without switching to the README.
 Explain the purpose of each stage and the public contracts it demonstrates.
 More inline commentary is appropriate here than in production library code.
 
+Import implementation APIs through their explicit `v1alpha1` namespaces.
+The unqualified defaults remain compatible; dedicated downstream regressions
+exercise interchange between both styles. Keep examples on the traits release
+selected by the workspace instead of depending on unreleased trait paths.
+
 ## CLI examples
 
 Use `clap` derive for CLI argument parsing. Keep each command's options suited

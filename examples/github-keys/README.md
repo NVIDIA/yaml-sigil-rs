@@ -489,7 +489,7 @@ use the native `p256` library to obtain the uncompressed point expected by
 use anyhow::{Result, bail};
 use p256::elliptic_curve::sec1::ToSec1Point;
 use russh::keys::ssh_key::{PublicKey, public::EcdsaPublicKey};
-use yaml_sigil_verification::resolve_p256_verifying_key;
+use yaml_sigil_verification::v1alpha1::resolve_p256_verifying_key;
 
 fn resolve_ssh_p256(line: &str) -> Result<p256::ecdsa::VerifyingKey> {
     let parsed = PublicKey::from_openssh(line)

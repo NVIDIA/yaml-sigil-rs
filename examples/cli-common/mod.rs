@@ -12,12 +12,12 @@ use std::io::{self, Read, Write};
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser};
-use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{
+use yaml_sigil_core::v1alpha1::AlgorithmId;
+use yaml_sigil_signing::v1alpha1::{
     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys, SignOutcome,
     sign_with_provider, signature_signing_callback,
 };
-use yaml_sigil_verification::{
+use yaml_sigil_verification::v1alpha1::{
     ArtifactForm, ProviderPublicKeys, ProviderVerifierFactory, UnqualifiedProviderPublicKeys,
     VerificationProviderBuilder, VerifierOptions, VerifierState, verify_with_provider,
     verify_with_unqualified_provider,

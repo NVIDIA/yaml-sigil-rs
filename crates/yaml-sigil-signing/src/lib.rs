@@ -5,9 +5,13 @@
 //! ECDSA P-256 SHA-256.
 //! Signed-artifact transcoding lives in [`transcription`].
 //!
+//! Select [`v1alpha1`] explicitly. The unqualified paths remain the
+//! `v1alpha1` default and name the same types, traits, and operations.
+//! The specification identifier is independent of the crate's SemVer.
+//!
 //! Request-shape failures are [`SignInvocationError`]; sign-time failures are
 //! [`SignError`], plus the YAML serialization extension. Resource-aware
-//! protobuf output preserves the core facade's [`yaml_sigil_core::pb::EncodeError`]
+//! protobuf output preserves the core facade's [`yaml_sigil_core::v1alpha1::pb::EncodeError`]
 //! in a separate inner result layer.
 //!
 //! Use [`sign_yaml`] or [`sign_proto`] to call [`sign`] with a fixed
@@ -44,6 +48,8 @@
 //! and final output checks as [`sign_with_resource_limits`]. The
 //! [provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
 //! compares qualified, unqualified, and direct trait integrations.
+
+pub mod v1alpha1;
 
 pub mod async_provider;
 mod proto_carrier;
@@ -472,8 +478,8 @@ pub fn sign_with_unqualified_provider_and_resource_limits(
 /// return fixed-width signature bytes and satisfy the profile's nonce rules.
 ///
 /// ```
-/// use yaml_sigil_core::AlgorithmId;
-/// use yaml_sigil_signing::{
+/// use yaml_sigil_core::v1alpha1::AlgorithmId;
+/// use yaml_sigil_signing::v1alpha1::{
 ///     OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder,
 ///     ProviderSigningKeyError, ProviderSigningKeys, SignError, SignOutcome,
 ///     sign_with_p256_digest_provider,

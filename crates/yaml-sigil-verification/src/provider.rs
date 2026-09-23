@@ -48,8 +48,8 @@
 //! does not change [`crate::VerifierOptions`] automatically.
 //!
 //! ```
-//! use yaml_sigil_core::AlgorithmId;
-//! use yaml_sigil_verification::{
+//! use yaml_sigil_core::v1alpha1::AlgorithmId;
+//! use yaml_sigil_verification::v1alpha1::{
 //!     ArtifactForm, ProviderPublicKeys, ProviderVerifier, ProviderVerifierFactory,
 //!     QualifiedVerificationProvider, VerificationProviderBuilder, VerifierOptions,
 //!     VerifierState, verify_with_provider,
@@ -116,10 +116,10 @@
 //! # // A fixed key and artifact are used only to execute this documentation test.
 //! # let native_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
 //! # let public_key = native_key.verifying_key().to_sec1_point(false);
-//! # let artifact = yaml_sigil_signing::sign_proto(&yaml_sigil_signing::SignProtoParams {
+//! # let artifact = yaml_sigil_signing::v1alpha1::sign_proto(&yaml_sigil_signing::v1alpha1::SignProtoParams {
 //! #     payload: b"example: signed\n",
 //! #     algorithm: AlgorithmId::EcdsaP256Sha256,
-//! #     key: yaml_sigil_signing::SigningKey::EcdsaP256Sha256(&native_key),
+//! #     key: yaml_sigil_signing::v1alpha1::SigningKey::EcdsaP256Sha256(&native_key),
 //! #     keyid: None,
 //! #     append_missing_final_newline: false,
 //! # }).unwrap();

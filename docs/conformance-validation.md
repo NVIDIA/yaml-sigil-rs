@@ -17,6 +17,30 @@ That includes fixture imports, fixture removals, fixture-to-API remapping,
 expected outcome changes, ignored tests, API additions discovered through a
 fixture, and deliberate divergences.
 
+## Namespace compatibility
+
+Each published implementation crate exposes `v1alpha1` alongside the
+unqualified default. Re-exports preserve type and trait identity, including
+the selected `yaml-sigil-traits` contract and optional feature gates.
+`crates/yaml-sigil-conformance/tests/conformance_default.rs` runs the existing
+sync and async suites through namespaced default implementations. The smoke
+suites retain unqualified imports. Fixture bytes, expected outcomes,
+algorithm profiles, imported artifacts, and wire behavior are unchanged.
+
+`tests/downstream/v1alpha1-api` passes requests, key bindings, results,
+resource policies, owned protobuf values, and borrowed views between both
+styles. It also uses the selected traits directly and checks provider signing
+and YAML serialization. Existing protobuf wire-characterization and
+independent-consumer tests continue to check the retained paths.
+
+`crates/yaml-sigil-wasm/tests/wasm.rs` checks Rust namespace interoperability.
+`crates/yaml-sigil-wasm/tests/generated_api.cjs` mixes JavaScript namespace
+and top-level calls for all eight operations, including shared result classes
+and resource-policy objects. Both styles run `tests/byte_inputs.cjs` relative
+to that crate. Rust binding tests run in Node.js and Firefox; generated
+JavaScript tests run in Node.js. Success, invocation, resource, and
+cryptographic outcomes remain unchanged.
+
 ## Suite Layout
 
 `crates/yaml-sigil-conformance` exposes one sync suite per fixture directory

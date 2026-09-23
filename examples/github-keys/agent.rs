@@ -13,7 +13,7 @@ use russh::keys::agent::client::{AgentClient, AgentStream};
 use russh::keys::ssh_key::{Algorithm, Fingerprint, PublicKey};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
-use yaml_sigil_signing::AsyncProviderSigner;
+use yaml_sigil_signing::v1alpha1::AsyncProviderSigner;
 
 use super::keys::Candidate;
 

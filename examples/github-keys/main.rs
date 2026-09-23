@@ -26,12 +26,12 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use russh::keys::ssh_key::Fingerprint;
-use yaml_sigil_core::{AlgorithmId, ArtifactResourceLimits};
-use yaml_sigil_signing::{
+use yaml_sigil_core::v1alpha1::{AlgorithmId, ArtifactResourceLimits};
+use yaml_sigil_signing::v1alpha1::{
     AsyncProviderSignRequest, AsyncProviderSigningKeyBuilder, AsyncProviderSigningKeys, OutputForm,
     SignOutcome, sign_with_async_provider_and_resource_limits,
 };
-use yaml_sigil_verification::{
+use yaml_sigil_verification::v1alpha1::{
     PreVerifyOutcome, PublicKeys, VerifierOptions, VerifierState,
     pre_verify_yaml_with_resource_limits, verify_from_pre_verify_yaml,
 };

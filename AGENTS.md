@@ -83,6 +83,20 @@ choose the smallest accurate type. Follow the sign-off requirements in
 This repository implements YamlSigil `v1alpha1` for Rust consumers. It is
 self-contained for normal clone, build, test, and publish workflows.
 
+Each published crate exposes its current API through `v1alpha1`. Prefer
+explicit imports in public examples and preserve the unqualified paths as the
+same `v1alpha1` default. Keep re-exports explicit, type and trait identity
+shared, and optional operations under their existing feature gates. The
+specification identifier is independent of crate SemVer. Both paths use the
+same selected `yaml-sigil-traits` contract; adopt a new traits release before
+depending on paths it introduces.
+
+The generated JavaScript `v1alpha1` namespace forwards the eight operations
+to the existing boundary functions. Keep top-level operations and result and
+policy classes available. Rust re-exports alone do not establish a JavaScript
+export. Exercise both styles in `tests/downstream/v1alpha1-api` and the local
+WebAssembly tests when changing this surface.
+
 Local implementation inputs:
 
 - `crates/yaml-sigil-core/spec/proto/yaml_sigil/v1alpha1/yaml_sigil.proto`
@@ -109,9 +123,10 @@ repository.
 
 Keep generated protobuf code crate-private inside `yaml-sigil-core`. Expose
 protobuf messages only through the private-field types in
-`yaml_sigil_core::pb`, and do not expose Buffa traits, generated modules,
-views, fields, or errors in public signatures. Of the published crates, only
-`yaml-sigil-core` depends directly on Buffa. Preserve unknown fields and raw
+`yaml_sigil_core::v1alpha1::pb` and its unqualified default, and do not expose
+Buffa traits, generated modules, views, fields, or errors in public signatures.
+Of the published crates, only `yaml-sigil-core` depends directly on Buffa.
+Preserve unknown fields and raw
 unknown algorithm numbers across owned decode and re-encode. Keep the Buffa
 0.5 wire-characterization tests, the protobuf `tests/downstream` facade
 fixtures, and the downstream resource-API fixture passing when changing
@@ -352,6 +367,7 @@ cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-buffa-0-5
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-noyalib-0-0-35
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-downstream-resource-api
+cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-downstream-v1alpha1-api
 cargo-machete --with-metadata
 cargo deny --all-features check bans licenses sources -D warnings
 cargo deny --manifest-path tests/downstream/Cargo.toml --locked check licenses sources -D warnings -A no-license-field -A unlicensed

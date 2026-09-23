@@ -2,9 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Typed JavaScript boundary for browser and Node.js WebAssembly runtimes.
+//!
+//! Select [`v1alpha1`] in Rust or the generated JavaScript `v1alpha1` export
+//! explicitly. The unqualified API remains the `v1alpha1` default. Both
+//! JavaScript paths use the same result classes and resource-policy objects.
+
+pub mod v1alpha1;
 
 mod bytes;
 mod resource;
+mod versioned_js;
 
 use bytes::ByteInput;
 pub use resource::ArtifactResourceLimits;

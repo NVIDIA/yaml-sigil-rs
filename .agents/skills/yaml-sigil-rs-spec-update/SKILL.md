@@ -42,6 +42,10 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 - Do not edit, generate, or publish `yaml-sigil-traits` from this repository.
 - If a spec delta requires trait or DTO contract changes, update
   `yaml-sigil-traits` first, then update this repository's dependency.
+- Keep explicit `v1alpha1` and unqualified default paths bound to the same
+  definitions and selected traits dependency. Preserve optional feature gates
+  and separate specification identifiers from crate SemVer. Depend on a new
+  traits path only after adopting the release that provides it.
 - Keep updates scoped to this workspace's crates, tests, docs, CI, and xtask
   helpers.
 - Leaving implementation code unchanged is a valid outcome when the spec delta
@@ -49,9 +53,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 - Do not add gRPC servers, clients, gateways, transport adapters, or generated
   service stubs for signing, verification, or transcription service IDL.
 - Keep Buffa-generated protobuf modules private to `yaml-sigil-core`. Preserve
-  the stable private-field `yaml_sigil_core::pb` facade, unknown-field and raw
-  enum-number forwarding, Buffa 0.5 wire vectors, and both downstream facade
-  fixtures.
+  the stable private-field `yaml_sigil_core::v1alpha1::pb` facade and its
+  unqualified default, unknown-field and raw enum-number forwarding, Buffa 0.5
+  wire vectors, and both downstream facade fixtures.
 - Treat whole-artifact limits as optional operational hardening for
   `v1alpha1`. The implementation-local resource API defaults to
   `DEFAULT_MAX_ARTIFACT_BYTES` only when a caller explicitly selects it. Do not
@@ -144,6 +148,12 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
 5. Map spec changes to the affected workspace surfaces. Start with the paths
    below and include any other paths identified by the complete diff:
 
+   - Each published crate's `src/v1alpha1.rs` and `src/lib.rs`: explicit
+     version selection and compatible default re-exports. Keep the namespace
+     inventory aligned with that crate's public items and feature gates.
+   - `crates/yaml-sigil-wasm/src/versioned_js.rs`: JavaScript namespace
+     forwarding to the existing boundary. Keep result and resource-policy
+     classes shared with the top-level API and test the generated exports.
    - `crates/yaml-sigil-core/src/algorithm.rs`: canonical YAML `alg` strings,
      protobuf enum mapping, algorithm additions, and algorithm deprecations.
    - `crates/yaml-sigil-core/src/signature_doc.rs` and
@@ -166,6 +176,9 @@ reviewing a `yaml-sigil-spec` update for impact on this workspace.
    - `crates/yaml-sigil-core/tests/protobuf_wire_compatibility.rs` and
      `tests/downstream/`: compatibility with characterized wire behavior and
      independently generated protobuf consumers.
+   - `tests/downstream/v1alpha1-api/` and
+     `crates/yaml-sigil-wasm/tests/`: interchange between explicit and default
+     paths, shared traits and DTOs, and actual JavaScript namespace exports.
    - `crates/yaml-sigil-core/README.md` and
      `crates/yaml-sigil-conformance/README.md`: immutable links to the reviewed
      specification commit.

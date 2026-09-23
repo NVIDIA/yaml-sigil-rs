@@ -8,7 +8,7 @@
 //! encodes the illustrative bytes [1, 2, 3]; this example performs no cryptography.
 
 use anyhow::{Result, ensure};
-use yaml_sigil_core::{parse_signature_document, serialize_signature_document};
+use yaml_sigil_core::v1alpha1::{parse_signature_document, serialize_signature_document};
 
 const SAMPLE: &[u8] = br#"schema: YamlSigilSignature.v1alpha1
 alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL
@@ -47,7 +47,7 @@ fn round_trip(carrier: &[u8]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yaml_sigil_core::{AlgorithmId, SCHEMA_V1ALPHA1, SignatureDocument};
+    use yaml_sigil_core::v1alpha1::{AlgorithmId, SCHEMA_V1ALPHA1, SignatureDocument};
 
     #[test]
     fn preserves_quoted_keyid_and_signature_fields() -> Result<()> {

@@ -31,12 +31,12 @@ use clap::Parser;
 use key_type::KeyType;
 use ring_adapter::{RingFactory, RingSigner};
 use yaml_io::{PayloadArgs, print_public_key, print_section, print_signed, print_verification};
-use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{
+use yaml_sigil_core::v1alpha1::AlgorithmId;
+use yaml_sigil_signing::v1alpha1::{
     OutputForm, ProviderSigningKeyBuilder, SignOutcome, UnqualifiedProviderSignRequest,
     UnqualifiedProviderSigningKeys, sign_with_unqualified_provider, signature_signing_callback,
 };
-use yaml_sigil_verification::{
+use yaml_sigil_verification::v1alpha1::{
     ArtifactForm, UnqualifiedProviderPublicKeys, VerificationProviderBuilder, VerifierOptions,
     VerifierState, verify_with_unqualified_provider,
 };
@@ -188,7 +188,7 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use clap::CommandFactory as _;
-    use yaml_sigil_verification::{
+    use yaml_sigil_verification::v1alpha1::{
         PublicKeys, resolve_ed25519_verifying_key, resolve_p256_verifying_key, verify_yaml,
     };
 

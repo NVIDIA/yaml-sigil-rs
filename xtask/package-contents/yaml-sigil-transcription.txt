@@ -8,3 +8,4 @@ LICENSE
 README.md
 SECURITY.md
 src/lib.rs
+src/v1alpha1.rs

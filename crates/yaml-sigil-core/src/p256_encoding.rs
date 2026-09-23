@@ -45,13 +45,13 @@ pub enum P256EncodingError {
 /// # Example
 ///
 /// ```
-/// use yaml_sigil_core::p256_der_signature_to_raw;
+/// use yaml_sigil_core::v1alpha1::p256_der_signature_to_raw;
 ///
 /// // Synthetic r = s = 1 demonstrates conversion, not message verification.
 /// let raw = p256_der_signature_to_raw(&[0x30, 6, 2, 1, 1, 2, 1, 1])?;
 /// assert_eq!(raw.len(), 64);
 /// assert_eq!((raw[31], raw[63]), (1, 1));
-/// # Ok::<(), yaml_sigil_core::P256EncodingError>(())
+/// # Ok::<(), yaml_sigil_core::v1alpha1::P256EncodingError>(())
 /// ```
 pub fn p256_der_signature_to_raw(bytes: &[u8]) -> Result<[u8; 64], P256EncodingError> {
     // Two INTEGERs, each with at most 32 value octets and one sign-padding
@@ -81,7 +81,7 @@ pub fn p256_der_signature_to_raw(bytes: &[u8]) -> Result<[u8; 64], P256EncodingE
 /// # Example
 ///
 /// ```
-/// use yaml_sigil_core::p256_public_key_to_uncompressed;
+/// use yaml_sigil_core::v1alpha1::p256_public_key_to_uncompressed;
 ///
 /// // The fixed private key is only an example fixture. Providers expose their
 /// // public bytes without exporting a private key.

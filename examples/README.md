@@ -3,6 +3,11 @@
 Runnable examples demonstrate the public `yaml-sigil` APIs. Run the commands
 below from the repository root.
 
+Examples select each implementation crate's `v1alpha1` namespace explicitly.
+The unqualified APIs remain compatible defaults and use the same types,
+traits, and specification behavior. Crate SemVer is independent of this
+specification identifier.
+
 ## Example index
 
 | Example | Demonstrates |

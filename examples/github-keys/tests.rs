@@ -6,8 +6,8 @@ use ed25519_dalek::SigningKey as Ed25519SigningKey;
 use russh::keys::ssh_key;
 use std::fs;
 use std::path::Path;
-use yaml_sigil_signing::{SignYamlParams, SigningKey, sign_yaml};
-use yaml_sigil_verification::pre_verify_yaml;
+use yaml_sigil_signing::v1alpha1::{SignYamlParams, SigningKey, sign_yaml};
+use yaml_sigil_verification::v1alpha1::pre_verify_yaml;
 
 #[path = "agent_tests.rs"]
 mod agent_tests;
@@ -844,7 +844,7 @@ async fn tampering_wrong_keys_and_lookup_failures_do_not_verify() {
 fn resolve_ssh_p256(line: &str) -> Result<p256::ecdsa::VerifyingKey> {
     use p256::elliptic_curve::sec1::ToSec1Point;
     use ssh_key::{PublicKey, public::EcdsaPublicKey};
-    use yaml_sigil_verification::resolve_p256_verifying_key;
+    use yaml_sigil_verification::v1alpha1::resolve_p256_verifying_key;
 
     let parsed = PublicKey::from_openssh(line)
         .map_err(|error| anyhow::anyhow!("invalid OpenSSH key: {error}"))?;
@@ -883,7 +883,7 @@ async fn p256_adaptation_uses_existing_library_apis_but_is_not_a_cli_mode() {
     })
     .unwrap();
     assert!(matches!(
-        yaml_sigil_verification::verify_yaml(
+        yaml_sigil_verification::v1alpha1::verify_yaml(
             &artifact,
             &PublicKeys {
                 ed25519: None,

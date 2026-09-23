@@ -17,14 +17,21 @@ before returning.
 
 ## JavaScript API
 
-The generated bindings expose these positional functions:
+Select the current specification explicitly through the generated `v1alpha1`
+namespace. Existing top-level functions remain the `v1alpha1` default.
+Both paths use the same implementation, result classes, and
+`ArtifactResourceLimits` objects. Classes and their constructors remain
+top-level exports. The specification identifier is independent of the
+crate's SemVer.
+
+The namespace exposes these positional functions:
 
 | Function | Inputs | Result class |
 |---------|--------|--------------|
-| `compose` | Payload bytes, signature-carrier bytes, and form. | `ComposeResult`. |
-| `decompose` | Artifact bytes, form, and optional outer conformance. | `DecomposeResult`. |
-| `sign` | Payload bytes, algorithm, private key bytes, optional `keyid`, newline permission, and output form. | `SignResult`. |
-| `verify` | Artifact bytes, form, algorithm, and public key bytes. | `VerifyResult`. |
+| `v1alpha1.compose` | Payload bytes, signature-carrier bytes, and form. | `ComposeResult`. |
+| `v1alpha1.decompose` | Artifact bytes, form, and optional outer conformance. | `DecomposeResult`. |
+| `v1alpha1.sign` | Payload bytes, algorithm, private key bytes, optional `keyid`, newline permission, and output form. | `SignResult`. |
+| `v1alpha1.verify` | Artifact bytes, form, algorithm, and public key bytes. | `VerifyResult`. |
 
 Every byte input and output uses `Uint8Array`. Expected invocation, artifact,
 and cryptographic failures return a typed result and do not throw a JavaScript
@@ -66,7 +73,7 @@ Create a policy explicitly when processing external input.
 
 ```javascript
 const limits = new ArtifactResourceLimits();
-const result = verifyWithResourceLimits(
+const result = v1alpha1.verifyWithResourceLimits(
   artifact, "yaml", algorithm, publicKey, limits,
 );
 if (result.status === "verified") {
@@ -122,6 +129,9 @@ the original and derived policies. The existing functions require caller-owned
 whole-artifact admission when a deployment needs it.
 
 ## Rust implementation boundary
+
+Rust callers select `yaml_sigil_wasm::v1alpha1`. Its re-exports name the same
+functions and types as the crate root, with no conversion or new wrapper type.
 
 The bindings use this workspace's synchronous RustCrypto signing and
 verification paths. They do not expose browser crypto-provider adapters or
@@ -199,13 +209,13 @@ the locally compiled `.wasm` file. Serve them from the same origin for local
 browser use, then initialize the module before calling an operation:
 
 ```javascript
-import init, { ArtifactResourceLimits, verifyWithResourceLimits }
+import init, { ArtifactResourceLimits, v1alpha1 }
   from "./yaml_sigil_wasm.js";
 
 await init();
 const limits = new ArtifactResourceLimits();
 try {
-  const result = verifyWithResourceLimits(
+  const result = v1alpha1.verifyWithResourceLimits(
     artifact, "yaml", algorithm, publicKey, limits,
   );
   try {
@@ -226,6 +236,15 @@ its module synchronously through `require("./yaml_sigil_wasm.js")`; it does
 not require the browser's `await init()` step. Add
 `--features json-schema-validate` to either build command to embed schema
 validation. The feature is off by default.
+
+For Node.js, select the same namespace from the generated module:
+
+```javascript
+const { ArtifactResourceLimits, v1alpha1 } = require("./yaml_sigil_wasm.js");
+```
+
+The generated TypeScript declarations include the namespace and the shared
+result and policy types.
 
 Remove temporary outputs after your local checks:
 
@@ -254,6 +273,9 @@ typed failure results.
 Byte-copy regressions also cover overridden metadata, cross-realm arrays,
 detached and resized buffers, concurrent shared-buffer growth, and policy
 reuse and disposal after rejected inputs.
+Both import styles run the byte-input regressions. Mixed namespace/default
+round trips also check all eight operations, shared result classes, and
+resource-policy interoperability.
 
 ## License and project information
 

@@ -28,6 +28,25 @@ terms for their *Standards for Efficient Cryptography 1 (SEC 1)* material.
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before proposing a change.
 
+## Select the specification contract
+
+Use each published crate's `v1alpha1` module to select the current
+specification contract explicitly. For example, import signing operations
+from `yaml_sigil_signing::v1alpha1` and protobuf helpers from
+`yaml_sigil_core::v1alpha1::pb`. The generated JavaScript bindings expose the
+same choice through `v1alpha1.sign`, `v1alpha1.verify`, `v1alpha1.compose`,
+`v1alpha1.decompose`, and their resource-aware counterparts.
+
+The unqualified Rust and JavaScript APIs remain the `v1alpha1` default. Rust
+paths re-export the existing definitions, so types, trait implementations,
+keys, and requests pass between both styles without conversion. Both use the
+same selected `yaml-sigil-traits` dependency. JavaScript operations share the
+existing result classes and resource-policy objects.
+
+`v1alpha1` identifies specification behavior, independently of crate SemVer.
+Selecting the namespace preserves feature requirements, runtime behavior,
+and YAML and protobuf wire formats.
+
 ## Crates
 
 The workspace provides four Rust implementation crates and a WebAssembly
@@ -207,7 +226,7 @@ or no additional byte limit.
 
 ```rust
 use core::num::NonZeroUsize;
-use yaml_sigil_core::{
+use yaml_sigil_core::v1alpha1::{
     ArtifactResourceLimits,
     pb::SignedYamlArtifactRef,
 };

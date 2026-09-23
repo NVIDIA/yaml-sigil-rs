@@ -182,7 +182,94 @@ assert.equal(api.decomposeWithResourceLimits(
   new Uint8Array(2), "invalid", undefined, tiny,
 ).status, "resource_error");
 
-require("./byte_inputs.cjs")(api).catch((error) => {
+// Mix the default and explicit contracts in both directions. Namespace calls
+// must return the original classes and accept the same resource-policy object.
+assert.deepEqual(Object.keys(api.v1alpha1).sort(), [
+  "compose", "composeWithResourceLimits", "decompose", "decomposeWithResourceLimits",
+  "sign", "signWithResourceLimits", "verify", "verifyWithResourceLimits",
+]);
+for (const [producer, consumer] of [[api.v1alpha1, api], [api, api.v1alpha1]]) {
+  for (const form of ["yaml", "protobuf"]) {
+    const owned = [];
+    const keep = (value) => { owned.push(value); return value; };
+    try {
+      const input = encoder.encode("namespace: v1alpha1\n");
+      const outer = form === "protobuf" ? "strict" : undefined;
+      const signed = keep(producer.sign(
+        input, P256, new Uint8Array(32).fill(3), undefined, false, form,
+      ));
+      assert.ok(signed instanceof api.SignResult);
+      assert.equal(signed.status, "success");
+      const limits = keep(new api.ArtifactResourceLimits());
+      const exact = keep(limits.withMaxArtifactBytes(signed.artifact.length));
+      const short = keep(limits.withMaxArtifactBytes(signed.artifact.length - 1));
+
+      const verified = keep(consumer.verify(signed.artifact, form, P256, verifyingKey));
+      assert.ok(verified instanceof api.VerifyResult);
+      assert.equal(verified.status, "verified");
+      assert.deepEqual(verified.payload, input);
+      const split = keep(consumer.decompose(signed.artifact, form, outer));
+      assert.ok(split instanceof api.DecomposeResult);
+      assert.equal(split.status, "ok");
+      const joined = keep(producer.compose(split.payload, split.signatureCarrier, form));
+      assert.ok(joined instanceof api.ComposeResult);
+      assert.equal(joined.status, "success");
+      assert.deepEqual(joined.artifact, signed.artifact);
+
+      const boundedSign = keep(producer.signWithResourceLimits(
+        input, P256, new Uint8Array(32).fill(3), undefined, false, form, exact,
+      ));
+      assert.ok(boundedSign instanceof api.SignResult);
+      assert.equal(boundedSign.status, "success");
+      const boundedVerify = keep(consumer.verifyWithResourceLimits(
+        boundedSign.artifact, form, P256, verifyingKey, exact,
+      ));
+      assert.ok(boundedVerify instanceof api.VerifyResult);
+      assert.equal(boundedVerify.status, "verified");
+      assert.deepEqual(boundedVerify.payload, input);
+      const boundedSplit = keep(consumer.decomposeWithResourceLimits(
+        boundedSign.artifact, form, outer, exact,
+      ));
+      assert.ok(boundedSplit instanceof api.DecomposeResult);
+      assert.equal(boundedSplit.status, "ok");
+      const boundedJoin = keep(producer.composeWithResourceLimits(
+        boundedSplit.payload, boundedSplit.signatureCarrier, form, exact,
+      ));
+      assert.ok(boundedJoin instanceof api.ComposeResult);
+      assert.equal(boundedJoin.status, "success");
+      assert.deepEqual(boundedJoin.artifact, boundedSign.artifact);
+
+      for (const refused of [
+        keep(consumer.verifyWithResourceLimits(signed.artifact, form, P256, verifyingKey, short)),
+        keep(consumer.decomposeWithResourceLimits(signed.artifact, form, outer, short)),
+      ]) {
+        assert.equal(refused.status, "resource_error");
+        assert.equal(refused.code, "input_artifact_too_large");
+        assert.equal(refused.hasPayload, false);
+      }
+      for (const refused of [
+        keep(producer.composeWithResourceLimits(split.payload, split.signatureCarrier, form, short)),
+        keep(producer.signWithResourceLimits(
+          input, P256, new Uint8Array(32).fill(3), undefined, false, form, short,
+        )),
+      ]) {
+        assert.equal(refused.status, "resource_error");
+        assert.equal(refused.code, "output_artifact_too_large");
+        assert.equal(refused.hasArtifact, false);
+      }
+    } finally {
+      for (const value of owned.reverse()) value.free();
+    }
+  }
+}
+
+async function checkByteInputs() {
+  const regressions = require("./byte_inputs.cjs");
+  await regressions(api);
+  await regressions({ ...api, ...api.v1alpha1 });
+}
+
+checkByteInputs().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

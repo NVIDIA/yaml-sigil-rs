@@ -291,7 +291,7 @@ async fn agent_timeout_does_not_emit_or_retry() {
 
 #[tokio::test(start_paused = true)]
 async fn cancelled_requests_close_the_connection() {
-    use yaml_sigil_signing::AsyncProviderSigner;
+    use yaml_sigil_signing::v1alpha1::AsyncProviderSigner;
     let key = private(50);
     let (connection, observed) = mock_agent(std::slice::from_ref(&key), Reply::Pending);
     let (adapter, _) = agent::AgentSigner::select(

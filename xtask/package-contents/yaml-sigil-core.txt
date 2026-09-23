@@ -24,6 +24,7 @@ src/proto_outer.rs
 src/resource.rs
 src/signature_doc.rs
 src/tier_a_schema.rs
+src/v1alpha1.rs
 src/wire.rs
 tests/implementation_stack_smoke.rs
 tests/json_schema_signature_doc.rs

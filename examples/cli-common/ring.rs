@@ -8,8 +8,8 @@
 
 use anyhow::{Result, anyhow};
 use ring::signature::KeyPair as _;
-use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_verification::{ProviderVerifier, ProviderVerifierFactory};
+use yaml_sigil_core::v1alpha1::AlgorithmId;
+use yaml_sigil_verification::v1alpha1::{ProviderVerifier, ProviderVerifierFactory};
 
 // This wrapper owns native provider keys. An application could instead borrow
 // a key handle. YamlSigil needs the operation trait and corresponding public

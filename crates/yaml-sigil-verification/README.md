@@ -8,6 +8,14 @@ Use this crate to check document structure, verify Ed25519 or ECDSA P-256
 SHA-256 signatures, and retrieve payload bytes only after successful
 verification. The result identifies the applicable `yaml-sigil` verifier state.
 
+## Select the contract
+
+Use `yaml_sigil_verification::v1alpha1` for explicit specification selection,
+including provider modules and resource-aware operations. The unqualified
+paths remain the `v1alpha1` default and name the same traits, key bindings,
+results, and implementations. Values work through either path without
+conversion. The specification identifier is independent of the crate's SemVer.
+
 ## API Surface
 
 - `verify`, `verify_yaml`, and `verify_proto` run verification.

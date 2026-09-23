@@ -17,14 +17,14 @@ use p256::elliptic_curve::Generate;
 use rand::rngs::SysRng;
 use signature::{RandomizedSigner as _, Verifier as _};
 use tokio::sync::{mpsc, oneshot};
-use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{
+use yaml_sigil_core::v1alpha1::AlgorithmId;
+use yaml_sigil_signing::v1alpha1::{
     AsyncProviderSignRequest, AsyncProviderSigner, AsyncProviderSigningKeyBuilder,
     AsyncProviderSigningKeys, AsyncSigner as _, OutputForm, ProviderAsyncSigner, SignOutcome,
     SignSuccess, UnqualifiedAsyncProviderSignRequest, UnqualifiedAsyncProviderSigningKeys,
     UnqualifiedProviderAsyncSigner,
 };
-use yaml_sigil_verification::{
+use yaml_sigil_verification::v1alpha1::{
     ArtifactForm, AsyncProviderPublicKeys, AsyncProviderVerifier, AsyncProviderVerifierFactory,
     AsyncVerificationProviderBuilder, AsyncVerifier as _, ProviderAsyncVerifier,
     ProviderVerificationOutcome, UnqualifiedAsyncProviderPublicKeys,
@@ -382,7 +382,7 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use clap::CommandFactory;
-    use yaml_sigil_verification::{PublicKeys, resolve_p256_verifying_key, verify_yaml};
+    use yaml_sigil_verification::v1alpha1::{PublicKeys, resolve_p256_verifying_key, verify_yaml};
 
     #[test]
     fn cli_builds() {

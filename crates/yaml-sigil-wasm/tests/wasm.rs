@@ -40,6 +40,34 @@ fn p256_r_component(artifact: Uint8Array, form: &str) -> [u8; 32] {
 }
 
 #[wasm_bindgen_test]
+fn explicit_rust_namespace_shares_boundary_types_and_operations() {
+    use yaml_sigil_wasm::v1alpha1;
+
+    init();
+    let (private, public) = ed25519_keys(7);
+    let signed: yaml_sigil_wasm::SignResult = v1alpha1::sign(
+        bytes(PAYLOAD),
+        ED25519,
+        bytes(&private),
+        None,
+        false,
+        "yaml",
+    );
+    assert_eq!(signed.status(), "success");
+    let limits: v1alpha1::ArtifactResourceLimits =
+        finite_limit(signed.artifact().length() as usize);
+    let verified: v1alpha1::VerifyResult =
+        verify_with_limits(signed.artifact(), "yaml", ED25519, bytes(&public), &limits);
+    assert_eq!(verified.status(), "verified");
+    assert_eq!(verified.payload().to_vec(), PAYLOAD);
+    let split: yaml_sigil_wasm::DecomposeResult =
+        v1alpha1::decompose_with_limits(signed.artifact(), "yaml", None, &limits);
+    let joined: v1alpha1::ComposeResult =
+        compose(split.payload(), split.signature_carrier(), "yaml");
+    assert_eq!(joined.artifact().to_vec(), signed.artifact().to_vec());
+}
+
+#[wasm_bindgen_test]
 fn bounded_round_trips_use_exact_input_and_output_limits() {
     init();
     for (algorithm, (private, public)) in [(ED25519, ed25519_keys(7)), (P256, p256_keys(3))] {

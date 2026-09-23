@@ -13,6 +13,14 @@ or
 [`yaml-sigil-transcription`](https://crates.io/crates/yaml-sigil-transcription)
 unless they need these lower-level helpers directly.
 
+## Select the contract
+
+Use `yaml_sigil_core::v1alpha1` for explicit specification selection, including
+`v1alpha1::pb` for the protobuf facade. The unqualified paths remain the
+`v1alpha1` default and re-export the same definitions. Values work through
+either path without conversion. The specification identifier is independent
+of the crate's SemVer; optional operations keep their existing feature gates.
+
 ## What It Provides
 
 - YAML artifact decomposition and payload validation.
@@ -91,7 +99,7 @@ different protobuf implementation or Buffa release exchange encoded bytes
 with the facade instead of sharing generated Rust types.
 
 ```rust
-use yaml_sigil_core::{
+use yaml_sigil_core::v1alpha1::{
     AlgorithmId,
     pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
 };

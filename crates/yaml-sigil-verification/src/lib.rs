@@ -4,6 +4,10 @@
 //! Verify YamlSigil `v1alpha1` artifacts with Ed25519 or ECDSA P-256 SHA-256.
 //! Results distinguish five verifier states and separate invocation errors.
 //!
+//! Select [`v1alpha1`] explicitly. The unqualified paths remain the
+//! `v1alpha1` default and name the same types, traits, and operations.
+//! The specification identifier is independent of the crate's SemVer.
+//!
 //! Algorithm slot 0 (`ALGORITHM_UNSPECIFIED`) and unknown wire `alg` values map
 //! to [`VerifierState::MalformedAttemptedSigned`]. Slot 1 is
 //! `ED25519_PUREEDDSA_RAW_RS64_CANONICAL` (Ed25519 RFC 8032, raw `R || S`); slot
@@ -27,7 +31,7 @@
 //! the existing verification contract.
 //!
 //! ```no_run
-//! use yaml_sigil_verification::{
+//! use yaml_sigil_verification::v1alpha1::{
 //!     ArtifactForm, ArtifactResourceLimits, PublicKeys, VerifierOptions,
 //!     VerifierState, verify_with_resource_limits,
 //! };
@@ -51,7 +55,7 @@
 //! call when you need the portable trait surface.
 //!
 //! ```no_run
-//! use yaml_sigil_verification::{
+//! use yaml_sigil_verification::v1alpha1::{
 //!     ArtifactForm, ArtifactResourceForm, ArtifactResourceLimits,
 //!     ArtifactResourceResult, AsyncVerifier, DefaultAsyncVerifier,
 //! };
@@ -87,6 +91,8 @@
 //! [provider guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/crypto-providers.md)
 //! compares both paths with direct `yaml-sigil-traits` implementations and
 //! records their tested boundaries.
+
+pub mod v1alpha1;
 
 pub mod async_provider;
 mod crypto;
@@ -151,7 +157,7 @@ pub type PublicKeys<'a> =
 /// private key or requiring a new library-owned key abstraction.
 ///
 /// ```
-/// use yaml_sigil_verification::{InvocationError, resolve_ed25519_verifying_key};
+/// use yaml_sigil_verification::v1alpha1::{InvocationError, resolve_ed25519_verifying_key};
 ///
 /// struct ApplicationPublicKey([u8; 32]);
 /// impl TryFrom<ApplicationPublicKey> for ed25519_dalek::VerifyingKey {
@@ -188,7 +194,7 @@ pub fn resolve_ed25519_verifying_key(
 /// when the wrapper already holds a validated key and conversion is infallible.
 ///
 /// ```
-/// use yaml_sigil_verification::{InvocationError, resolve_p256_verifying_key};
+/// use yaml_sigil_verification::v1alpha1::{InvocationError, resolve_p256_verifying_key};
 ///
 /// struct ApplicationPublicKey(Vec<u8>);
 /// impl TryFrom<ApplicationPublicKey> for p256::ecdsa::VerifyingKey {
@@ -901,7 +907,7 @@ pub fn pre_verify_yaml_with_resource_limits(
 ///
 /// # Resource usage
 ///
-/// This path delegates to [`yaml_sigil_core::decompose_proto_outer`] without
+/// This path delegates to [`yaml_sigil_core::v1alpha1::decompose_proto_outer`] without
 /// adding a deployment-specific complete-artifact limit. It copies recognized
 /// outer and inner fields into owned buffers with work and allocation linear
 /// in field size. Applications accepting potentially untrusted input should

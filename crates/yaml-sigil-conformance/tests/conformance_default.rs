@@ -25,9 +25,9 @@ use yaml_sigil_conformance::{
     verification_runtime::{run_verification_runtime_suite, run_verification_runtime_suite_async},
     yaml_signature::{run_yaml_signature_suite, run_yaml_signature_suite_async},
 };
-use yaml_sigil_signing::{DefaultAsyncSigner, DefaultSigner};
-use yaml_sigil_transcription::{DefaultAsyncTranscriber, DefaultTranscriber};
-use yaml_sigil_verification::{DefaultAsyncVerifier, DefaultVerifier};
+use yaml_sigil_signing::v1alpha1::{DefaultAsyncSigner, DefaultSigner};
+use yaml_sigil_transcription::v1alpha1::{DefaultAsyncTranscriber, DefaultTranscriber};
+use yaml_sigil_verification::v1alpha1::{DefaultAsyncVerifier, DefaultVerifier};
 
 #[test]
 fn yaml_decomposition_default() {

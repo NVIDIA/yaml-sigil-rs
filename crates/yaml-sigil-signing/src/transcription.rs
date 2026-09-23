@@ -16,7 +16,7 @@
 //! conformance.
 //!
 //! ```no_run
-//! use yaml_sigil_signing::{
+//! use yaml_sigil_signing::v1alpha1::{
 //!     ArtifactResourceLimits,
 //!     signed_yaml_stream_to_proto_wire_with_resource_limits,
 //! };

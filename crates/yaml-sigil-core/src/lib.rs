@@ -4,6 +4,10 @@
 //! Shared YamlSigil `v1alpha1` operations for artifact decomposition, payload
 //! validation, algorithm mapping, and protobuf wire types.
 //!
+//! Select [`v1alpha1`] explicitly. The unqualified paths remain the
+//! `v1alpha1` default and name the same types, modules, and operations.
+//! The specification identifier is independent of the crate's SemVer.
+//!
 //! # Resource boundaries
 //!
 //! YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
@@ -24,6 +28,8 @@ mod generated_proto {
     #![allow(missing_docs)]
     include!(concat!(env!("OUT_DIR"), "/yaml_sigil_include.rs"));
 }
+
+pub mod v1alpha1;
 
 pub mod algorithm;
 pub mod conformance;

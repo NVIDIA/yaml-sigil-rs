@@ -11,6 +11,8 @@ THIRD_PARTY_NOTICES.md
 src/bytes.rs
 src/lib.rs
 src/resource.rs
+src/v1alpha1.rs
+src/versioned_js.rs
 tests/byte_inputs.cjs
 tests/generated_api.cjs
 tests/wasm.rs

@@ -301,6 +301,17 @@ const DOWNSTREAM: &[Step] = &[
             "yaml-sigil-downstream-resource-api",
         ],
     },
+    Step {
+        label: "downstream v1alpha1 namespace test",
+        program: "cargo",
+        args: &[
+            "test",
+            "--manifest-path",
+            "tests/downstream/Cargo.toml",
+            "--package",
+            "yaml-sigil-downstream-v1alpha1-api",
+        ],
+    },
 ];
 
 const MACHETE: &[Step] = &[Step {

@@ -9,6 +9,13 @@ directly when you need control over the complete operation.
 The default convenience APIs accept `ed25519-dalek` and `p256` keys. Choose
 them when your application already holds those RustCrypto key types.
 
+Select implementation contracts through `yaml_sigil_signing::v1alpha1` and
+`yaml_sigil_verification::v1alpha1`, including their `provider` and
+`async_provider` modules. The unqualified defaults name the same traits,
+provider bindings, and operations. Version selection requires no adapter
+conversion or new qualification; use the traits release selected by your
+dependency graph for direct trait implementations.
+
 ## Choose an integration path
 
 | Path | What you gain | What you supply or give up |
@@ -52,7 +59,7 @@ Ed25519 acceptance difference described above.
 ### Convert P-256 provider encodings
 
 The signing and verification crates re-export two shared helpers from
-`yaml_sigil_core::p256_encoding`. Core-only callers enable the
+`yaml_sigil_core::v1alpha1::p256_encoding`. Core-only callers enable the
 `p256-encoding` feature explicitly.
 
 | Helper | Accepted input | Output |

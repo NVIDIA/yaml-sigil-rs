@@ -4,7 +4,7 @@
 //! Shared key selection for CLI examples offering both supported algorithms.
 
 use clap::ValueEnum;
-use yaml_sigil_core::AlgorithmId;
+use yaml_sigil_core::v1alpha1::AlgorithmId;
 
 #[derive(Clone, Copy, ValueEnum)]
 pub(crate) enum KeyType {

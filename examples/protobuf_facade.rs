@@ -9,7 +9,7 @@
 
 use anyhow::{Context as _, Result, ensure};
 use prost::Message as _;
-use yaml_sigil_core::{
+use yaml_sigil_core::v1alpha1::{
     AlgorithmId,
     pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
 };

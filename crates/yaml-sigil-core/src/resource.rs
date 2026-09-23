@@ -16,7 +16,7 @@
 //!
 //! ```
 //! use core::num::NonZeroUsize;
-//! use yaml_sigil_core::{ArtifactResourceLimits, DEFAULT_MAX_ARTIFACT_BYTES};
+//! use yaml_sigil_core::v1alpha1::{ArtifactResourceLimits, DEFAULT_MAX_ARTIFACT_BYTES};
 //!
 //! let default_limit = ArtifactResourceLimits::default();
 //! assert_eq!(
@@ -41,7 +41,7 @@
 //! existing operation without copying bytes.
 //!
 //! ```
-//! use yaml_sigil_core::{
+//! use yaml_sigil_core::v1alpha1::{
 //!     ArtifactResourceForm, ArtifactResourceLimits, decompose_artifact,
 //! };
 //!
@@ -222,7 +222,7 @@ pub type ArtifactResourceResult<T> = Result<T, ArtifactResourceError>;
 /// This type deliberately does not implement `Copy`:
 ///
 /// ```compile_fail
-/// use yaml_sigil_core::ArtifactResourceLimits;
+/// use yaml_sigil_core::v1alpha1::ArtifactResourceLimits;
 ///
 /// fn require_copy<T: Copy>() {}
 /// require_copy::<ArtifactResourceLimits>();
@@ -231,7 +231,7 @@ pub type ArtifactResourceResult<T> = Result<T, ArtifactResourceError>;
 /// Its fields are not directly constructible:
 ///
 /// ```compile_fail
-/// use yaml_sigil_core::ArtifactResourceLimits;
+/// use yaml_sigil_core::v1alpha1::ArtifactResourceLimits;
 ///
 /// let _ = ArtifactResourceLimits {
 ///     max_artifact_bytes: None,

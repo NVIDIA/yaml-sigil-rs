@@ -1,9 +1,13 @@
 # Protobuf facade
 
-Use `yaml_sigil_core::pb` to read and write protobuf envelopes without
+Use `yaml_sigil_core::v1alpha1::pb` to read and write protobuf envelopes without
 importing a protobuf library. Applications that already use another
 protobuf library can exchange wire bytes with the facade while keeping their
 own message types.
+
+The unqualified `yaml_sigil_core::pb` path remains the `v1alpha1` default.
+Both paths name the same owned messages, borrowed views, and facade errors.
+Generated protobuf modules remain private.
 
 ## Run the example
 
