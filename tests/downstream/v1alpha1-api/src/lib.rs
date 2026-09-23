@@ -7,7 +7,7 @@ use yaml_sigil_signing::v1alpha1 as signing;
 
 /// Use a versioned implementation through the separately selected trait.
 pub fn capabilities(
-    signer: &impl yaml_sigil_traits::signing::Signer,
+    signer: &impl yaml_sigil_traits::v1alpha1::signing::Signer,
 ) -> signing::SignerCapabilities {
     signer.capabilities()
 }
@@ -16,7 +16,7 @@ pub fn capabilities(
 mod tests {
     use super::*;
     use yaml_sigil_core::{self as core, v1alpha1 as contract};
-    use yaml_sigil_traits as traits;
+    use yaml_sigil_traits::{self as default_traits, v1alpha1 as traits};
     use yaml_sigil_transcription::{self as default_transcription, v1alpha1 as transcription};
     use yaml_sigil_verification::{self as default_verification, v1alpha1 as verification};
 
@@ -56,7 +56,7 @@ mod tests {
             else {
                 panic!("versioned signing failed");
             };
-            let traits::signing::SignOutcome::Success(default) =
+            let default_traits::signing::SignOutcome::Success(default) =
                 traits::signing::Signer::sign(&signing::DefaultSigner, &request)
             else {
                 panic!("selected trait signing failed");
@@ -113,6 +113,7 @@ mod tests {
     fn transcription_accepts_cross_path_requests_and_trait_objects() {
         let transcriber: &dyn traits::transcription::Transcriber =
             &transcription::DefaultTranscriber;
+        let transcriber: &dyn default_traits::transcription::Transcriber = transcriber;
         for (form, outer_conformance) in [
             (transcription::TranscriptionForm::Yaml, None),
             (
@@ -154,8 +155,9 @@ mod tests {
 
     #[test]
     fn core_facades_share_owned_and_borrowed_values() {
+        let algorithm: default_traits::AlgorithmId = traits::AlgorithmId::Ed25519;
         let signature: core::pb::YamlSigilSignature =
-            contract::pb::YamlSigilSignature::new(traits::AlgorithmId::Ed25519, vec![1, 2, 3]);
+            contract::pb::YamlSigilSignature::new(algorithm, vec![1, 2, 3]);
         let artifact: contract::pb::SignedYamlArtifact =
             core::pb::SignedYamlArtifact::new(b"shared\n".to_vec(), Some(signature));
         let wire = artifact.encode_to_vec().unwrap();
