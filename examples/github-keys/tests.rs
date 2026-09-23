@@ -131,7 +131,7 @@ async fn cli_parser_and_required_arguments() {
     }
 }
 
-const RAW_URL: &str = "https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/dev/0.6.0/examples/github-keys/fixtures/unsigned.yaml";
+const RAW_URL: &str = "https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/main/examples/github-keys/fixtures/unsigned.yaml";
 
 fn input_response(status: u16, bytes: Vec<u8>) -> ureq::http::Response<ureq::Body> {
     ureq::http::Response::builder()
