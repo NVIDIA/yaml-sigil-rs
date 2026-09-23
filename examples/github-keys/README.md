@@ -277,13 +277,13 @@ target/debug/examples/github-keys verify \
   < target/github-keys-demo/signed-offline.yaml
 ```
 
-You can also read a URL. This URL targets the published fixture on
-`dev/0.6.0`; if it is unavailable there, use the local fixture instead.
+You can also read a URL. This URL targets the published fixture on `main`.
+If the URL is unavailable, use the local fixture instead.
 
 ```shell
 target/debug/examples/github-keys verify \
   --signer "$(cat examples/github-keys/fixtures/ddurst-nvidia.pub-key)" \
-  --input https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/dev/0.6.0/examples/github-keys/fixtures/signed.yaml
+  --input https://raw.githubusercontent.com/NVIDIA/yaml-sigil-rs/main/examples/github-keys/fixtures/signed.yaml
 ```
 
 URL input makes a network request even with an explicit signer. Review a

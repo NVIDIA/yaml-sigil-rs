@@ -21,7 +21,7 @@ const MAX_PAGES_PER_RESOURCE: usize = 10;
 const PER_PAGE: usize = 100;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const API_VERSION: &str = "2026-03-10";
-const RATE_LIMIT_HELP: &str = "See examples/github-keys/README.md, 'GitHub API rate limits and offline runs', for retry guidance and the explicit public-key option: https://github.com/NVIDIA/yaml-sigil-rs/blob/dev/0.6.0/examples/github-keys/README.md#github-api-rate-limits-and-offline-runs";
+const RATE_LIMIT_HELP: &str = "See examples/github-keys/README.md, 'GitHub API rate limits and offline runs', for retry guidance and the explicit public-key option: https://github.com/NVIDIA/yaml-sigil-rs/blob/main/examples/github-keys/README.md#github-api-rate-limits-and-offline-runs";
 
 #[derive(Clone, Debug)]
 pub(super) struct GitHubAccount(String);

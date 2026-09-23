@@ -19,6 +19,12 @@ resolves the exact traits crate transitively. The conformance, test-key,
 workspace, and xtask packages remain unpublished. Releases never contain
 executable assets, installers, containers, or retained CI artifacts.
 
+Coordination and rollback refs are not prerequisites for preparing or
+publishing from `main`. After a coordination line is promoted, follow the
+[retirement procedure](MAINTAINERS.md#retire-abandon-or-restart-a-line).
+Activated `support/M.N` lines retain their separate requirements for protected
+lineage and recovery.
+
 ## Prepare the release pull request
 
 Select `main`, or an already activated `support/M.N` after reviewing its
