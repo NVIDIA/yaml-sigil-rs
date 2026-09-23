@@ -299,6 +299,9 @@ jobs:
 
       # Candidate execution is terminal. The full workspace audit below is
       # candidate execution rather than trusted pre-execution policy evidence.
+      # `check` runs Markdown, Protobuf, formatting, workspace-version,
+      # package-content, compile, Clippy, test, downstream, unused-dependency,
+      # dependency-policy, and audit checks; optional reports and Wasm are separate.
       # No cache-save, artifact, environment, token, or consumer follows it.
       - name: Run exact candidate
         env:

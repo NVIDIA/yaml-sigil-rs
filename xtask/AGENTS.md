@@ -23,10 +23,11 @@ path. The canonical registry order is `markdown`, `protobuf`, `fmt`,
 mutually exclusive CSV `--only` and `--exclude` selectors; reject unknown,
 empty, and fully excluded selections and deduplicate in registry order.
 
-Share feature options between checks, coverage, and coverage-open. Default to
-all features only without explicit options; allow `--features` with
+Share feature options between compilation, tests, coverage, and coverage-open.
+Default to all features only without explicit options; allow `--features` with
 `--no-default-features`. Keep all-feature locked xtask compilation and the
 independent downstream fixture contracts outside product feature selection.
+Keep Cargo Deny's all-feature policy independent of these build options.
 Do not forward features to formatting. Generate missing ignored lockfiles for
 selected dependency checks without requiring the tests to run first.
 

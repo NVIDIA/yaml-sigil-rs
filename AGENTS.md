@@ -320,10 +320,11 @@ cargo xtask profile-view
 Use either `--only=<csv>` or `--exclude=<csv>` to select checks. Empty or unknown
 selections fail; duplicates run once in registry order.
 
-Checks and coverage enable all workspace features when no feature option is
-supplied. They accept `--all-features`, `--features=<csv>`, and
+Compilation, tests, and coverage enable all workspace features when no feature
+option is supplied. They accept `--all-features`, `--features=<csv>`, and
 `--no-default-features`; the last two may be combined. The independent locked
-xtask and downstream fixture graphs keep their own feature contracts.
+xtask and downstream fixture graphs keep their own feature contracts. Cargo Deny
+always checks all features under `deny.toml`; build selectors do not narrow it.
 Dependency checks generate a missing ignored root or downstream lockfile when
 needed, so narrow `deny` and `audit` selections also work from a fresh checkout.
 

@@ -63,8 +63,10 @@ jobs:
           .github/scripts/check-trusted-tool-pins.sh
           .github/scripts/test-trusted-tool-pins.sh
 
-      # `cargo xtask check` runs Markdown, Protobuf, formatting, package-content,
-      # compile, Clippy, test, downstream, dependency-policy, and audit checks.
+      # `cargo xtask check` runs Markdown, Protobuf, formatting, workspace-version,
+      # package-content, compile, Clippy, test, downstream, unused-dependency,
+      # dependency-policy, and audit checks. Coverage, profiling, Wasm, and release
+      # operations are separate; protected workflow and shell policy run below.
       - name: Run provider-neutral CI
         run: cargo xtask check
 

@@ -144,8 +144,6 @@ impl Step {
                 .position(|arg| *arg == "--all-features")
                 .expect("workspace compile and test recipes declare a feature default");
             args.splice(position..=position, features.cargo_args());
-        } else if self.program == "cargo" && self.args.starts_with(&["deny", "check"]) {
-            args.splice(1..1, features.cargo_args());
         }
         args
     }
@@ -315,8 +313,16 @@ const DENY: &[Step] = &[
     Step {
         label: "Rust dependency policy",
         program: "cargo",
+        // Dependency policy always covers every feature, as required by deny.toml.
         args: &[
-            "deny", "check", "bans", "licenses", "sources", "-D", "warnings",
+            "deny",
+            "--all-features",
+            "check",
+            "bans",
+            "licenses",
+            "sources",
+            "-D",
+            "warnings",
         ],
     },
     Step {
@@ -527,17 +533,12 @@ mod tests {
                 );
             }
         }
-        assert_eq!(
-            DENY[0].arguments(&options.features)[..4],
-            [
-                "deny",
-                "--features",
-                "json-schema-validate",
-                "--no-default-features"
-            ]
-            .map(OsString::from)
+        assert!(
+            DENY[0]
+                .arguments(&options.features)
+                .contains(&OsString::from("--all-features"))
         );
-        for step in &DENY[1..] {
+        for step in DENY {
             assert_eq!(
                 step.arguments(&options.features),
                 step.args.iter().map(OsString::from).collect::<Vec<_>>()

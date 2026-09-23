@@ -321,10 +321,11 @@ options and runs the same checks. Selectors are mutually exclusive, reject
 unknown or empty selections, and run duplicate names only once in registry
 order.
 
-Checks and coverage enable all workspace features by default. Use
+Compilation, tests, and coverage enable all workspace features by default. Use
 `--features=json-schema-validate` or `--no-default-features` for a narrower
 product build; those two flags may be combined. The separate xtask and
-downstream fixture workspaces keep their own feature settings.
+downstream fixture workspaces keep their own feature settings. Dependency
+policy always checks all features, as configured in `deny.toml`.
 
 ## Coverage and profiling
 
