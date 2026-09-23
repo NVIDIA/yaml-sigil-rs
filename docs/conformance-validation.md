@@ -149,6 +149,26 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-09-23: Reviewed and refreshed local artifacts from public
+  `NVIDIA/yaml-sigil-spec` `main` at
+  `30b143f09630448abbace14cfae2188279536f56`, advancing the reviewed revision
+  from `98140c77464af0a1cae2c6a650a1adeb9493e5f2`. The eight-commit delta
+  extends the non-normative implementation kit's runnable-example and Buf
+  guidance, updates conformance-generator comments and development tooling,
+  and revises CI and repository maintenance. These upstream files are not
+  imported into this workspace.
+
+  `cargo xtask update-spec` produces no artifact changes. The local proto,
+  JSON Schema, curated fixture bytes and mappings, expected outcomes,
+  imported and crate-local notices, public contracts, and runtime behavior
+  remain unchanged. The core and conformance README links now identify the
+  reviewed specification revision. No conformance divergence is added.
+
+  The coordinated
+  [`yaml-sigil-traits` update](https://github.com/NVIDIA/yaml-sigil-traits/pull/126)
+  advances its specification pin and notice link to the same revision without
+  changing public trait or DTO definitions. This workspace retains
+  `yaml-sigil-traits` `0.4.0`; no dependency or API reconciliation is needed.
 - 2026-09-17: Reviewed and refreshed local artifacts from public
   `NVIDIA/yaml-sigil-spec` `main` at
   `98140c77464af0a1cae2c6a650a1adeb9493e5f2`, advancing the reviewed revision
