@@ -4,6 +4,22 @@ All notable changes to this crate are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0-rc.3](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-wasm-v0.6.0-rc.2...yaml-sigil-wasm-v0.6.0-rc.3) - 2026-09-24
+
+### Added
+
+- add a JavaScript `v1alpha1` namespace and matching Rust module while retaining
+  top-level operations and shared result and policy classes
+  ([#177](https://github.com/NVIDIA/yaml-sigil-rs/pull/177))
+
+### Fixed
+
+- *(signing)* sample fresh P-256 nonces ([#168](https://github.com/NVIDIA/yaml-sigil-rs/pull/168))
+
+### Other
+
+- clarify crate contracts and contributor guidance
+
 ## [0.6.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-wasm-v0.6.0-rc.1...yaml-sigil-wasm-v0.6.0-rc.2) - 2026-09-22
 
 ### Changed
