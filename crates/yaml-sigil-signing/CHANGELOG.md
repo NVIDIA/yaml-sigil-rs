@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0-rc.3](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-signing-v0.6.0-rc.2...yaml-sigil-signing-v0.6.0-rc.3) - 2026-09-24
+
+### Added
+
+- expose the existing Rust API through `v1alpha1` while retaining unqualified
+  paths ([#177](https://github.com/NVIDIA/yaml-sigil-rs/pull/177))
+- *(crypto)* add P-256 encoding helpers ([#169](https://github.com/NVIDIA/yaml-sigil-rs/pull/169))
+
+### Changed
+
+- *(signing)* change synchronous provider signing to accept a callback per
+  operation; `ProviderSigningKeyBuilder` now binds only public-key bytes
+  ([#170](https://github.com/NVIDIA/yaml-sigil-rs/pull/170))
+- use `yaml-sigil-traits` `=0.4.1` for the shared traits and data types
+
+### Fixed
+
+- *(signing)* sample fresh P-256 nonces ([#168](https://github.com/NVIDIA/yaml-sigil-rs/pull/168))
+
+### Other
+
+- clarify crate contracts and contributor guidance
+
 ## [0.6.0-rc.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-signing-v0.6.0-rc.1...yaml-sigil-signing-v0.6.0-rc.2) - 2026-09-22
 
 ### Changed
