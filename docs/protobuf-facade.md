@@ -34,10 +34,10 @@ illustrative encoding data. The example performs no signature verification.
 
 `SignedYamlArtifact` owns a payload and an optional `YamlSigilSignature`.
 Construct them with `new`, inspect fields through accessors, and use setters
-to change fields. `encode_to_vec` returns a fallible wire encoding;
-`SignedYamlArtifact::decode` returns an owned decoded value.
+to change fields. `encode_to_vec(&limits)` returns a fallible wire encoding;
+`SignedYamlArtifact::decode(input, &limits)` returns an owned decoded value.
 
-`SignedYamlArtifactRef::decode` provides borrowed inspection. Payload,
+`SignedYamlArtifactRef::decode(input, &limits)` provides borrowed inspection. Payload,
 signature bytes, and string fields borrow the input buffer, so that buffer
 must outlive the view. Use `to_owned` when the decoded value must outlive its
 input.
@@ -78,10 +78,11 @@ Protobuf decoding is structural. It does not establish complete artifact
 validity or verify a signature. Use `yaml-sigil-verification` with trusted
 keys when you need authenticated payload bytes.
 
-The example uses small built-in messages. For external input, the facade also
-offers `decode_with_resource_limits` methods that check an explicitly chosen
-whole-artifact policy before parsing. Such limits are application policy,
-separate from signature verification and conformance.
+The primary facade methods take an explicit whole-artifact policy and return
+flat `ArtifactDecodeError` or `ArtifactEncodeError` results. The example uses
+`unbounded()` for its small built-in messages. Select a finite policy before
+processing external input. The `protobuf` feature works with `no_std + alloc`
+and does not enable the YAML parser; see [portable builds](./no-std.md).
 
 ## Tests
 

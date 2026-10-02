@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(feature = "protobuf")]
 use std::env;
+#[cfg(feature = "protobuf")]
 use std::path::PathBuf;
+#[cfg(feature = "protobuf")]
 use std::process::Command;
 
+#[cfg(feature = "protobuf")]
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let proto_root = manifest_dir.join("spec/proto");
@@ -47,3 +51,6 @@ fn main() {
         .compile()
         .expect("buffa codegen failed");
 }
+
+#[cfg(not(feature = "protobuf"))]
+fn main() {}

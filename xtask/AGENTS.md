@@ -16,6 +16,13 @@ separation from the untracked product-workspace lockfile and release policy.
 Use Clap derive, a thin binary entry point, testable command construction, and
 the root parser's `CommandFactory::debug_assert()` invariant test.
 
+`cargo xtask no-std` is an opt-in isolated consumer matrix. Keep it separate
+from the default registry, check target runtime features independently of host
+build dependencies, and remove its temporary compilation outputs on return.
+Its allocator-free link check must have an alloc-enabled negative control.
+The global `--traits-path` validation option supplies a scoped Cargo patch
+for an unpublished peer checkout and restores the original configuration.
+
 `cargo xtask check` and its visible `ci` alias share one parser and execution
 path. The canonical registry order is `markdown`, `protobuf`, `fmt`,
 `versions`, `package-content`, `check`, `clippy`, `test`, `downstream`,

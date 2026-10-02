@@ -38,9 +38,16 @@ include = [
 workspace = true
 
 [dependencies]
-tracing = { workspace = true }
+tracing = { workspace = true, optional = true }
 yaml-sigil-core = { workspace = true, default-features = false }
 yaml-sigil-traits = { workspace = true, default-features = false }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[features]
+default = ["std", "yaml", "protobuf"]
+alloc = ["yaml-sigil-core/alloc", "yaml-sigil-traits/alloc"]
+std = ["alloc", "yaml-sigil-core/std", "yaml-sigil-traits/std", "dep:tracing", "tracing/std"]
+yaml = ["alloc"]
+protobuf = ["alloc", "yaml-sigil-core/protobuf"]

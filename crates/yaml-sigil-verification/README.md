@@ -18,18 +18,17 @@ conversion. The specification identifier is independent of the crate's SemVer.
 
 ## API Surface
 
-- `verify`, `verify_yaml`, and `verify_proto` run verification.
-- Their `_with_resource_limits` variants apply an explicit complete-input
-  policy before verification work.
-- `pre_verify`, `pre_verify_yaml`, and `pre_verify_proto` run structural checks
-  without cryptography.
-- Their `_with_resource_limits` variants and
-  `can_pre_verify_with_resource_limits` check the original encoded input.
-- `verify_from_pre_verify` and its form-specific helpers reuse successful
-  pre-verification results.
+- `verify` returns `Result<VerifyResult<'input>, VerifyError>`; its state and
+  authenticated payload are available through `result.state`.
+- `pre_verify` and `can_pre_verify` take `PreVerifyOptions` and return fallible
+  results, including resource and disabled-format errors.
+- `VerifierOptions` and `PreVerifyOptions` carry the complete-input policy and
+  parser-observation selection. Their defaults are unbounded.
+- `verify_from_pre_verify` borrows the original artifact independently of the
+  temporary pre-verification response, options, and keys.
 - `VerificationProviderBuilder` either qualifies one exact synchronous
   provider instance or constructs an explicitly unqualified provider.
-- `verify_with_provider` and its metadata and pre-verification
+- `verify_with_provider` and its pre-verification
   variants retain YamlSigil artifact handling around qualified provider keys.
 - The corresponding `verify_with_unqualified_provider` functions make the
   qualification bypass explicit.
@@ -149,12 +148,11 @@ big-endian `r || s`, not DER. The development matrix exercises RustCrypto,
 `ring`, and `aws-lc-rs` adapters. Provider support or qualification does not
 establish or imply FIPS validation.
 
-To bound provider verification, admit the original artifact with
-`ArtifactResourceLimits::check_input_size` before calling a provider operation.
-A bounded pre-verification response can also be passed to
-`verify_from_pre_verify_with_provider`. Use the same admission and reuse with
-async or explicitly unqualified variants. Admit the original input before any
-artifact-dependent remote work.
+Select `VerifierOptions::resource_limits` for provider verification or
+`PreVerifyOptions::resource_limits` for pre-verification. The handoff retains
+`source_artifact`, so subsequent native or provider verification can check the
+original encoded size under its own policy. Apply admission before binding if
+that binding itself requires artifact-dependent remote work.
 
 Async binding can suspend and return a handle that borrows its factory or
 client without a `'static` requirement. It cannot retain a borrow of the
@@ -166,26 +164,28 @@ these scheduling boundaries and the difference from `DefaultAsyncVerifier`.
 
 ## Resource boundaries
 
-Resource-aware verification, pre-verification, and the boolean summary check
-the original complete input before form options, parsing, copying, or
-cryptography. Their outer `ArtifactResourceResult` reports resource admission;
-the inner result or verifier state preserves the existing contract.
+Primary verification, pre-verification, and `can_pre_verify` admit the original
+complete input before option, parser, or cryptographic processing. One typed
+`VerifyError` distinguishes resource and invocation failures. Artifact validity
+and cryptographic outcomes remain verifier states.
 
-Bounded pre-verification enforces complete-input size once while the original
-encoded artifact is available. Continue with the existing
-`verify_from_pre_verify` functions. They receive in-memory components and do
-not reconstruct or recheck an encoded artifact.
+`PreVerifyResponse` retains the original encoded source and borrowed payload.
+`verify_from_pre_verify` rechecks that source against its selected policy,
+without reconstructing an artifact. Successful `VerifyResult` payloads borrow
+only the source artifact; keys, options, and the pre-response may be dropped.
 
-YamlSigil `v1alpha1` defines no maximum complete artifact size. A local
-resource-policy rejection remains separate from invocation errors, malformed
-artifacts, failed cryptographic verification, and conformance results. A
-deployment can choose a lower limit, a higher limit, or no additional limit;
-`DEFAULT_MAX_ARTIFACT_BYTES` defines the explicit default. Existing
-verification entry points and default trait implementations remain unbounded
-by this policy. Adopt a bounded operation at the affected trust boundary or
-enforce an equivalent earlier raw-input bound. Protobuf format limits, parser
-safeguards, address-space limits, allocator limits, and deployment controls
-still apply.
+`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`;
+operation options default to `unbounded()`. A local resource rejection does not
+make an artifact malformed or alter conformance. Parser safeguards, format
+limits, and deployment controls remain independent.
+
+## Features
+
+Defaults enable `std`, `yaml`, and `protobuf`. Select either format with
+defaults disabled for full `no_std + alloc` verification. Disabled forms
+produce invocation errors and are absent from capabilities. The
+[portable API guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/no-std.md)
+explains feature selection and migration.
 
 ## YAML Signature-Document Behavior
 

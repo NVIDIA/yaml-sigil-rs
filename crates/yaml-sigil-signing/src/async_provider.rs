@@ -19,18 +19,19 @@
 //! Dropping a pending future does not promise to cancel an operation already
 //! submitted to a service. Local parsing and output checks remain synchronous.
 
-use std::{fmt, future::Future, marker::PhantomData, pin::Pin};
+use alloc::{boxed::Box, vec::Vec};
+use core::{fmt, future::Future, marker::PhantomData, pin::Pin};
 
 use yaml_sigil_traits::AlgorithmId;
 use yaml_sigil_traits::signing::{
     SignRequest as GenericSignRequest, SigningKey as GenericSigningKey,
 };
 
-use crate::provider::bounded_public_key_copy;
-use crate::provider_crypto::{
+use super::provider_crypto::{
     ProviderPublicKey, provider_signature_is_structurally_valid, resolve_provider_public_key,
     verify_provider_signature,
 };
+use crate::provider::bounded_public_key_copy;
 use crate::{
     ArtifactResourceLimits, ArtifactResourceResult, AsyncSigner, EncodeError,
     ProviderSigningKeyError, SignError, SignInvocationError, SignOutcome, SignerCapabilities,
@@ -197,92 +198,73 @@ async fn sign_inner<K: BoundKey>(
     limits: Option<&ArtifactResourceLimits>,
 ) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
     let validation = if limits.is_some() {
-        crate::validate_invocation_shape(req)
+        super::validate_invocation_shape(req)
     } else {
-        crate::validate_invocation(req)
+        super::validate_invocation(req)
     };
     if let Err(error) = validation {
-        return Ok(Ok(SignOutcome::Invocation(error)));
+        return Ok(Ok(Err(yaml_sigil_traits::signing::SignError::Invocation(
+            error,
+        ))));
     }
     let key = match req.key {
         GenericSigningKey::Ed25519(key) | GenericSigningKey::EcdsaP256Sha256(key) => key.inner(),
     };
     if key.public_key.algorithm() != req.algorithm {
-        return Ok(Ok(SignOutcome::Invocation(
+        return Ok(Ok(Err(yaml_sigil_traits::signing::SignError::Invocation(
             SignInvocationError::InvalidOrUnsupportedAlgorithm,
-        )));
+        ))));
     }
     if let Some(limits) = limits {
-        if let Err(error) = crate::preflight_signing_output(req, limits)? {
+        if let Err(error) = super::preflight_signing_output(req, limits)? {
             return Ok(Err(error));
         }
-        if let Err(error) = crate::validate_keyid_content(req) {
-            return Ok(Ok(SignOutcome::Invocation(error)));
+        if let Err(error) = super::validate_keyid_content(req) {
+            return Ok(Ok(Err(yaml_sigil_traits::signing::SignError::Invocation(
+                error,
+            ))));
         }
     }
-    let prepared = match crate::prepare_signing_payload(req) {
+    let prepared = match super::prepare_signing_payload(req) {
         Ok(prepared) => prepared,
-        Err(error) => return Ok(Ok(SignOutcome::Signer(error))),
+        Err(error) => return Ok(Ok(Err(error))),
     };
     let signature = match key.signer.try_sign(&prepared.payload).await {
         Ok(signature) => signature,
-        Err(_) => return Ok(Ok(SignOutcome::Signer(SignError::KeyOperationFailure))),
+        Err(_) => return Ok(Ok(Err(SignError::KeyOperationFailure))),
     };
     if !provider_signature_is_structurally_valid(req.algorithm, &signature)
         || (K::SELF_VERIFY
             && !verify_provider_signature(&key.public_key, &prepared.payload, &signature))
     {
-        return Ok(Ok(SignOutcome::Signer(SignError::KeyOperationFailure)));
+        return Ok(Ok(Err(SignError::KeyOperationFailure)));
     }
-    Ok(Ok(crate::finish_signing(
+    Ok(Ok(super::finish_signing(
         req, prepared, &signature, limits,
     )?))
 }
 
 /// Await qualified signing and return the framed artifact after output checks.
-#[tracing::instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+#[cfg_attr(feature = "std", tracing::instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form)))]
 pub async fn sign_with_async_provider(req: &AsyncProviderSignRequest<'_>) -> SignOutcome {
-    sign_inner(req, None)
-        .await
-        .expect("unbounded signing cannot return a resource error")
-        .expect("unbounded signing does not preflight protobuf encoding")
+    super::validate_primary_invocation(req)?;
+    sign_inner(req, Some(&req.resource_limits)).await??
 }
 
 /// Await signing while explicitly skipping output self-verification.
-#[tracing::instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form))]
+#[cfg_attr(feature = "std", tracing::instrument(level = "info", skip_all, fields(alg = ?req.algorithm, form = ?req.output_form)))]
 pub async fn sign_with_unqualified_async_provider(
     req: &UnqualifiedAsyncProviderSignRequest<'_>,
 ) -> SignOutcome {
-    sign_inner(req, None)
-        .await
-        .expect("unbounded signing cannot return a resource error")
-        .expect("unbounded signing does not preflight protobuf encoding")
-}
-
-/// Await qualified signing with the existing projected and exact output policy.
-///
-/// Conclusive size rejection precedes the provider call. The final YAML size
-/// check follows signing and carrier serialization, before artifact allocation.
-pub async fn sign_with_async_provider_and_resource_limits(
-    req: &AsyncProviderSignRequest<'_>,
-    limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
-    sign_inner(req, Some(limits)).await
-}
-
-/// Await unqualified signing with the same output policy as the qualified path.
-pub async fn sign_with_unqualified_async_provider_and_resource_limits(
-    req: &UnqualifiedAsyncProviderSignRequest<'_>,
-    limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Result<SignOutcome, EncodeError>> {
-    sign_inner(req, Some(limits)).await
+    super::validate_primary_invocation(req)?;
+    sign_inner(req, Some(&req.resource_limits)).await??
 }
 
 /// Stateless [`AsyncSigner`] implementation accepting qualified async keys.
 ///
 /// The lifetime permits keys borrowing an initialized client. These trait
-/// operations are unbounded; select the resource-aware free function for an
-/// output policy. Capabilities describe the supported artifact processing.
+/// operations honor the request resource policy. Capabilities describe the
+/// enabled formats and provider-supported algorithms.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProviderAsyncSigner<'key>(PhantomData<&'key ()>);
 
@@ -296,7 +278,7 @@ macro_rules! signer_facade {
             type Ed25519SigningKey = $key<'key>;
             type P256SigningKey = $key<'key>;
             fn capabilities(&self) -> SignerCapabilities {
-                crate::signer_capabilities()
+                crate::signer_capabilities_with_rng()
             }
             async fn sign(
                 &self,

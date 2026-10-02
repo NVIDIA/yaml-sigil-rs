@@ -53,7 +53,7 @@
 //!     ArtifactForm, ProviderPublicKeys, ProviderVerifier, ProviderVerifierFactory,
 //!     QualifiedVerificationProvider, VerificationProviderBuilder, VerifierOptions,
 //!     VerifierState, verify_with_provider,
-//! };
+//!};
 //!
 //! struct P256Factory;
 //! struct P256Verifier(p256::ecdsa::VerifyingKey);
@@ -88,11 +88,11 @@
 //!     }
 //! }
 //!
-//! fn verify_document(
+//! fn verify_document<'input>(
 //!     provider: &QualifiedVerificationProvider<P256Factory>,
-//!     artifact: &[u8],
+//!     artifact: &'input [u8],
 //!     canonical_public_key: &[u8],
-//! ) -> Result<VerifierState, Box<dyn std::error::Error>> {
+//! ) -> Result<VerifierState<'input>, Box<dyn core::error::Error>> {
 //!     let key = provider.bind_ecdsa_p256_sha256(canonical_public_key)?;
 //!     let keys = ProviderPublicKeys {
 //!         ed25519: None,
@@ -106,7 +106,7 @@
 //!             verify_ed25519: false,
 //!             ..VerifierOptions::default()
 //!         },
-//!     )?)
+//!     )?.state)
 //! }
 //!
 //! // Qualify once, then reuse this instance for application keys and artifacts.
@@ -116,13 +116,13 @@
 //! # // A fixed key and artifact are used only to execute this documentation test.
 //! # let native_key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
 //! # let public_key = native_key.verifying_key().to_sec1_point(false);
-//! # let artifact = yaml_sigil_signing::v1alpha1::sign_proto(&yaml_sigil_signing::v1alpha1::SignProtoParams {
+//! # let artifact = yaml_sigil_signing::v1alpha1::sign(&yaml_sigil_signing::v1alpha1::SignRequest { resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(), output_form: yaml_sigil_signing::OutputForm::Protobuf, algorithm_parameters: &[],
 //! #     payload: b"example: signed\n",
 //! #     algorithm: AlgorithmId::EcdsaP256Sha256,
 //! #     key: yaml_sigil_signing::v1alpha1::SigningKey::EcdsaP256Sha256(&native_key),
 //! #     keyid: None,
 //! #     append_missing_final_newline: false,
-//! # }).unwrap();
+//! # }).unwrap().artifact;
 //! # assert!(matches!(verify_document(&provider, &artifact, public_key.as_bytes()).unwrap(),
 //! #     VerifierState::Verified { .. }));
 //! ```
@@ -134,17 +134,18 @@
 //!
 //! The [`ProviderVerifier`] and [`ProviderVerifierFactory`] traits and provider
 //! key types are re-exported at the crate root. Pass bound keys to
-//! [`crate::verify_with_provider`] or its metadata and pre-verification variants.
+//! [`crate::verify_with_provider`] or its pre-verification handoff variants.
 //! Those functions retain artifact parsing, structural checks, and result
 //! classification. Implementing the separate high-level [`crate::Verifier`]
 //! trait means providing that complete operation.
 
-use std::fmt;
+use alloc::{boxed::Box, vec::Vec};
+use core::fmt;
 
 use yaml_sigil_traits::AlgorithmId;
 use yaml_sigil_traits::verification::PublicKeys as GenericPublicKeys;
 
-use crate::crypto::provider_public_key_is_admissible;
+use super::crypto::provider_public_key_is_admissible;
 
 /// Provider result after YamlSigil has completed structural validation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -228,7 +229,7 @@ impl fmt::Display for ProviderQualificationError {
     }
 }
 
-impl std::error::Error for ProviderQualificationError {}
+impl core::error::Error for ProviderQualificationError {}
 
 impl ProviderQualificationError {
     /// Return the stable failure category.
@@ -292,7 +293,7 @@ impl fmt::Display for ProviderKeyBindingError {
     }
 }
 
-impl std::error::Error for ProviderKeyBindingError {}
+impl core::error::Error for ProviderKeyBindingError {}
 
 impl ProviderKeyBindingError {
     /// Return the stable failure category.
@@ -847,10 +848,10 @@ mod tests {
                     key.verify_strict(message, &signature).is_ok()
                 }
                 ReferenceKey::Ed25519(key) => {
-                    crate::crypto::verify_ed25519(key, message, signature).is_ok()
+                    super::super::crypto::verify_ed25519(key, message, signature).is_ok()
                 }
                 ReferenceKey::EcdsaP256Sha256(key) => {
-                    crate::crypto::verify_ecdsa_p256_sha256(key, message, signature).is_ok()
+                    super::super::crypto::verify_ecdsa_p256_sha256(key, message, signature).is_ok()
                 }
             };
             verified.then_some(()).ok_or_else(signature::Error::new)
@@ -884,11 +885,11 @@ mod tests {
             self.binds.fetch_add(1, Ordering::Relaxed);
             let key = match algorithm {
                 AlgorithmId::Ed25519 => ReferenceKey::Ed25519(
-                    crate::crypto::resolve_ed25519_verifying_key(canonical_public_key)
+                    super::super::crypto::resolve_ed25519_verifying_key(canonical_public_key)
                         .map_err(|_| signature::Error::new())?,
                 ),
                 AlgorithmId::EcdsaP256Sha256 => ReferenceKey::EcdsaP256Sha256(
-                    crate::crypto::resolve_p256_verifying_key(canonical_public_key)
+                    super::super::crypto::resolve_p256_verifying_key(canonical_public_key)
                         .map_err(|_| signature::Error::new())?,
                 ),
             };
@@ -956,10 +957,10 @@ mod tests {
             let mut keys = self.keys.lock().unwrap();
             let verifies = |key: &ReferenceKey| match key {
                 ReferenceKey::Ed25519(key) => {
-                    crate::crypto::verify_ed25519(key, message, signature).is_ok()
+                    super::super::crypto::verify_ed25519(key, message, signature).is_ok()
                 }
                 ReferenceKey::EcdsaP256Sha256(key) => {
-                    crate::crypto::verify_ecdsa_p256_sha256(key, message, signature).is_ok()
+                    super::super::crypto::verify_ecdsa_p256_sha256(key, message, signature).is_ok()
                 }
             };
             let verified = if let Some(index) = self.key_index {
@@ -990,11 +991,11 @@ mod tests {
             }
             let key = match algorithm {
                 AlgorithmId::Ed25519 => ReferenceKey::Ed25519(
-                    crate::crypto::resolve_ed25519_verifying_key(canonical_public_key)
+                    super::super::crypto::resolve_ed25519_verifying_key(canonical_public_key)
                         .map_err(|_| signature::Error::new())?,
                 ),
                 AlgorithmId::EcdsaP256Sha256 => ReferenceKey::EcdsaP256Sha256(
-                    crate::crypto::resolve_p256_verifying_key(canonical_public_key)
+                    super::super::crypto::resolve_p256_verifying_key(canonical_public_key)
                         .map_err(|_| signature::Error::new())?,
                 ),
             };
@@ -1163,15 +1164,17 @@ mod tests {
         assert!(format!("{provider:?}").contains("provider: \"***\""));
     }
 
-    fn pre_verified_vector(
+    fn pre_verified_vector<'input>(
         algorithm: AlgorithmId,
-        message: &[u8],
+        message: &'input [u8],
         signature: &[u8; 64],
-    ) -> crate::PreVerifyResponse {
+    ) -> crate::PreVerifyResponse<'input> {
         crate::PreVerifyResponse {
+            source_artifact: &[],
+
             outcome: crate::PreVerifyOutcome::Ok,
             form: crate::ArtifactForm::Proto,
-            unverified_payload_bytes: Some(message.to_vec()),
+            unverified_payload_bytes: Some(message),
             unverified_signature: Some(crate::UnverifiedSignature {
                 algorithm,
                 keyid: None,
@@ -1211,10 +1214,11 @@ mod tests {
                 crate::verify_from_pre_verify_with_provider(
                     &pre_verified_vector(AlgorithmId::Ed25519, message, signature),
                     &keys,
-                    crate::VerifierOptions::default(),
-                ),
+                    crate::VerifierOptions::default()
+                )
+                .map(|result| result.state),
                 Ok(crate::VerifierState::Verified {
-                    payload: message.to_vec(),
+                    payload: message,
                     algorithm: AlgorithmId::Ed25519,
                 })
             );
@@ -1239,10 +1243,11 @@ mod tests {
                         signature,
                     ),
                     &keys,
-                    crate::VerifierOptions::default(),
-                ),
+                    crate::VerifierOptions::default()
+                )
+                .map(|result| result.state),
                 Ok(crate::VerifierState::Verified {
-                    payload: b"YamlSigil P-256 SHA-256 qualification".to_vec(),
+                    payload: b"YamlSigil P-256 SHA-256 qualification",
                     algorithm: AlgorithmId::EcdsaP256Sha256,
                 })
             );
@@ -1273,8 +1278,9 @@ mod tests {
             crate::verify_from_pre_verify_with_provider(
                 &pre_verified_vector(AlgorithmId::Ed25519, b"", &[0xff; 64]),
                 &ed25519_keys,
-                crate::VerifierOptions::default(),
-            ),
+                crate::VerifierOptions::default()
+            )
+            .map(|result| result.state),
             Ok(crate::VerifierState::MalformedAttemptedSigned)
         );
         assert_eq!(
@@ -1297,8 +1303,9 @@ mod tests {
                     &[0; 64],
                 ),
                 &p256_keys,
-                crate::VerifierOptions::default(),
-            ),
+                crate::VerifierOptions::default()
+            )
+            .map(|result| result.state),
             Ok(crate::VerifierState::MalformedAttemptedSigned)
         );
         assert_eq!(

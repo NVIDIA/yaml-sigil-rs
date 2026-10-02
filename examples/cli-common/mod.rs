@@ -14,7 +14,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{CommandFactory, FromArgMatches, Parser};
 use yaml_sigil_core::v1alpha1::AlgorithmId;
 use yaml_sigil_signing::v1alpha1::{
-    OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys, SignOutcome,
+    OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys,
     sign_with_provider, signature_signing_callback,
 };
 use yaml_sigil_verification::v1alpha1::{
@@ -54,11 +54,11 @@ pub(crate) trait ProviderExample: ProviderVerifierFactory + Default {
 fn command<P: ProviderExample>() -> clap::Command {
     Args::command().name(P::COMMAND)
 }
-fn verify_artifact<P: ProviderExample>(
+fn verify_artifact<'input, P: ProviderExample>(
     algorithm: AlgorithmId,
     public_key: &[u8],
-    artifact: &[u8],
-) -> Result<VerifierState> {
+    artifact: &'input [u8],
+) -> Result<VerifierState<'input>> {
     match algorithm {
         AlgorithmId::EcdsaP256Sha256 => {
             // Qualification tests this exact factory with public vectors.
@@ -82,7 +82,8 @@ fn verify_artifact<P: ProviderExample>(
                     verify_ed25519: false,
                     ..VerifierOptions::default()
                 },
-            )?)
+            )
+            .map(|result| result.state)?)
         }
         AlgorithmId::Ed25519 => {
             // The native verifier rejects some mixed-order signatures that
@@ -105,7 +106,8 @@ fn verify_artifact<P: ProviderExample>(
                     verify_ecdsa_p256_sha256: false,
                     ..VerifierOptions::default()
                 },
-            )?)
+            )
+            .map(|result| result.state)?)
         }
     }
 }
@@ -132,6 +134,7 @@ fn run<P: ProviderExample>(args: &Args, stdin: impl Read, mut output: impl Write
     };
     let signed = match sign_with_provider(
         &ProviderSignRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             payload: payload.as_bytes(),
             algorithm,
             key,
@@ -144,9 +147,11 @@ fn run<P: ProviderExample>(args: &Args, stdin: impl Read, mut output: impl Write
         },
         signature_signing_callback(&signer),
     ) {
-        SignOutcome::Success(signed) => signed,
-        SignOutcome::Invocation(error) => bail!("signing invocation failed: {error}"),
-        SignOutcome::Signer(error) => bail!("signing failed: {error}"),
+        Ok(signed) => signed,
+        Err(yaml_sigil_traits::signing::SignError::Invocation(error)) => {
+            bail!("signing invocation failed: {error}")
+        }
+        Err(error) => bail!("signing failed: {error}"),
     };
 
     // Only Verified permits the final artifact output. Invocation errors and

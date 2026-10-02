@@ -28,12 +28,16 @@ fn round_trip(payload: &[u8], keyid: Option<&str>) -> Result<()> {
     let mut signature = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
     signature.set_keyid(keyid.map(str::to_owned));
     let artifact = SignedYamlArtifact::new(payload.to_vec(), Some(signature));
-    let wire = artifact.encode_to_vec()?;
+    let wire = artifact.encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())?;
 
     // Owned decoding copies the fields; borrowed decoding keeps byte and
     // string fields in wire. Keep that buffer alive while using the view.
-    let owned = SignedYamlArtifact::decode(&wire)?;
-    let borrowed = SignedYamlArtifactRef::decode(&wire)?;
+    let owned =
+        SignedYamlArtifact::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())?;
+    let borrowed = SignedYamlArtifactRef::decode(
+        &wire,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )?;
     ensure!(owned == artifact, "owned facade round trip changed fields");
     ensure!(borrowed.payload() == payload, "borrowed payload changed");
     let borrowed_signature = borrowed.signature().context("missing borrowed signature")?;
@@ -67,7 +71,10 @@ fn round_trip(payload: &[u8], keyid: Option<&str>) -> Result<()> {
     // Prost -> Core: encode the independently constructed application message.
     // No generated Rust type or conversion adapter crosses the boundary.
     let application_wire = application.encode_to_vec();
-    let decoded_by_core = SignedYamlArtifact::decode(&application_wire)?;
+    let decoded_by_core = SignedYamlArtifact::decode(
+        &application_wire,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )?;
     ensure!(decoded_by_core == artifact, "Prost -> Core changed fields");
     println!("Prost encode -> Core decode preserved the fields.");
     Ok(())

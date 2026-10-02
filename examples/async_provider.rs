@@ -20,8 +20,8 @@ use tokio::sync::{mpsc, oneshot};
 use yaml_sigil_core::v1alpha1::AlgorithmId;
 use yaml_sigil_signing::v1alpha1::{
     AsyncProviderSignRequest, AsyncProviderSigner, AsyncProviderSigningKeyBuilder,
-    AsyncProviderSigningKeys, AsyncSigner as _, OutputForm, ProviderAsyncSigner, SignOutcome,
-    SignSuccess, UnqualifiedAsyncProviderSignRequest, UnqualifiedAsyncProviderSigningKeys,
+    AsyncProviderSigningKeys, AsyncSigner as _, OutputForm, ProviderAsyncSigner, SignSuccess,
+    UnqualifiedAsyncProviderSignRequest, UnqualifiedAsyncProviderSigningKeys,
     UnqualifiedProviderAsyncSigner,
 };
 use yaml_sigil_verification::v1alpha1::{
@@ -247,6 +247,7 @@ async fn sign_and_verify(
             let key = builder.build()?;
             ProviderAsyncSigner::default()
                 .sign(&AsyncProviderSignRequest {
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
                     payload: payload.as_bytes(),
                     algorithm: AlgorithmId::EcdsaP256Sha256,
                     key: AsyncProviderSigningKeys::EcdsaP256Sha256(&key),
@@ -261,6 +262,7 @@ async fn sign_and_verify(
             let key = builder.build_unqualified()?;
             UnqualifiedProviderAsyncSigner::default()
                 .sign(&UnqualifiedAsyncProviderSignRequest {
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
                     payload: payload.as_bytes(),
                     algorithm: AlgorithmId::EcdsaP256Sha256,
                     key: UnqualifiedAsyncProviderSigningKeys::EcdsaP256Sha256(&key),
@@ -272,11 +274,13 @@ async fn sign_and_verify(
                 .await
         }
     };
-    let SignOutcome::Success(signed) = outcome else {
+    let Ok(signed) = outcome else {
         return match outcome {
-            SignOutcome::Invocation(error) => Err(error).context("invalid signing request"),
-            SignOutcome::Signer(error) => Err(error).context("signing failed"),
-            SignOutcome::Success(_) => unreachable!(),
+            Err(yaml_sigil_traits::signing::SignError::Invocation(error)) => {
+                Err(error).context("invalid signing request")
+            }
+            Err(error) => Err(error).context("signing failed"),
+            Ok(_) => unreachable!(),
         };
     };
 
@@ -306,7 +310,8 @@ async fn sign_and_verify(
                     },
                     options,
                 )
-                .await?
+                .await
+                .map(|result| result.state)?
         }
         ProviderMode::Unqualified => {
             let provider = builder.build_unqualified();
@@ -321,7 +326,8 @@ async fn sign_and_verify(
                     },
                     options,
                 )
-                .await?
+                .await
+                .map(|result| result.state)?
         }
     };
     check_verified(&signed, payload, state)?;
@@ -382,7 +388,7 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
     use clap::CommandFactory;
-    use yaml_sigil_verification::v1alpha1::{PublicKeys, resolve_p256_verifying_key, verify_yaml};
+    use yaml_sigil_verification::v1alpha1::{PublicKeys, resolve_p256_verifying_key, verify};
 
     #[test]
     fn cli_builds() {
@@ -423,14 +429,16 @@ mod tests {
             .unwrap()
             .1;
         // Independently verify the actual transcript with its printed key.
-        let state = verify_yaml(
+        let state = verify(
             artifact.as_bytes(),
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
             &PublicKeys {
                 ed25519: None,
                 p256: Some(&key),
             },
             VerifierOptions::default(),
-        )?;
+        )
+        .map(|result| result.state)?;
         let VerifierState::Verified { payload, .. } = state else {
             panic!("printed artifact did not verify");
         };

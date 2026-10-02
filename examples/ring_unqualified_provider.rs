@@ -33,7 +33,7 @@ use ring_adapter::{RingFactory, RingSigner};
 use yaml_io::{PayloadArgs, print_public_key, print_section, print_signed, print_verification};
 use yaml_sigil_core::v1alpha1::AlgorithmId;
 use yaml_sigil_signing::v1alpha1::{
-    OutputForm, ProviderSigningKeyBuilder, SignOutcome, UnqualifiedProviderSignRequest,
+    OutputForm, ProviderSigningKeyBuilder, UnqualifiedProviderSignRequest,
     UnqualifiedProviderSigningKeys, sign_with_unqualified_provider, signature_signing_callback,
 };
 use yaml_sigil_verification::v1alpha1::{
@@ -98,6 +98,7 @@ fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()> {
     // public-key binding does not store the provider's private-key handle.
     let signed = match sign_with_unqualified_provider(
         &UnqualifiedProviderSignRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             payload: payload.as_bytes(),
             algorithm,
             key,
@@ -110,9 +111,11 @@ fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()> {
         },
         signature_signing_callback(&signer),
     ) {
-        SignOutcome::Success(signed) => signed,
-        SignOutcome::Invocation(error) => bail!("signing invocation failed: {error}"),
-        SignOutcome::Signer(error) => bail!("signing failed: {error}"),
+        Ok(signed) => signed,
+        Err(yaml_sigil_traits::signing::SignError::Invocation(error)) => {
+            bail!("signing invocation failed: {error}")
+        }
+        Err(error) => bail!("signing failed: {error}"),
     };
 
     // WARNING: This factory never runs the fixed qualification suite. The
@@ -147,6 +150,7 @@ fn run(args: &Args, stdin: impl Read, mut output: impl Write) -> Result<()> {
             ..VerifierOptions::default()
         },
     )
+    .map(|result| result.state)
     .context("verification failed")?;
     let VerifierState::Verified {
         payload: verified_payload,
@@ -189,7 +193,7 @@ mod tests {
     use base64::engine::general_purpose::STANDARD as BASE64;
     use clap::CommandFactory as _;
     use yaml_sigil_verification::v1alpha1::{
-        PublicKeys, resolve_ed25519_verifying_key, resolve_p256_verifying_key, verify_yaml,
+        PublicKeys, resolve_ed25519_verifying_key, resolve_p256_verifying_key, verify,
     };
 
     #[test]
@@ -255,14 +259,16 @@ mod tests {
             KeyType::P256 => Some(resolve_p256_verifying_key(&public_key)?),
             KeyType::Ed25519 => None,
         };
-        let state = verify_yaml(
+        let state = verify(
             artifact.as_bytes(),
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
             &PublicKeys {
                 ed25519: ed25519.as_ref(),
                 p256: p256.as_ref(),
             },
             VerifierOptions::default(),
-        )?;
+        )
+        .map(|result| result.state)?;
         let VerifierState::Verified { payload, algorithm } = state else {
             panic!("printed artifact did not verify with the printed public key");
         };

@@ -123,12 +123,14 @@ pub(crate) fn resolve_p256_verifying_key(bytes: &[u8]) -> Result<P256Vk, Invocat
 }
 
 pub(crate) fn provider_public_key_is_admissible(
-    algorithm: crate::AlgorithmId,
+    algorithm: yaml_sigil_traits::AlgorithmId,
     bytes: &[u8],
 ) -> bool {
     match algorithm {
-        crate::AlgorithmId::Ed25519 => resolve_ed25519_verifying_key(bytes).is_ok(),
-        crate::AlgorithmId::EcdsaP256Sha256 => resolve_p256_verifying_key(bytes).is_ok(),
+        yaml_sigil_traits::AlgorithmId::Ed25519 => resolve_ed25519_verifying_key(bytes).is_ok(),
+        yaml_sigil_traits::AlgorithmId::EcdsaP256Sha256 => {
+            resolve_p256_verifying_key(bytes).is_ok()
+        }
     }
 }
 
@@ -247,7 +249,7 @@ mod tests {
             p256: None,
         };
         assert_eq!(
-            crate::verify_extracted_signature(
+            super::super::verify_extracted_signature(
                 b"payload\n",
                 1,
                 signature,
@@ -272,7 +274,7 @@ mod tests {
             p256: None,
         };
         assert!(matches!(
-            crate::verify_extracted_signature(
+            super::super::verify_extracted_signature(
                 payload,
                 1,
                 &signature,
@@ -282,7 +284,7 @@ mod tests {
             Ok(crate::VerifierState::Verified { .. })
         ));
         assert_eq!(
-            crate::verify_extracted_signature(
+            super::super::verify_extracted_signature(
                 b"different payload\n",
                 1,
                 &signature,
@@ -340,7 +342,7 @@ mod tests {
         };
 
         assert_eq!(
-            crate::verify_extracted_signature(
+            super::super::verify_extracted_signature(
                 b"payload\n",
                 1,
                 &[0u8; 64],

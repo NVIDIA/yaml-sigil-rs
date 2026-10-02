@@ -16,6 +16,10 @@ pub const DEFAULT_YAML_UNKNOWN_FIELD_POLICY: YamlSignatureDocumentUnknownFieldPo
     YamlSignatureDocumentUnknownFieldPolicy::RejectedAtParse;
 
 /// Policies available for YAML signature-document unknown fields in this build.
-pub fn yaml_unknown_field_policies() -> Vec<YamlSignatureDocumentUnknownFieldPolicy> {
-    vec![DEFAULT_YAML_UNKNOWN_FIELD_POLICY]
+pub fn yaml_unknown_field_policies() -> &'static [YamlSignatureDocumentUnknownFieldPolicy] {
+    if cfg!(feature = "yaml") {
+        &[DEFAULT_YAML_UNKNOWN_FIELD_POLICY]
+    } else {
+        &[]
+    }
 }

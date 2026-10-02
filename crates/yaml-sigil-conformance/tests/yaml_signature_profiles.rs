@@ -11,9 +11,9 @@ use yaml_sigil_core::{
     YamlSignatureDocumentUnknownFieldPolicy,
 };
 use yaml_sigil_verification::{
-    AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, InvocationError, PreVerifyOutcome,
+    AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, PreVerifyOptions, PreVerifyOutcome,
     PreVerifyResponse, PublicKeys, Verifier, VerifierCapabilities, VerifierOptions, VerifierState,
-    VerifyResult,
+    VerifyError, VerifyResult,
 };
 
 #[derive(Clone, Copy)]
@@ -29,7 +29,7 @@ fn capabilities(profile: AdvertisedConformanceProfile) -> VerifierCapabilities {
             YamlSignatureDocumentDuplicateKeyPolicy::RejectedAtParse,
         yaml_signature_unknown_field_policy:
             YamlSignatureDocumentUnknownFieldPolicy::RejectedAtParse,
-        yaml_signature_unknown_field_policies: vec![
+        yaml_signature_unknown_field_policies: &[
             YamlSignatureDocumentUnknownFieldPolicy::RejectedAtParse,
         ],
         supported_forms: &[ArtifactForm::Yaml],
@@ -41,7 +41,7 @@ fn capabilities(profile: AdvertisedConformanceProfile) -> VerifierCapabilities {
     }
 }
 
-fn state_for_fixture(input_bytes: &[u8]) -> VerifierState {
+fn state_for_fixture(input_bytes: &[u8]) -> VerifierState<'_> {
     let text = std::str::from_utf8(input_bytes).expect("YAML signature fixtures are UTF-8");
     let schema_identity_failure = !text.contains("\nschema: YamlSigilSignature.v1alpha1\n");
     let duplicate_known_key = ["schema", "alg", "keyid", "signature"]
@@ -73,13 +73,15 @@ fn state_for_fixture(input_bytes: &[u8]) -> VerifierState {
     }
 }
 
-fn pre_verify_response(input_bytes: &[u8], form: ArtifactForm) -> PreVerifyResponse {
+fn pre_verify_response(input_bytes: &[u8], form: ArtifactForm) -> PreVerifyResponse<'_> {
     let outcome = if state_for_fixture(input_bytes) == VerifierState::MalformedAttemptedSigned {
         PreVerifyOutcome::MetadataParseFailure
     } else {
         PreVerifyOutcome::Ok
     };
     PreVerifyResponse {
+        source_artifact: input_bytes,
+
         outcome,
         form,
         unverified_payload_bytes: None,
@@ -91,106 +93,78 @@ fn pre_verify_response(input_bytes: &[u8], form: ArtifactForm) -> PreVerifyRespo
 impl Verifier for FakeVerifier {
     type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
     type P256VerifyingKey = p256::ecdsa::VerifyingKey;
-
     fn capabilities(&self) -> VerifierCapabilities {
         capabilities(self.profile)
     }
-
-    fn pre_verify(
+    fn pre_verify<'input>(
         &self,
-        input_bytes: &[u8],
+        input: &'input [u8],
         form: ArtifactForm,
-        _allow_unsigned: bool,
-        _include_parser_observations: bool,
-    ) -> PreVerifyResponse {
-        pre_verify_response(input_bytes, form)
+        _options: PreVerifyOptions,
+    ) -> Result<PreVerifyResponse<'input>, VerifyError> {
+        Ok(pre_verify_response(input, form))
     }
-
-    fn verify(
+    fn verify<'input>(
         &self,
-        input_bytes: &[u8],
-        form: ArtifactForm,
+        input: &'input [u8],
+        _form: ArtifactForm,
         _keys: &PublicKeys<'_>,
-        _options: VerifierOptions,
-    ) -> Result<VerifierState, InvocationError> {
-        assert_eq!(form, ArtifactForm::Yaml);
-        Ok(state_for_fixture(input_bytes))
-    }
-
-    fn verify_with_metadata(
-        &self,
-        input_bytes: &[u8],
-        form: ArtifactForm,
-        keys: &PublicKeys<'_>,
-        options: VerifierOptions,
-        _include_parser_observations: bool,
-    ) -> Result<VerifyResult, InvocationError> {
+        _options: VerifierOptions<'_>,
+    ) -> Result<VerifyResult<'input>, VerifyError> {
         Ok(VerifyResult {
-            state: Verifier::verify(self, input_bytes, form, keys, options)?,
+            state: state_for_fixture(input),
             parser_observations: Vec::new(),
         })
     }
-
-    fn verify_from_pre_verify(
+    fn verify_from_pre_verify<'input>(
         &self,
-        _pre: &PreVerifyResponse,
+        _pre: &PreVerifyResponse<'input>,
         _keys: &PublicKeys<'_>,
-        _options: VerifierOptions,
-    ) -> Result<VerifierState, InvocationError> {
-        Ok(VerifierState::SignedButFailedVerification)
+        _options: VerifierOptions<'_>,
+    ) -> Result<VerifyResult<'input>, VerifyError> {
+        Ok(VerifyResult {
+            state: VerifierState::SignedButFailedVerification,
+            parser_observations: Vec::new(),
+        })
     }
 }
 
 impl AsyncVerifier for FakeVerifier {
     type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
     type P256VerifyingKey = p256::ecdsa::VerifyingKey;
-
     fn capabilities(&self) -> VerifierCapabilities {
         capabilities(self.profile)
     }
-
-    async fn pre_verify(
-        &self,
-        input_bytes: &[u8],
+    async fn pre_verify<'call, 'input: 'call>(
+        &'call self,
+        input: &'input [u8],
         form: ArtifactForm,
-        _allow_unsigned: bool,
-        _include_parser_observations: bool,
-    ) -> PreVerifyResponse {
-        pre_verify_response(input_bytes, form)
+        _options: PreVerifyOptions,
+    ) -> Result<PreVerifyResponse<'input>, VerifyError> {
+        Ok(pre_verify_response(input, form))
     }
-
-    async fn verify(
-        &self,
-        input_bytes: &[u8],
-        form: ArtifactForm,
-        _keys: &PublicKeys<'_>,
-        _options: VerifierOptions,
-    ) -> Result<VerifierState, InvocationError> {
-        assert_eq!(form, ArtifactForm::Yaml);
-        Ok(state_for_fixture(input_bytes))
-    }
-
-    async fn verify_with_metadata(
-        &self,
-        input_bytes: &[u8],
-        form: ArtifactForm,
-        keys: &PublicKeys<'_>,
-        options: VerifierOptions,
-        _include_parser_observations: bool,
-    ) -> Result<VerifyResult, InvocationError> {
+    async fn verify<'call, 'input: 'call>(
+        &'call self,
+        input: &'input [u8],
+        _form: ArtifactForm,
+        _keys: &'call PublicKeys<'_>,
+        _options: VerifierOptions<'call>,
+    ) -> Result<VerifyResult<'input>, VerifyError> {
         Ok(VerifyResult {
-            state: AsyncVerifier::verify(self, input_bytes, form, keys, options).await?,
+            state: state_for_fixture(input),
             parser_observations: Vec::new(),
         })
     }
-
-    async fn verify_from_pre_verify(
-        &self,
-        _pre: &PreVerifyResponse,
-        _keys: &PublicKeys<'_>,
-        _options: VerifierOptions,
-    ) -> Result<VerifierState, InvocationError> {
-        Ok(VerifierState::SignedButFailedVerification)
+    async fn verify_from_pre_verify<'call, 'input: 'call>(
+        &'call self,
+        _pre: &'call PreVerifyResponse<'input>,
+        _keys: &'call PublicKeys<'_>,
+        _options: VerifierOptions<'call>,
+    ) -> Result<VerifyResult<'input>, VerifyError> {
+        Ok(VerifyResult {
+            state: VerifierState::SignedButFailedVerification,
+            parser_observations: Vec::new(),
+        })
     }
 }
 

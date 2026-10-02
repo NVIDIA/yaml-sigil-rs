@@ -81,3 +81,12 @@ cargo test --package yaml-sigil-examples --example yaml-facade
 cargo test --manifest-path tests/downstream/Cargo.toml \
   --package yaml-sigil-core-downstream-core-only
 ```
+
+## Portable feature selection
+
+The current `yaml` feature enables the existing Serde model and private
+`noyalib` backend with `alloc`, independently of `std` and protobuf support.
+YAML-only consumers omit Buffa and protobuf code generation. Parser budgets,
+canonical serialization, unknown-field rejection, and carrier constraints
+remain unchanged. See the [portable API guide](./no-std.md) for the isolated
+consumer checks. Earlier evaluations above retain their original scope.

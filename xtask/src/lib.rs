@@ -8,8 +8,10 @@ mod cargo_metadata_output;
 mod ci;
 mod features;
 mod github;
+mod no_std;
 mod package_content;
 mod package_content_policy;
+mod peer_patch;
 mod release;
 mod release_base;
 mod release_policy;
@@ -36,12 +38,17 @@ const WASM_TARGET_INSTALL: &str = "rustup target add --toolchain 1.95.0 wasm32-u
 #[derive(Parser)]
 #[command(name = "xtask", about = "yaml-sigil-rs workspace tasks")]
 pub struct Cli {
+    /// Temporarily patch yaml-sigil-traits from a paired checkout for nested Cargo commands.
+    #[arg(long, global = true, value_name = "PATH")]
+    traits_path: Option<PathBuf>,
     #[command(subcommand)]
     command: Task,
 }
 
 #[derive(Subcommand)]
 enum Task {
+    /// Validate isolated no_std consumers and allocator-free linking.
+    NoStd(no_std::NoStdArgs),
     /// Run the repository's provider-neutral non-release checks.
     #[command(visible_alias = "ci")]
     Check(ci::CheckArgs),
@@ -90,7 +97,20 @@ struct UpdateSpecArgs {
 /// operation fails. Mutating maintenance commands retain their own safeguards.
 pub fn execute(cli: Cli) -> Result<()> {
     let root = workspace_root();
+    anyhow::ensure!(
+        cli.traits_path.is_none()
+            || !matches!(
+                cli.command,
+                Task::Release(_)
+                    | Task::Github(_)
+                    | Task::SyncWorkspaceVersions { .. }
+                    | Task::UpdateSpec(_)
+            ),
+        "--traits-path is for local validation, not maintenance or release commands"
+    );
+    let _peer_patch = peer_patch::PeerPatch::install(&root, cli.traits_path.as_deref())?;
     match cli.command {
+        Task::NoStd(args) => no_std::run(&root, args)?,
         Task::Check(args) => ci::run(&root, args)?,
         Task::PackageContent => {
             package_content::run(&root)?;

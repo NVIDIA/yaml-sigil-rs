@@ -16,7 +16,7 @@
 
 use p256::ecdsa::{SigningKey as P256Sk, VerifyingKey as P256Vk};
 use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{OutputForm, SignInvocationError, SignOutcome, SignRequest, SigningKey};
+use yaml_sigil_signing::{OutputForm, SignInvocationError, SignRequest, SigningKey};
 use yaml_sigil_verification::{
     ArtifactForm, InvocationError, PublicKeys, VerifierOptions, VerifierState,
     resolve_p256_verifying_key,
@@ -76,6 +76,7 @@ fn happy_path_and_acvp<V: ConformanceVerifier>(v: &V) {
             &keys,
             VerifierOptions::default(),
         )
+        .map(|result| result.state)
         .expect("happy-path proto verify should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -85,6 +86,7 @@ fn happy_path_and_acvp<V: ConformanceVerifier>(v: &V) {
     let yaml = load_bytes(CATEGORY, "verify-happy-path.yaml");
     let state = v
         .verify(&yaml, ArtifactForm::Yaml, &keys, VerifierOptions::default())
+        .map(|result| result.state)
         .expect("happy-path yaml verify should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -107,6 +109,7 @@ fn happy_path_and_acvp<V: ConformanceVerifier>(v: &V) {
             &acvp_keys,
             VerifierOptions::default(),
         )
+        .map(|result| result.state)
         .expect("ACVP tc131 verify should not return invocation error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -127,6 +130,7 @@ fn high_low_s<V: ConformanceVerifier>(v: &V) {
                 &keys,
                 VerifierOptions::default(),
             )
+            .map(|result| result.state)
             .expect("high/low-s verify should not error");
         assert!(
             matches!(state, VerifierState::Verified { .. }),
@@ -144,6 +148,7 @@ fn high_low_s<V: ConformanceVerifier>(v: &V) {
                 &keys,
                 VerifierOptions::default(),
             )
+            .map(|result| result.state)
             .expect("high/low-s YAML verify should not error");
         assert!(
             matches!(state, VerifierState::Verified { .. }),
@@ -176,6 +181,7 @@ fn invalid_component_ranges<V: ConformanceVerifier>(v: &V) {
                 &keys,
                 VerifierOptions::default(),
             )
+            .map(|result| result.state)
             .expect("invalid-* fixture should not return invocation error");
         assert_eq!(
             state,
@@ -201,6 +207,7 @@ fn non_fixed_width<V: ConformanceVerifier>(v: &V) {
                 &keys,
                 VerifierOptions::default(),
             )
+            .map(|result| result.state)
             .expect("non-fixed-width fixture should not return invocation error");
         assert_eq!(
             state,
@@ -286,6 +293,7 @@ fn two_nonce_instability<V: ConformanceVerifier>(v: &V) {
 
     let st1 = v
         .verify(&k1, ArtifactForm::Proto, &keys, VerifierOptions::default())
+        .map(|result| result.state)
         .expect("k1 verify should not error");
     assert!(
         matches!(st1, VerifierState::Verified { .. }),
@@ -293,6 +301,7 @@ fn two_nonce_instability<V: ConformanceVerifier>(v: &V) {
     );
     let st2 = v
         .verify(&k2, ArtifactForm::Proto, &keys, VerifierOptions::default())
+        .map(|result| result.state)
         .expect("k2 verify should not error");
     assert!(
         matches!(st2, VerifierState::Verified { .. }),
@@ -329,14 +338,20 @@ fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(
     let keys = keys_with_p256(&vk);
     let proto = load_bytes(CATEGORY, "verify-happy-path.binpb");
     let opts = VerifierOptions {
-        algorithm_parameters: vec![0x00],
+        algorithm_parameters: &[0x00],
         ..VerifierOptions::default()
     };
     let err = v
         .verify(&proto, ArtifactForm::Proto, &keys, opts)
+        .map(|result| result.state)
         .expect_err("non-empty algorithm_parameters must yield invocation error");
     assert!(
-        matches!(err, InvocationError::InvalidAlgorithmParameters),
+        matches!(
+            err,
+            yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::InvalidAlgorithmParameters
+            )
+        ),
         "Verify: expected InvalidAlgorithmParameters, got {err:?}"
     );
 
@@ -348,6 +363,7 @@ fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(
     let sk = P256Sk::from_slice(&d_bytes).expect("happy-path private key parses");
     let bad = [0u8];
     let req = SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"hello: world\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&sk),
@@ -357,7 +373,9 @@ fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(
         algorithm_parameters: &bad,
     };
     match s.sign(&req) {
-        SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters) => {}
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidAlgorithmParameters,
+        )) => {}
         other => panic!("Sign: expected InvalidAlgorithmParameters, got {other:?}"),
     }
 }
@@ -390,7 +408,8 @@ async fn happy_path_and_acvp_async<V: ConformanceAsyncVerifier>(v: &V) {
             VerifierOptions::default(),
         )
         .await
-        .expect("happy-path proto verify (async) should not error");
+        .map(|result| result.state)
+        .expect("happy-path proto verify(async).map(|result| result.state) should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
         "verify-happy-path.binpb (async): expected Verified, got {state:?}"
@@ -400,7 +419,8 @@ async fn happy_path_and_acvp_async<V: ConformanceAsyncVerifier>(v: &V) {
     let state = v
         .verify(&yaml, ArtifactForm::Yaml, &keys, VerifierOptions::default())
         .await
-        .expect("happy-path yaml verify (async) should not error");
+        .map(|result| result.state)
+        .expect("happy-path yaml verify(async).map(|result| result.state) should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
         "verify-happy-path.yaml (async): expected Verified, got {state:?}"
@@ -411,14 +431,9 @@ async fn happy_path_and_acvp_async<V: ConformanceAsyncVerifier>(v: &V) {
     let acvp_keys = keys_with_p256(&acvp_vk);
     let acvp = load_bytes(CATEGORY, "acvp-fips186-5-p256-sha256-tc131.binpb");
     let state = v
-        .verify(
-            &acvp,
-            ArtifactForm::Proto,
-            &acvp_keys,
-            VerifierOptions::default(),
-        )
-        .await
-        .expect("ACVP tc131 verify (async) should not return invocation error");
+        .verify(&acvp, ArtifactForm::Proto, &acvp_keys, VerifierOptions::default())
+        .await.map(|result| result.state)
+        .expect("ACVP tc131 verify(async).map(|result| result.state) should not return invocation error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
         "acvp-fips186-5-p256-sha256-tc131.binpb (async): expected Verified, got {state:?}"
@@ -439,7 +454,8 @@ async fn high_low_s_async<V: ConformanceAsyncVerifier>(v: &V) {
                 VerifierOptions::default(),
             )
             .await
-            .expect("high/low-s verify (async) should not error");
+            .map(|result| result.state)
+            .expect("high/low-s verify(async).map(|result| result.state) should not error");
         assert!(
             matches!(state, VerifierState::Verified { .. }),
             "{}/{} (async): expected Verified (high-S accepted), got {state:?}",
@@ -457,7 +473,8 @@ async fn high_low_s_async<V: ConformanceAsyncVerifier>(v: &V) {
                 VerifierOptions::default(),
             )
             .await
-            .expect("high/low-s YAML verify (async) should not error");
+            .map(|result| result.state)
+            .expect("high/low-s YAML verify(async).map(|result| result.state) should not error");
         assert!(
             matches!(state, VerifierState::Verified { .. }),
             "{}/{} (async): expected Verified, got {state:?}",
@@ -487,6 +504,7 @@ async fn invalid_component_ranges_async<V: ConformanceAsyncVerifier>(v: &V) {
                 VerifierOptions::default(),
             )
             .await
+            .map(|result| result.state)
             .expect("invalid-* fixture (async) should not return invocation error");
         assert_eq!(
             state,
@@ -512,6 +530,7 @@ async fn non_fixed_width_async<V: ConformanceAsyncVerifier>(v: &V) {
                 VerifierOptions::default(),
             )
             .await
+            .map(|result| result.state)
             .expect("non-fixed-width fixture (async) should not return invocation error");
         assert_eq!(
             state,
@@ -534,7 +553,8 @@ async fn two_nonce_instability_async<V: ConformanceAsyncVerifier>(v: &V) {
     let st1 = v
         .verify(&k1, ArtifactForm::Proto, &keys, VerifierOptions::default())
         .await
-        .expect("k1 verify (async) should not error");
+        .map(|result| result.state)
+        .expect("k1 verify(async).map(|result| result.state) should not error");
     assert!(
         matches!(st1, VerifierState::Verified { .. }),
         "two-nonce-instability-k1.binpb (async): expected Verified, got {st1:?}"
@@ -542,7 +562,8 @@ async fn two_nonce_instability_async<V: ConformanceAsyncVerifier>(v: &V) {
     let st2 = v
         .verify(&k2, ArtifactForm::Proto, &keys, VerifierOptions::default())
         .await
-        .expect("k2 verify (async) should not error");
+        .map(|result| result.state)
+        .expect("k2 verify(async).map(|result| result.state) should not error");
     assert!(
         matches!(st2, VerifierState::Verified { .. }),
         "two-nonce-instability-k2.binpb (async): expected Verified, got {st2:?}"
@@ -580,15 +601,21 @@ async fn algorithm_parameters_rejection_async<
     let keys = keys_with_p256(&vk);
     let proto = load_bytes(CATEGORY, "verify-happy-path.binpb");
     let opts = VerifierOptions {
-        algorithm_parameters: vec![0x00],
+        algorithm_parameters: &[0x00],
         ..VerifierOptions::default()
     };
     let err = v
         .verify(&proto, ArtifactForm::Proto, &keys, opts)
         .await
+        .map(|result| result.state)
         .expect_err("non-empty algorithm_parameters must yield invocation error");
     assert!(
-        matches!(err, InvocationError::InvalidAlgorithmParameters),
+        matches!(
+            err,
+            yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::InvalidAlgorithmParameters
+            )
+        ),
         "Verify (async): expected InvalidAlgorithmParameters, got {err:?}"
     );
 
@@ -596,6 +623,7 @@ async fn algorithm_parameters_rejection_async<
     let sk = P256Sk::from_slice(&d_bytes).expect("happy-path private key parses");
     let bad = [0u8];
     let req = SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"hello: world\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&sk),
@@ -605,7 +633,9 @@ async fn algorithm_parameters_rejection_async<
         algorithm_parameters: &bad,
     };
     match s.sign(&req).await {
-        SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters) => {}
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidAlgorithmParameters,
+        )) => {}
         other => panic!("Sign (async): expected InvalidAlgorithmParameters, got {other:?}"),
     }
 }

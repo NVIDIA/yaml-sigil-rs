@@ -18,9 +18,9 @@ conversion. The specification identifier is independent of the crate's SemVer.
 ## API Surface
 
 - `sign` signs either artifact form in process.
-- `sign_yaml` and `sign_proto` provide form-specific convenience wrappers.
-- `sign_with_resource_limits`, `sign_yaml_with_resource_limits`, and
-  `sign_proto_with_resource_limits` enforce an explicit complete-output policy.
+- `SignRequest::output_form` selects the enabled artifact format, and
+  `SignRequest::resource_limits` selects its complete-output policy.
+- `sign_with_rng` accepts a fallible caller-supplied CSPRNG for P-256.
 - `EncodeError` and `EncodeErrorKind` re-export the common protobuf format
   error used by resource-aware protobuf output.
 - `sign_with_provider` accepts a qualified public-key binding and a callback, while
@@ -33,7 +33,7 @@ conversion. The specification identifier is independent of the crate's SemVer.
 - `AsyncProviderSigner` and `AsyncProviderSigningKeyBuilder` support awaitable
   operations. `ProviderAsyncSigner` and `UnqualifiedProviderAsyncSigner`
   implement `AsyncSigner` with the corresponding bound keys.
-- Sync and async provider signing offer `_and_resource_limits` functions.
+- Sync and async provider signing honor the request resource policy.
 - `DefaultSigner` and `DefaultAsyncSigner` delegate to the free functions.
 - `Signer`, `AsyncSigner`, outcome types, and capability types are re-exported
   from
@@ -135,16 +135,9 @@ Provider support or successful output self-verification does not establish or
 imply FIPS validation. Such a claim depends on the complete provider build,
 configuration, platform, operational boundary, and deployment.
 
-Use `sign_with_provider_and_resource_limits`,
-`sign_with_unqualified_provider_and_resource_limits`, or
-`sign_with_p256_digest_provider_and_resource_limits` for bounded synchronous
-signing. Pass `(request, limits, callback)`. The async counterparts are
-`sign_with_async_provider_and_resource_limits` and
-`sign_with_unqualified_async_provider_and_resource_limits`. They apply the
-preflight and exact output checks described under
-[Resource boundaries](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-signing/README.md#resource-boundaries).
-Ordinary provider entry points and the async trait facades remain unbounded
-by that optional policy.
+Set `request.resource_limits` for bounded native, callback, digest, and async
+provider signing. All primary operations use the preflight and final checks
+under [Resource boundaries](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-signing/README.md#resource-boundaries).
 
 Async provider operations do not require a synchronous adapter or a library
 runtime. Clients can be borrowed without a `'static` requirement. Local
@@ -155,39 +148,32 @@ cancellation semantics.
 
 ## Resource boundaries
 
-The resource-aware signing functions validate the bounded request shape first.
-For protobuf output, they calculate the exact prospective wire length from
-component lengths before scanning caller buffers or performing cryptography.
-The outer result reports resource rejection, a middle result preserves the
-protobuf format error, and the existing signing return remains the inner
-value. YAML-only signing does not add the protobuf format layer.
-For YAML output, they first test a conclusive lower bound that includes any
-projected final line feed and the minimum carrier encoding. After signing and
-carrier serialization, they check the exact output size before allocating the
-complete artifact. Passing the lower-bound check never replaces that final
-exact check.
+Primary signing validates invocation shape and enforces the request policy.
+Protobuf output has exact projected sizing before content processing or
+cryptography. YAML first tests a conclusive lower bound, then checks the exact
+serialized output before complete-artifact allocation. Escaping can make a
+late rejection necessary. `SignError` distinguishes invocation, resource,
+encoding, and signing failures in a flat result.
 
-The resource-aware transcoding functions check the original source before
-parsing and check the complete destination independently before allocation.
-The source and destination lengths are not added together. Errors identify the
-form whose boundary failed. YAML-to-protobuf transcoding preserves protobuf
-format errors between the outer resource result and the existing transcoding
-result.
+Transcoding takes `&ArtifactResourceLimits` on its primary functions, checks
+the original source before parsing, and admits the destination independently.
+Source and destination sizes are not added together. `TranscodeError`
+distinguishes resource, encoding, and conversion failures.
 
-`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`, and
-you can lower, raise, or disable that ceiling. Existing signing and transcoding
-functions remain unbounded by this policy. Adoption at the affected trust
-boundary, or an equivalent earlier raw-input bound, is required to protect an
-existing caller. This policy provides operational limits without changing
-YamlSigil `v1alpha1` conformance. The 16,384-octet YAML signature-carrier
-constraint remains separate.
+`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`;
+`unbounded()` disables the optional ceiling. This policy does not change
+YamlSigil `v1alpha1` conformance or its independent 16,384-octet YAML carrier
+constraint.
 
-## Third-party material
+## Features and entropy
 
-NVIDIA-authored crate material is licensed under Apache-2.0. RFC 8032-derived
-point-encoding, scalar, challenge, and verification rules in
-`src/provider_crypto.rs` retain their source attribution and terms. The P-256
-provider boundary follows point-encoding behavior from
-*Standards for Efficient Cryptography 1 (SEC 1)*. The applicable notices and
-source terms are retained in
-[`THIRD_PARTY_NOTICES.md`](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/crates/yaml-sigil-signing/THIRD_PARTY_NOTICES.md).
+Defaults enable `std`, `yaml`, `protobuf`, and `system-rng`. Disable defaults
+and select either format for `no_std + alloc`. Without `system-rng`, `sign`
+supports native Ed25519; use `sign_with_rng` for native P-256 or a provider
+operation for provider-held keys. `signer_capabilities()` describes native
+`sign`, while `signer_capabilities_with_rng()` describes supplied entropy.
+Entropy failure aborts without deterministic fallback. P-256 retains uniform
+CSPRNG nonce sampling; the library does not replace it with RFC 6979.
+
+The [portable API guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/no-std.md)
+describes feature selection and migration.

@@ -12,6 +12,7 @@ src/async_provider.rs
 src/async_provider_tests.rs
 src/crypto.rs
 src/lib.rs
+src/operations.rs
 src/proto_verify.rs
 src/provider.rs
 src/v1alpha1.rs

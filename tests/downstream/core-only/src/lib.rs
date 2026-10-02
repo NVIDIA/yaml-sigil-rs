@@ -3,25 +3,14 @@
 
 //! Downstream fixture whose only direct dependency is `yaml-sigil-core`.
 
-use yaml_sigil_core::{
-    ArtifactResourceLimits, ArtifactResourceResult,
-    pb::{DecodeError, SignedYamlArtifactRef},
-};
+use yaml_sigil_core::{ArtifactDecodeError, ArtifactResourceLimits, pb::SignedYamlArtifactRef};
 
-/// Borrow the payload through the public protobuf facade.
-pub fn payload(input: &[u8]) -> Result<&[u8], DecodeError> {
-    Ok(SignedYamlArtifactRef::decode(input)?.payload())
-}
-
-/// Borrow the payload after applying an explicit core-only input policy.
-pub fn payload_with_resource_limits<'a>(
-    input: &'a [u8],
+/// Borrow payload bytes after admitting the original encoded artifact.
+pub fn payload<'input>(
+    input: &'input [u8],
     limits: &ArtifactResourceLimits,
-) -> ArtifactResourceResult<Result<&'a [u8], DecodeError>> {
-    Ok(
-        SignedYamlArtifactRef::decode_with_resource_limits(input, limits)?
-            .map(|artifact| artifact.payload()),
-    )
+) -> Result<&'input [u8], ArtifactDecodeError> {
+    Ok(SignedYamlArtifactRef::decode(input, limits)?.payload())
 }
 
 #[cfg(test)]
@@ -37,20 +26,29 @@ mod tests {
     fn constructs_encodes_and_decodes_without_a_direct_buffa_dependency() {
         let signature = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
         let artifact = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
-        let wire = artifact.encode_to_vec().unwrap();
+        let wire = artifact
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
 
-        assert_eq!(SignedYamlArtifact::decode(&wire).unwrap(), artifact);
-        assert_eq!(super::payload(&wire).unwrap(), b"message\n");
         assert_eq!(
-            super::payload_with_resource_limits(&wire, &ArtifactResourceLimits::default(),)
-                .unwrap()
-                .unwrap(),
+            SignedYamlArtifact::decode(
+                &wire,
+                &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+            )
+            .unwrap(),
+            artifact
+        );
+        assert_eq!(
+            super::payload(&wire, &ArtifactResourceLimits::unbounded()).unwrap(),
+            b"message\n"
+        );
+        assert_eq!(
+            super::payload(&wire, &ArtifactResourceLimits::default(),).unwrap(),
             b"message\n"
         );
         assert_eq!(
             artifact
-                .encode_to_vec_with_resource_limits(&ArtifactResourceLimits::default())
-                .unwrap()
+                .encode_to_vec(&ArtifactResourceLimits::default())
                 .unwrap(),
             wire
         );

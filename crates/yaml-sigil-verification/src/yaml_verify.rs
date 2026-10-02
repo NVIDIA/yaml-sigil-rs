@@ -1,16 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
+use alloc::vec::Vec;
 use base64::Engine;
-use tracing::instrument;
+
 use yaml_sigil_core::{parse_signature_document, validate_payload_stream};
 use yaml_sigil_traits::AlgorithmId;
 use yaml_sigil_transcription::{DecomposeOutcome, DecomposeRequest, TranscriptionForm, decompose};
 
-use crate::{
-    ArtifactForm, InvocationError, PreVerifyOutcome, PreVerifyResponse, PublicKeys,
-    UnverifiedSignature, VerifierOptions, VerifierState,
-};
+use crate::{ArtifactForm, PreVerifyOutcome, PreVerifyResponse, UnverifiedSignature};
 
 fn preverify_outcome_from_decompose(
     outcome: DecomposeOutcome,
@@ -24,8 +22,8 @@ fn preverify_outcome_from_decompose(
     }
 }
 
-fn extract_yaml_metadata(carrier: Vec<u8>) -> Result<UnverifiedSignature, PreVerifyOutcome> {
-    let doc = match parse_signature_document(&carrier) {
+fn extract_yaml_metadata(carrier: &[u8]) -> Result<UnverifiedSignature, PreVerifyOutcome> {
+    let doc = match parse_signature_document(carrier) {
         Ok(d) => d,
         Err(_) => return Err(PreVerifyOutcome::MetadataParseFailure),
     };
@@ -37,7 +35,7 @@ fn extract_yaml_metadata(carrier: Vec<u8>) -> Result<UnverifiedSignature, PreVer
         None => return Err(PreVerifyOutcome::MetadataParseFailure),
     };
     if let Some(ref keyid) = doc.keyid
-        && !keyid_is_valid(keyid)
+        && !super::keyid_is_valid(keyid)
     {
         return Err(PreVerifyOutcome::MetadataParseFailure);
     }
@@ -52,26 +50,22 @@ fn extract_yaml_metadata(carrier: Vec<u8>) -> Result<UnverifiedSignature, PreVer
     })
 }
 
-/// `keyid` must be 1..=1024 UTF-8 octets without CR or LF.
-pub(crate) fn keyid_is_valid(keyid: &str) -> bool {
-    let len = keyid.len();
-    (1..=1024).contains(&len) && !keyid.contains(['\r', '\n'])
-}
-
 pub(crate) fn pre_verify_yaml(
     artifact: &[u8],
     allow_unsigned: bool,
     _include_parser_observations: bool,
-) -> PreVerifyResponse {
+) -> PreVerifyResponse<'_> {
     let resp = decompose(&DecomposeRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         artifact,
         form: TranscriptionForm::Yaml,
         outer_conformance: None,
     });
     let structural = match resp {
-        yaml_sigil_transcription::DecomposeResponse::Structural(s) => s,
-        yaml_sigil_transcription::DecomposeResponse::Invocation(_) => {
+        Ok(s) => s,
+        Err(_) => {
             return PreVerifyResponse {
+                source_artifact: artifact,
                 outcome: PreVerifyOutcome::StructuralFailure,
                 form: ArtifactForm::Yaml,
                 unverified_payload_bytes: None,
@@ -83,6 +77,7 @@ pub(crate) fn pre_verify_yaml(
     let base_outcome = preverify_outcome_from_decompose(structural.outcome, allow_unsigned);
     if base_outcome != PreVerifyOutcome::Ok {
         return PreVerifyResponse {
+            source_artifact: artifact,
             outcome: base_outcome,
             form: ArtifactForm::Yaml,
             unverified_payload_bytes: None,
@@ -92,8 +87,9 @@ pub(crate) fn pre_verify_yaml(
     }
     let payload = structural.payload.expect("ok decompose");
     let carrier = structural.signature_carrier.expect("ok decompose");
-    if validate_payload_stream(&payload).is_err() {
+    if validate_payload_stream(payload).is_err() {
         return PreVerifyResponse {
+            source_artifact: artifact,
             outcome: PreVerifyOutcome::StructuralFailure,
             form: ArtifactForm::Yaml,
             unverified_payload_bytes: None,
@@ -103,6 +99,7 @@ pub(crate) fn pre_verify_yaml(
     }
     match extract_yaml_metadata(carrier) {
         Ok(sig) => PreVerifyResponse {
+            source_artifact: artifact,
             outcome: PreVerifyOutcome::Ok,
             form: ArtifactForm::Yaml,
             unverified_payload_bytes: Some(payload),
@@ -110,6 +107,7 @@ pub(crate) fn pre_verify_yaml(
             parser_observations: Vec::new(),
         },
         Err(o) => PreVerifyResponse {
+            source_artifact: artifact,
             outcome: o,
             form: ArtifactForm::Yaml,
             unverified_payload_bytes: None,
@@ -117,58 +115,6 @@ pub(crate) fn pre_verify_yaml(
             parser_observations: Vec::new(),
         },
     }
-}
-
-#[instrument(level = "debug", skip_all)]
-pub(crate) fn verify_yaml(
-    artifact: &[u8],
-    keys: &PublicKeys<'_>,
-    options: &VerifierOptions,
-    include_parser_observations: bool,
-) -> Result<(VerifierState, Vec<String>), InvocationError> {
-    let pre = pre_verify_yaml(artifact, false, include_parser_observations);
-    let obs = if include_parser_observations {
-        pre.parser_observations.clone()
-    } else {
-        Vec::new()
-    };
-    let state = match pre.outcome {
-        PreVerifyOutcome::Ok => verify_from_pre_verify(&pre, keys, options)?,
-        PreVerifyOutcome::Unsigned => VerifierState::Unsigned,
-        PreVerifyOutcome::StructuralFailure | PreVerifyOutcome::MetadataParseFailure => {
-            VerifierState::MalformedAttemptedSigned
-        }
-    };
-    Ok((state, obs))
-}
-
-pub(crate) fn verify_from_pre_verify(
-    pre: &PreVerifyResponse,
-    keys: &PublicKeys<'_>,
-    options: &VerifierOptions,
-) -> Result<VerifierState, InvocationError> {
-    if pre.form != ArtifactForm::Yaml || pre.outcome != PreVerifyOutcome::Ok {
-        return Err(InvocationError::InvalidPreVerifyResult);
-    }
-    let payload = pre
-        .unverified_payload_bytes
-        .as_ref()
-        .ok_or(InvocationError::InvalidPreVerifyResult)?;
-    let sig = pre
-        .unverified_signature
-        .as_ref()
-        .ok_or(InvocationError::InvalidPreVerifyResult)?;
-    let wire = match sig.algorithm {
-        AlgorithmId::Ed25519 => 1,
-        AlgorithmId::EcdsaP256Sha256 => 2,
-    };
-    crate::verify_extracted_signature(
-        payload,
-        wire,
-        sig.signature_octets.as_slice(),
-        keys,
-        options,
-    )
 }
 
 fn decode_sig_b64(s: &str) -> Result<Vec<u8>, ()> {

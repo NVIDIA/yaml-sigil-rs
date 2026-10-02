@@ -45,6 +45,7 @@
 //! let key = ProviderSigningKeyBuilder::ed25519(native_key.verifying_key().as_bytes())
 //!     .build()?;
 //! let request = ProviderSignRequest {
+//!         resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
 //!     payload: b"example: signed",
 //!     algorithm: AlgorithmId::Ed25519,
 //!     key: ProviderSigningKeys::Ed25519(&key),
@@ -64,11 +65,11 @@
 //!                 .map_err(|_| SignError::KeyOperationFailure)?;
 //!         Ok(signature.to_bytes())
 //!     });
-//!     assert!(matches!(outcome, SignOutcome::Success(_)));
+//!     assert!(matches!(outcome, Ok(_)));
 //! }
 //! assert_eq!(calls, 2);
 //! assert_eq!(local_messages.borrow()[0], b"example: signed\n");
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok::<(), Box<dyn core::error::Error>>(())
 //! ```
 //!
 //! # Share a provider across threads
@@ -96,6 +97,7 @@
 //! let key = ProviderSigningKeyBuilder::ed25519(adapter.0.verifying_key().as_bytes())
 //!     .build()?;
 //! let request = ProviderSignRequest {
+//!         resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
 //!     payload: b"shared payload",
 //!     algorithm: AlgorithmId::Ed25519,
 //!     key: ProviderSigningKeys::Ed25519(&key),
@@ -109,18 +111,19 @@
 //!         scope.spawn(|| {
 //!             assert!(matches!(
 //!                 sign_with_provider(&request, signature_signing_callback(&adapter)),
-//!                 SignOutcome::Success(_),
+//!                 Ok(_),
 //!             ));
 //!         });
 //!     }
 //! });
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok::<(), Box<dyn core::error::Error>>(())
 //! ```
 //!
 //! These callbacks supply only cryptography. The separate high-level
 //! [`crate::Signer`] trait owns the complete signing operation.
 
-use std::fmt;
+use alloc::vec::Vec;
+use core::fmt;
 
 use thiserror::Error;
 use yaml_sigil_traits::AlgorithmId;
@@ -128,11 +131,11 @@ use yaml_sigil_traits::signing::{
     SignRequest as GenericSignRequest, SigningKey as GenericSigningKey,
 };
 
-use crate::SignError;
-use crate::provider_crypto::{
+use super::provider_crypto::{
     ProviderPublicKey, provider_signature_is_structurally_valid, resolve_provider_public_key,
     verify_provider_signature,
 };
+use crate::SignError;
 
 /// Why a provider signing key could not be constructed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

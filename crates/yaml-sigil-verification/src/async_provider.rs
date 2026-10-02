@@ -16,13 +16,14 @@
 //! wrappers use a private boxed handle and box one future per verification.
 //! Factory binding and the public extension traits use native returned futures.
 //!
-//! Parsing and structural checks run locally before the awaited operation.
-//! Apply [`crate::ArtifactResourceLimits::check_input_size`] to the original
-//! artifact, or use bounded pre-verification, before artifact-dependent remote
-//! work. Timeouts, retries, blocking-pool placement, and remote cancellation
+//! The operation's options admit the original artifact under its resource policy
+//! before local parsing and artifact-dependent remote work. Pre-verification
+//! handoffs retain the original encoded input for that check. Timeouts, retries,
+//! blocking-pool placement, and remote cancellation
 //! belong to the adapter or caller. No library runtime is required.
 
-use std::{fmt, future::Future, marker::PhantomData, pin::Pin};
+use alloc::{boxed::Box, vec::Vec};
+use core::{fmt, future::Future, marker::PhantomData, pin::Pin};
 
 use yaml_sigil_core::AlgorithmId;
 use yaml_sigil_traits::verification::PublicKeys as GenericPublicKeys;
@@ -36,10 +37,10 @@ use crate::provider::{
     validate_public_key,
 };
 use crate::{
-    ArtifactForm, AsyncVerifier, InvocationError, PreVerifyOutcome, PreVerifyResponse,
-    ProviderKeyBindingError, ProviderKeyBindingErrorKind, ProviderQualificationErrorKind,
-    ProviderQualificationStatus, ProviderVerificationOutcome, VerifierCapabilities,
-    VerifierOptions, VerifierState, VerifyResult,
+    ArtifactForm, AsyncVerifier, InvocationError, PreVerifyOptions, PreVerifyOutcome,
+    PreVerifyResponse, ProviderKeyBindingError, ProviderKeyBindingErrorKind,
+    ProviderQualificationErrorKind, ProviderQualificationStatus, ProviderVerificationOutcome,
+    VerifierCapabilities, VerifierOptions, VerifierState, VerifyError, VerifyResult,
 };
 
 /// A key-bound verification operation that may suspend.
@@ -269,7 +270,7 @@ pub struct UnqualifiedAsyncProviderVerifyingKey<'a> {
     inner: BoundVerifier<'a>,
 }
 
-trait BoundKey: crate::Ed25519KeyValidation + crate::P256KeyValidation + Sync {
+trait BoundKey: super::Ed25519KeyValidation + super::P256KeyValidation + Sync {
     fn inner(&self) -> &BoundVerifier<'_>;
 }
 
@@ -280,19 +281,19 @@ macro_rules! bound_key {
                 &self.inner
             }
         }
-        impl crate::Ed25519KeyValidation for $name<'_> {
+        impl super::Ed25519KeyValidation for $name<'_> {
             fn is_admissible(&self) -> bool {
                 self.inner.algorithm == AlgorithmId::Ed25519
-                    && crate::crypto::provider_public_key_is_admissible(
+                    && super::crypto::provider_public_key_is_admissible(
                         AlgorithmId::Ed25519,
                         &self.inner.canonical_public_key,
                     )
             }
         }
-        impl crate::P256KeyValidation for $name<'_> {
+        impl super::P256KeyValidation for $name<'_> {
             fn is_admissible(&self) -> bool {
                 self.inner.algorithm == AlgorithmId::EcdsaP256Sha256
-                    && crate::crypto::provider_public_key_is_admissible(
+                    && super::crypto::provider_public_key_is_admissible(
                         AlgorithmId::EcdsaP256Sha256,
                         &self.inner.canonical_public_key,
                     )
@@ -320,11 +321,11 @@ pub type UnqualifiedAsyncProviderPublicKeys<'a> = GenericPublicKeys<
     UnqualifiedAsyncProviderVerifyingKey<'a>,
 >;
 
-async fn verify_from_pre<K: BoundKey>(
-    pre: &PreVerifyResponse,
+async fn verify_from_pre<'input, K: BoundKey>(
+    pre: &PreVerifyResponse<'input>,
     keys: &GenericPublicKeys<'_, K, K>,
-    options: &VerifierOptions,
-) -> Result<VerifierState, InvocationError> {
+    options: &VerifierOptions<'_>,
+) -> Result<VerifierState<'input>, InvocationError> {
     if !options.algorithm_parameters.is_empty() {
         return Err(InvocationError::InvalidAlgorithmParameters);
     }
@@ -333,7 +334,6 @@ async fn verify_from_pre<K: BoundKey>(
     }
     let payload = pre
         .unverified_payload_bytes
-        .as_ref()
         .ok_or(InvocationError::InvalidPreVerifyResult)?;
     let signature = pre
         .unverified_signature
@@ -343,41 +343,43 @@ async fn verify_from_pre<K: BoundKey>(
         AlgorithmId::Ed25519 => 1,
         AlgorithmId::EcdsaP256Sha256 => 2,
     };
-    let (key, octets) = match crate::prepare_signature_verification(
+    let (key, octets) = match super::prepare_signature_verification(
         wire_algorithm,
         &signature.signature_octets,
         keys,
         options,
     )? {
-        crate::PreparedVerification::Complete(state) => return Ok(state),
-        crate::PreparedVerification::Ed25519(key, octets)
-        | crate::PreparedVerification::P256(key, octets) => (key.inner(), octets),
+        super::PreparedVerification::Complete(state) => return Ok(state),
+        super::PreparedVerification::Ed25519(key, octets)
+        | super::PreparedVerification::P256(key, octets) => (key.inner(), octets),
     };
     let outcome = key.verifier.verify(payload, octets).await;
-    crate::verification_state_from_outcome(
-        crate::provider_outcome(outcome),
+    super::verification_state_from_outcome(
+        super::provider_outcome(outcome),
         payload,
         signature.algorithm,
     )
 }
 
-async fn verify_metadata<K: BoundKey>(
-    input: &[u8],
+async fn verify_metadata<'input, K: BoundKey>(
+    input: &'input [u8],
     form: ArtifactForm,
     keys: &GenericPublicKeys<'_, K, K>,
-    options: VerifierOptions,
-    include_parser_observations: bool,
-) -> Result<VerifyResult, InvocationError> {
-    if !crate::verifier_capabilities()
-        .supported_forms
-        .contains(&form)
-    {
-        return Err(InvocationError::InvalidOrUnsupportedForm);
-    }
-    if !options.algorithm_parameters.is_empty() {
-        return Err(InvocationError::InvalidAlgorithmParameters);
-    }
-    let pre = crate::pre_verify(input, form, false, include_parser_observations);
+    options: VerifierOptions<'_>,
+) -> Result<VerifyResult<'input>, VerifyError> {
+    options
+        .resource_limits
+        .check_input_size(super::resource_form(form), input)?;
+    super::validate_verify_options(form, &options)?;
+    let pre = crate::pre_verify(
+        input,
+        form,
+        PreVerifyOptions {
+            allow_unsigned: false,
+            include_parser_observations: options.include_parser_observations,
+            resource_limits: options.resource_limits.clone(),
+        },
+    )?;
     let state = match pre.outcome {
         PreVerifyOutcome::Ok => verify_from_pre(&pre, keys, &options).await?,
         PreVerifyOutcome::Unsigned => VerifierState::Unsigned,
@@ -387,84 +389,69 @@ async fn verify_metadata<K: BoundKey>(
     };
     Ok(VerifyResult {
         state,
-        parser_observations: if include_parser_observations {
-            pre.parser_observations
+        parser_observations: pre.parser_observations,
+    })
+}
+async fn from_pre<'input, K: BoundKey>(
+    pre: &PreVerifyResponse<'input>,
+    keys: &GenericPublicKeys<'_, K, K>,
+    options: VerifierOptions<'_>,
+) -> Result<VerifyResult<'input>, VerifyError> {
+    options
+        .resource_limits
+        .check_input_size(super::resource_form(pre.form), pre.source_artifact)?;
+    super::validate_verify_options(pre.form, &options)?;
+    let state = verify_from_pre(pre, keys, &options).await?;
+    Ok(VerifyResult {
+        state,
+        parser_observations: if options.include_parser_observations {
+            pre.parser_observations.clone()
         } else {
             Vec::new()
         },
     })
 }
-
 /// Await verification through a qualified provider. Its verdict is authoritative.
-pub async fn verify_with_async_provider(
-    input: &[u8],
+pub async fn verify_with_async_provider<'input>(
+    input: &'input [u8],
     form: ArtifactForm,
     keys: &AsyncProviderPublicKeys<'_>,
-    options: VerifierOptions,
-) -> Result<VerifierState, InvocationError> {
-    verify_metadata(input, form, keys, options, false)
-        .await
-        .map(|result| result.state)
+    options: VerifierOptions<'_>,
+) -> Result<VerifyResult<'input>, VerifyError> {
+    verify_metadata(input, form, keys, options).await
 }
-/// Await qualified verification with optional parser observations.
-pub async fn verify_with_async_provider_and_metadata(
-    input: &[u8],
-    form: ArtifactForm,
+/// Await qualified verification of a pre-verification response.
+pub async fn verify_from_pre_verify_with_async_provider<'input>(
+    pre: &PreVerifyResponse<'input>,
     keys: &AsyncProviderPublicKeys<'_>,
-    options: VerifierOptions,
-    include_parser_observations: bool,
-) -> Result<VerifyResult, InvocationError> {
-    verify_metadata(input, form, keys, options, include_parser_observations).await
-}
-/// Await only qualified cryptographic verification of a pre-verification response.
-pub async fn verify_from_pre_verify_with_async_provider(
-    pre: &PreVerifyResponse,
-    keys: &AsyncProviderPublicKeys<'_>,
-    options: VerifierOptions,
-) -> Result<VerifierState, InvocationError> {
-    verify_from_pre(pre, keys, &options).await
+    options: VerifierOptions<'_>,
+) -> Result<VerifyResult<'input>, VerifyError> {
+    from_pre(pre, keys, options).await
 }
 /// Await verification through an explicitly unqualified provider.
-pub async fn verify_with_unqualified_async_provider(
-    input: &[u8],
+pub async fn verify_with_unqualified_async_provider<'input>(
+    input: &'input [u8],
     form: ArtifactForm,
     keys: &UnqualifiedAsyncProviderPublicKeys<'_>,
-    options: VerifierOptions,
-) -> Result<VerifierState, InvocationError> {
-    verify_metadata(input, form, keys, options, false)
-        .await
-        .map(|result| result.state)
+    options: VerifierOptions<'_>,
+) -> Result<VerifyResult<'input>, VerifyError> {
+    verify_metadata(input, form, keys, options).await
 }
-/// Await unqualified verification with optional parser observations.
-pub async fn verify_with_unqualified_async_provider_and_metadata(
-    input: &[u8],
-    form: ArtifactForm,
+/// Await unqualified verification of a pre-verification response.
+pub async fn verify_from_pre_verify_with_unqualified_async_provider<'input>(
+    pre: &PreVerifyResponse<'input>,
     keys: &UnqualifiedAsyncProviderPublicKeys<'_>,
-    options: VerifierOptions,
-    include_parser_observations: bool,
-) -> Result<VerifyResult, InvocationError> {
-    verify_metadata(input, form, keys, options, include_parser_observations).await
-}
-/// Await unqualified cryptographic verification after pre-verification.
-pub async fn verify_from_pre_verify_with_unqualified_async_provider(
-    pre: &PreVerifyResponse,
-    keys: &UnqualifiedAsyncProviderPublicKeys<'_>,
-    options: VerifierOptions,
-) -> Result<VerifierState, InvocationError> {
-    verify_from_pre(pre, keys, &options).await
+    options: VerifierOptions<'_>,
+) -> Result<VerifyResult<'input>, VerifyError> {
+    from_pre(pre, keys, options).await
 }
 
-/// Stateless [`AsyncVerifier`] facade accepting qualified async provider keys.
-///
-/// Capabilities describe artifact processing, not a factory's qualification.
-/// Use its `status` method for slot evidence. Apply input limits before these
-/// trait operations, which retain the existing unbounded resource contract.
+/// Stateless async verifier accepting qualified provider keys.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProviderAsyncVerifier<'key>(PhantomData<&'key ()>);
-/// Stateless [`AsyncVerifier`] facade accepting explicitly unqualified async keys.
+/// Stateless async verifier accepting explicitly unqualified provider keys.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UnqualifiedProviderAsyncVerifier<'key>(PhantomData<&'key ()>);
-
 macro_rules! verifier_facade {
     ($facade:ident, $key:ident) => {
         impl<'key> AsyncVerifier for $facade<'key> {
@@ -473,43 +460,38 @@ macro_rules! verifier_facade {
             fn capabilities(&self) -> VerifierCapabilities {
                 crate::verifier_capabilities()
             }
-            async fn pre_verify(
-                &self,
-                input: &[u8],
+            async fn pre_verify<'call, 'input: 'call>(
+                &'call self,
+                input: &'input [u8],
                 form: ArtifactForm,
-                allow_unsigned: bool,
-                observations: bool,
-            ) -> PreVerifyResponse {
-                crate::pre_verify(input, form, allow_unsigned, observations)
+                options: PreVerifyOptions,
+            ) -> Result<PreVerifyResponse<'input>, VerifyError> {
+                crate::pre_verify(input, form, options)
             }
-            async fn verify(
-                &self,
-                input: &[u8],
+            async fn verify<'call, 'input: 'call>(
+                &'call self,
+                input: &'input [u8],
                 form: ArtifactForm,
-                keys: &GenericPublicKeys<'_, Self::Ed25519VerifyingKey, Self::P256VerifyingKey>,
-                options: VerifierOptions,
-            ) -> Result<VerifierState, InvocationError> {
-                verify_metadata(input, form, keys, options, false)
-                    .await
-                    .map(|result| result.state)
+                keys: &'call GenericPublicKeys<
+                    '_,
+                    Self::Ed25519VerifyingKey,
+                    Self::P256VerifyingKey,
+                >,
+                options: VerifierOptions<'call>,
+            ) -> Result<VerifyResult<'input>, VerifyError> {
+                verify_metadata(input, form, keys, options).await
             }
-            async fn verify_with_metadata(
-                &self,
-                input: &[u8],
-                form: ArtifactForm,
-                keys: &GenericPublicKeys<'_, Self::Ed25519VerifyingKey, Self::P256VerifyingKey>,
-                options: VerifierOptions,
-                observations: bool,
-            ) -> Result<VerifyResult, InvocationError> {
-                verify_metadata(input, form, keys, options, observations).await
-            }
-            async fn verify_from_pre_verify(
-                &self,
-                pre: &PreVerifyResponse,
-                keys: &GenericPublicKeys<'_, Self::Ed25519VerifyingKey, Self::P256VerifyingKey>,
-                options: VerifierOptions,
-            ) -> Result<VerifierState, InvocationError> {
-                verify_from_pre(pre, keys, &options).await
+            async fn verify_from_pre_verify<'call, 'input: 'call>(
+                &'call self,
+                pre: &'call PreVerifyResponse<'input>,
+                keys: &'call GenericPublicKeys<
+                    '_,
+                    Self::Ed25519VerifyingKey,
+                    Self::P256VerifyingKey,
+                >,
+                options: VerifierOptions<'call>,
+            ) -> Result<VerifyResult<'input>, VerifyError> {
+                from_pre(pre, keys, options).await
             }
         }
     };

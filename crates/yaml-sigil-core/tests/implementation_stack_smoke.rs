@@ -32,7 +32,13 @@ fn capability_protobuf_facade_decode_encode_roundtrip() {
 
     let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
     let outer = SignedYamlArtifact::new(b"k: v\n".to_vec(), Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
-    let back = decode_signed_yaml_artifact(&wire).unwrap();
+    let wire = encode_signed_yaml_artifact(
+        &outer,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
+    let back =
+        decode_signed_yaml_artifact(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
     assert_eq!(back.payload(), outer.payload());
 }

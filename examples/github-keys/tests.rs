@@ -6,8 +6,8 @@ use ed25519_dalek::SigningKey as Ed25519SigningKey;
 use russh::keys::ssh_key;
 use std::fs;
 use std::path::Path;
-use yaml_sigil_signing::v1alpha1::{SignYamlParams, SigningKey, sign_yaml};
-use yaml_sigil_verification::v1alpha1::pre_verify_yaml;
+use yaml_sigil_signing::v1alpha1::{SignRequest, SigningKey, sign as sign_request};
+use yaml_sigil_verification::v1alpha1::pre_verify;
 
 #[path = "agent_tests.rs"]
 mod agent_tests;
@@ -53,13 +53,17 @@ fn candidates(key: &PrivateKey) -> Vec<Candidate> {
 }
 
 fn sign(payload: &[u8], key: &PrivateKey, keyid: Option<&str>) -> Vec<u8> {
-    sign_yaml(&SignYamlParams {
+    sign_request(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload,
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&native(key)),
         keyid,
         append_missing_final_newline: true,
     })
+    .map(|success| success.artifact)
     .unwrap()
 }
 
@@ -528,11 +532,20 @@ async fn file_signing_and_verification_use_the_cli_operations() {
     .unwrap();
     let artifact = fs::read(&destination).unwrap();
     assert_eq!(
-        pre_verify_yaml(&artifact, false)
-            .unverified_signature
-            .unwrap()
-            .keyid
-            .as_deref(),
+        pre_verify(
+            &artifact,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: false,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+        .unverified_signature
+        .unwrap()
+        .keyid
+        .as_deref(),
         Some(KEY_ID)
     );
     assert_eq!(
@@ -743,11 +756,20 @@ async fn authentication_and_signing_registrations_both_sign_and_verify() {
         .unwrap();
         assert_eq!(calls.get(), 2);
         assert_eq!(
-            pre_verify_yaml(&artifact, false)
-                .unverified_signature
-                .unwrap()
-                .keyid
-                .as_deref(),
+            pre_verify(
+                &artifact,
+                yaml_sigil_traits::verification::ArtifactForm::Yaml,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+                }
+            )
+            .unwrap()
+            .unverified_signature
+            .unwrap()
+            .keyid
+            .as_deref(),
             Some(urls[registered].as_str())
         );
         let verified = verify_offline(&artifact, &endpoint(), fetch).unwrap();
@@ -824,10 +846,19 @@ async fn tampering_wrong_keys_and_lookup_failures_do_not_verify() {
     assert!(verify_offline(&artifact, &endpoint(), |_| bail!("network unavailable")).is_err());
     assert!(verify_offline(&artifact, &endpoint(), |_| Ok(vec![])).is_err());
 
-    let mut signature = pre_verify_yaml(&artifact, false)
-        .unverified_signature
-        .unwrap()
-        .signature_octets;
+    let mut signature = pre_verify(
+        &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        yaml_sigil_traits::verification::PreVerifyOptions {
+            allow_unsigned: false,
+            include_parser_observations: false,
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+        },
+    )
+    .unwrap()
+    .unverified_signature
+    .unwrap()
+    .signature_octets;
     let original = URL_SAFE_NO_PAD.encode(&signature);
     signature[32] ^= 1; // Change a low scalar bit while retaining a complete signature.
     let changed = String::from_utf8(artifact.clone())
@@ -874,23 +905,29 @@ async fn p256_adaptation_uses_existing_library_apis_but_is_not_a_cli_mode() {
     .unwrap();
     let verifying = resolve_ssh_p256(&ssh_public).unwrap();
     assert!(resolve_ssh_p256(&export(&private(7))).is_err());
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign_request(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: PAYLOAD,
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&signing),
         keyid: Some(KEY_ID),
         append_missing_final_newline: true,
     })
+    .map(|success| success.artifact)
     .unwrap();
     assert!(matches!(
-        yaml_sigil_verification::v1alpha1::verify_yaml(
+        yaml_sigil_verification::v1alpha1::verify(
             &artifact,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
             &PublicKeys {
                 ed25519: None,
                 p256: Some(&verifying)
             },
             VerifierOptions::default()
         )
+        .map(|result| result.state)
         .unwrap(),
         VerifierState::Verified { .. }
     ));
@@ -974,11 +1011,20 @@ async fn direct_public_key_signing_and_verification_never_fetch_github_keys() {
     .unwrap();
     let fingerprint = key.fingerprint(HashAlg::Sha256).to_string();
     assert_eq!(
-        pre_verify_yaml(&artifact, false)
-            .unverified_signature
-            .unwrap()
-            .keyid
-            .as_deref(),
+        pre_verify(
+            &artifact,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: false,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+        .unverified_signature
+        .unwrap()
+        .keyid
+        .as_deref(),
         None
     );
     let command = Cli::try_parse_from([

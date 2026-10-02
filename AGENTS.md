@@ -147,8 +147,9 @@ YamlSigil `v1alpha1` defines no maximum complete artifact size. Treat an
 opt-in whole-artifact limit as implementation-local operational hardening, not
 a conformance requirement. `ArtifactResourceLimits::default()` selects
 `DEFAULT_MAX_ARTIFACT_BYTES` only when a caller explicitly passes it to a
-resource-aware operation. Existing entry points remain unbounded by that
-policy. Keep the 16,384-octet YAML signature-carrier constraint separate.
+primary request, options, or codec argument. Operation defaults remain
+unbounded by that policy. Keep the 16,384-octet YAML signature-carrier
+constraint separate.
 Publishing the bounded API does not remediate an existing caller; adoption at
 the affected trust boundary or evidence of an equivalent earlier raw-input
 bound is required.

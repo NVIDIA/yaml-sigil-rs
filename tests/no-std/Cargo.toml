@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "yaml-sigil-no-std-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+yaml-sigil-core = { path = "../../crates/yaml-sigil-core", default-features = false }
+yaml-sigil-signing = { path = "../../crates/yaml-sigil-signing", default-features = false }
+yaml-sigil-transcription = { path = "../../crates/yaml-sigil-transcription", default-features = false }
+yaml-sigil-verification = { path = "../../crates/yaml-sigil-verification", default-features = false }
+yaml-sigil-traits = { version = "~0.4.1", default-features = false }
+ed25519-dalek = { version = "=3.0.0", default-features = false, optional = true }
+p256 = { version = "=0.14.0", default-features = false, features = ["ecdsa"], optional = true }
+rand_core = { version = "0.10", default-features = false, optional = true }
+
+[features]
+default = []
+bare = ["yaml-sigil-core/p256-encoding"]
+alloc = ["yaml-sigil-core/alloc", "yaml-sigil-signing/alloc", "yaml-sigil-transcription/alloc", "yaml-sigil-verification/alloc", "yaml-sigil-traits/alloc", "dep:ed25519-dalek", "dep:p256", "dep:rand_core"]
+yaml = ["alloc", "yaml-sigil-core/yaml", "yaml-sigil-signing/yaml", "yaml-sigil-transcription/yaml", "yaml-sigil-verification/yaml"]
+protobuf = ["alloc", "yaml-sigil-core/protobuf", "yaml-sigil-signing/protobuf", "yaml-sigil-transcription/protobuf", "yaml-sigil-verification/protobuf"]
+
+[[bin]]
+name = "allocator-free"
+path = "src/allocator_free.rs"
+required-features = ["bare"]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

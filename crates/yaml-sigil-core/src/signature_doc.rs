@@ -3,6 +3,11 @@
 
 //! Strict signature-document subset: serde model + YAML parser.
 
+use alloc::{
+    format,
+    string::{String, ToString},
+};
+
 use base64::Engine;
 
 use crate::algorithm::{AlgorithmId, SCHEMA_V1ALPHA1};
@@ -79,10 +84,10 @@ impl SignatureDocument {
 /// sizes, documents, merge keys, and alias expansion. It rejects anchors,
 /// aliases, and custom tags. The byte bound applies to the markerless YAML
 /// signature carrier, not the complete artifact.
-#[tracing::instrument(level = "debug", skip(bytes), fields(len = bytes.len()))]
+#[cfg_attr(feature = "std", tracing::instrument(level = "debug", skip(bytes), fields(len = bytes.len())))]
 pub fn parse_signature_document(bytes: &[u8]) -> Result<SignatureDocument, CoreError> {
     ensure_signature_document_byte_budget(bytes)?;
-    let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
+    let text = core::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
     let config = signature_document_parser_config();
     let documents = noyalib::load_all_with_config(text, &config)
         .map_err(|e| CoreError::SignatureYaml(e.to_string()))?;
@@ -136,9 +141,9 @@ fn ensure_signature_document_byte_budget(bytes: &[u8]) -> Result<(), CoreError> 
 /// the complete carrier.
 pub fn signature_document_top_level_keys(
     bytes: &[u8],
-) -> Result<std::collections::BTreeSet<String>, CoreError> {
+) -> Result<alloc::collections::BTreeSet<String>, CoreError> {
     ensure_signature_document_byte_budget(bytes)?;
-    let text = std::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
+    let text = core::str::from_utf8(bytes).map_err(|_| CoreError::InvalidUtf8)?;
     Ok(top_level_keys_flat_line_scan(text))
 }
 
@@ -176,8 +181,8 @@ fn signature_key_decoder_config() -> noyalib::ParserConfig {
 }
 
 /// Top-level keys from a flat YAML mapping (Tier A signature-document shape).
-fn top_level_keys_flat_line_scan(text: &str) -> std::collections::BTreeSet<String> {
-    let mut keys = std::collections::BTreeSet::new();
+fn top_level_keys_flat_line_scan(text: &str) -> alloc::collections::BTreeSet<String> {
+    let mut keys = alloc::collections::BTreeSet::new();
     for line in text.lines() {
         let trimmed = line.trim_start();
         if trimmed.is_empty() || trimmed.starts_with('#') {

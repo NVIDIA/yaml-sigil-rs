@@ -3,6 +3,11 @@
 
 //! Vendored JSON Schema validation for parsed [`SignatureDocument`] values.
 
+use alloc::{
+    format,
+    string::{String, ToString},
+};
+
 use std::sync::OnceLock;
 
 use serde_json::Value as JsonValue;

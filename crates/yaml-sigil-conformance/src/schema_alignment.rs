@@ -119,7 +119,17 @@ const EMPTY_SIGNATURE_FIXTURES: &[SchemaFixture] = &[
 pub fn run_schema_alignment_suite<V: ConformanceVerifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
-        let pre = v.pre_verify(&bytes, fx.form, false, false);
+        let pre = v
+            .pre_verify(
+                &bytes,
+                fx.form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .unwrap();
         match fx.expect {
             Expectation::Accepted => assert_eq!(
                 pre.outcome,
@@ -157,6 +167,7 @@ fn assert_empty_signature_precedence<V: ConformanceVerifier>(v: &V) {
         };
         let state = v
             .verify(&bytes, fx.form, &keys, options)
+            .map(|result| result.state)
             .unwrap_or_else(|error| {
                 panic!(
                     "{}/{}: unexpected invocation error {error:?}",
@@ -177,7 +188,18 @@ fn assert_empty_signature_precedence<V: ConformanceVerifier>(v: &V) {
 pub async fn run_schema_alignment_suite_async<V: ConformanceAsyncVerifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
-        let pre = v.pre_verify(&bytes, fx.form, false, false).await;
+        let pre = v
+            .pre_verify(
+                &bytes,
+                fx.form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .await
+            .unwrap();
         match fx.expect {
             Expectation::Accepted => assert_eq!(
                 pre.outcome,
@@ -216,6 +238,7 @@ async fn assert_empty_signature_precedence_async<V: ConformanceAsyncVerifier>(v:
         let state = v
             .verify(&bytes, fx.form, &keys, options)
             .await
+            .map(|result| result.state)
             .unwrap_or_else(|error| {
                 panic!(
                     "{}/{} (async): unexpected invocation error {error:?}",

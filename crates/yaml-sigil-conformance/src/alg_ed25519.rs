@@ -12,7 +12,7 @@
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_core::AlgorithmId;
-use yaml_sigil_signing::{OutputForm, SignInvocationError, SignOutcome, SignRequest, SigningKey};
+use yaml_sigil_signing::{OutputForm, SignInvocationError, SignRequest, SigningKey};
 use yaml_sigil_verification::{
     ArtifactForm, InvocationError, PublicKeys, VerifierOptions, VerifierState,
     resolve_ed25519_verifying_key,
@@ -65,6 +65,7 @@ fn happy_path_vectors<V: ConformanceVerifier>(v: &V) {
             &keys,
             VerifierOptions::default(),
         )
+        .map(|result| result.state)
         .expect("RFC 8032 Test 1 protobuf verify should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -74,6 +75,7 @@ fn happy_path_vectors<V: ConformanceVerifier>(v: &V) {
     let yaml = load_bytes(CATEGORY, "rfc8032-vec1-empty-message.yaml");
     let state = v
         .verify(&yaml, ArtifactForm::Yaml, &keys, VerifierOptions::default())
+        .map(|result| result.state)
         .expect("RFC 8032 Test 1 YAML verify should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -96,6 +98,7 @@ fn happy_path_vectors<V: ConformanceVerifier>(v: &V) {
             &keys2,
             VerifierOptions::default(),
         )
+        .map(|result| result.state)
         .expect("RFC 8032 Test 2 protobuf verify should not return invocation error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -127,6 +130,7 @@ fn noncanonical_encodings<V: ConformanceVerifier>(v: &V) {
                 &keys,
                 VerifierOptions::default(),
             )
+            .map(|result| result.state)
             .expect("noncanonical fixture should not return invocation error");
         assert_eq!(
             state,
@@ -173,6 +177,7 @@ fn stable_resign<S: ConformanceSigner>(s: &S) {
     let sk = EdSk::from_bytes(&seed_arr);
 
     let req = SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
@@ -182,11 +187,11 @@ fn stable_resign<S: ConformanceSigner>(s: &S) {
         algorithm_parameters: &[],
     };
     let out1 = match s.sign(&req) {
-        SignOutcome::Success(s) => s,
+        Ok(s) => s,
         other => panic!("first sign should succeed, got {other:?}"),
     };
     let out2 = match s.sign(&req) {
-        SignOutcome::Success(s) => s,
+        Ok(s) => s,
         other => panic!("second sign should succeed, got {other:?}"),
     };
     assert_eq!(
@@ -213,14 +218,20 @@ fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(
     let keys = keys_with_ed25519(&vk);
     let proto = load_bytes(CATEGORY, "rfc8032-vec1-empty-message.binpb");
     let opts = VerifierOptions {
-        algorithm_parameters: vec![0x00],
+        algorithm_parameters: &[0x00],
         ..VerifierOptions::default()
     };
     let err = v
         .verify(&proto, ArtifactForm::Proto, &keys, opts)
+        .map(|result| result.state)
         .expect_err("non-empty algorithm_parameters must yield invocation error");
     assert!(
-        matches!(err, InvocationError::InvalidAlgorithmParameters),
+        matches!(
+            err,
+            yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::InvalidAlgorithmParameters
+            )
+        ),
         "Verify: expected InvalidAlgorithmParameters, got {err:?}"
     );
 
@@ -229,6 +240,7 @@ fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(
     let sk = EdSk::from_bytes(&[0u8; 32]);
     let bad = [0u8];
     let req = SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
@@ -238,7 +250,9 @@ fn algorithm_parameters_rejection<V: ConformanceVerifier, S: ConformanceSigner>(
         algorithm_parameters: &bad,
     };
     match s.sign(&req) {
-        SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters) => {}
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidAlgorithmParameters,
+        )) => {}
         other => panic!("Sign: expected InvalidAlgorithmParameters, got {other:?}"),
     }
 }
@@ -270,6 +284,7 @@ async fn happy_path_vectors_async<V: ConformanceAsyncVerifier>(v: &V) {
             VerifierOptions::default(),
         )
         .await
+        .map(|result| result.state)
         .expect("RFC 8032 Test 1 protobuf verify should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -280,6 +295,7 @@ async fn happy_path_vectors_async<V: ConformanceAsyncVerifier>(v: &V) {
     let state = v
         .verify(&yaml, ArtifactForm::Yaml, &keys, VerifierOptions::default())
         .await
+        .map(|result| result.state)
         .expect("RFC 8032 Test 1 YAML verify should not error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -298,6 +314,7 @@ async fn happy_path_vectors_async<V: ConformanceAsyncVerifier>(v: &V) {
             VerifierOptions::default(),
         )
         .await
+        .map(|result| result.state)
         .expect("RFC 8032 Test 2 protobuf verify should not return invocation error");
     assert!(
         matches!(state, VerifierState::Verified { .. }),
@@ -323,6 +340,7 @@ async fn noncanonical_encodings_async<V: ConformanceAsyncVerifier>(v: &V) {
                 VerifierOptions::default(),
             )
             .await
+            .map(|result| result.state)
             .expect("noncanonical fixture should not return invocation error");
         assert_eq!(
             state,
@@ -342,6 +360,7 @@ async fn stable_resign_async<S: ConformanceAsyncSigner>(s: &S) {
     let sk = EdSk::from_bytes(&seed_arr);
 
     let req = SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
@@ -351,11 +370,11 @@ async fn stable_resign_async<S: ConformanceAsyncSigner>(s: &S) {
         algorithm_parameters: &[],
     };
     let out1 = match s.sign(&req).await {
-        SignOutcome::Success(s) => s,
+        Ok(s) => s,
         other => panic!("first sign (async) should succeed, got {other:?}"),
     };
     let out2 = match s.sign(&req).await {
-        SignOutcome::Success(s) => s,
+        Ok(s) => s,
         other => panic!("second sign (async) should succeed, got {other:?}"),
     };
     assert_eq!(
@@ -382,21 +401,28 @@ async fn algorithm_parameters_rejection_async<
     let keys = keys_with_ed25519(&vk);
     let proto = load_bytes(CATEGORY, "rfc8032-vec1-empty-message.binpb");
     let opts = VerifierOptions {
-        algorithm_parameters: vec![0x00],
+        algorithm_parameters: &[0x00],
         ..VerifierOptions::default()
     };
     let err = v
         .verify(&proto, ArtifactForm::Proto, &keys, opts)
         .await
+        .map(|result| result.state)
         .expect_err("non-empty algorithm_parameters must yield invocation error");
     assert!(
-        matches!(err, InvocationError::InvalidAlgorithmParameters),
+        matches!(
+            err,
+            yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::InvalidAlgorithmParameters
+            )
+        ),
         "Verify (async): expected InvalidAlgorithmParameters, got {err:?}"
     );
 
     let sk = EdSk::from_bytes(&[0u8; 32]);
     let bad = [0u8];
     let req = SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
@@ -406,7 +432,9 @@ async fn algorithm_parameters_rejection_async<
         algorithm_parameters: &bad,
     };
     match s.sign(&req).await {
-        SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters) => {}
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidAlgorithmParameters,
+        )) => {}
         other => panic!("Sign (async): expected InvalidAlgorithmParameters, got {other:?}"),
     }
 }

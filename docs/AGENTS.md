@@ -11,6 +11,7 @@ does not directly edit a Markdown file.
 
 | Document | Update when |
 |----------|-------------|
+| [`no-std.md`](./no-std.md) | Feature propagation, allocator requirements, borrowed result lifetimes, primary request/error contracts, entropy sources, or isolated portability validation change. |
 | [`yaml-facade.md`](./yaml-facade.md) | Signature-document parsing, canonical serialization, the public Serde representation, the YAML facade example, or its consumer tests change. |
 | [`protobuf-facade.md`](./protobuf-facade.md) | Public protobuf facade operations, wire interoperability, the Prost example dependency or message declarations, or the core-only consumer tests change. |
 | [`crypto-providers.md`](./crypto-providers.md) | Public crypto types, adapter contracts, qualified or unqualified behavior, async semantics, key binding, error mapping, resource admission, integration examples, qualification call counts, operation costs, or regression coverage change. Update its three-path checklist with the evidence and remaining integrator responsibilities. |

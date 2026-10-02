@@ -3,7 +3,7 @@
 
 //! Artifact decomposition for the signed YAML stream envelope.
 
-use std::ops::Range;
+use core::ops::Range;
 
 use crate::{ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult};
 
@@ -29,7 +29,7 @@ pub enum DecompositionOutcome {
 }
 
 fn utf8_ok(bytes: &[u8]) -> bool {
-    std::str::from_utf8(bytes).is_ok()
+    core::str::from_utf8(bytes).is_ok()
 }
 
 fn bom_at_zero(bytes: &[u8]) -> bool {
@@ -93,11 +93,11 @@ fn find_last_marker(bytes: &[u8]) -> Option<usize> {
 ///
 /// This linear scan accepts a complete YAML artifact and does not impose an
 /// additional whole-artifact size limit. Use
-/// [`decompose_artifact_with_resource_limits`] to apply the shared input
+/// [`decompose_artifact`] to apply the shared input
 /// policy first. The signature-carrier parser applies its separate
 /// 16,384-octet constraint after decomposition.
-#[tracing::instrument(level = "debug", skip(artifact), fields(len = artifact.len()))]
-pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
+#[cfg_attr(feature = "std", tracing::instrument(level = "debug", skip(artifact), fields(len = artifact.len())))]
+fn scan_artifact(artifact: &[u8]) -> DecompositionOutcome {
     if !utf8_ok(artifact) || bom_at_zero(artifact) {
         return DecompositionOutcome::Malformed;
     }
@@ -129,12 +129,12 @@ pub fn decompose_artifact(artifact: &[u8]) -> DecompositionOutcome {
 /// Run artifact decomposition after applying an explicit complete-input policy.
 ///
 /// The raw input length is checked before UTF-8 validation or marker search.
-pub fn decompose_artifact_with_resource_limits(
+pub fn decompose_artifact(
     artifact: &[u8],
     limits: &ArtifactResourceLimits,
 ) -> ArtifactResourceResult<DecompositionOutcome> {
     let artifact = limits.check_input_size(ArtifactResourceForm::Yaml, artifact)?;
-    Ok(decompose_artifact(artifact))
+    Ok(scan_artifact(artifact))
 }
 
 #[cfg(test)]
@@ -143,13 +143,21 @@ mod tests {
 
     #[test]
     fn empty_unsigned() {
-        assert_eq!(decompose_artifact(b""), DecompositionOutcome::Unsigned);
+        assert_eq!(
+            decompose_artifact(b"", &crate::ArtifactResourceLimits::unbounded())
+                .expect("unbounded artifact policy"),
+            DecompositionOutcome::Unsigned
+        );
     }
 
     #[test]
     fn no_marker_unsigned() {
         assert_eq!(
-            decompose_artifact(b"hello: world\n"),
+            decompose_artifact(
+                b"hello: world\n",
+                &crate::ArtifactResourceLimits::unbounded()
+            )
+            .expect("unbounded artifact policy"),
             DecompositionOutcome::Unsigned
         );
     }
@@ -157,9 +165,8 @@ mod tests {
     #[test]
     fn resource_limit_precedes_invalid_yaml_bytes() {
         let limits = crate::ArtifactResourceLimits::unbounded()
-            .with_max_artifact_bytes(std::num::NonZeroUsize::new(2).unwrap());
-        let error =
-            decompose_artifact_with_resource_limits(&[0xff, 0xfe, 0xfd], &limits).unwrap_err();
+            .with_max_artifact_bytes(core::num::NonZeroUsize::new(2).unwrap());
+        let error = decompose_artifact(&[0xff, 0xfe, 0xfd], &limits).unwrap_err();
         assert_eq!(
             error.kind(),
             crate::ArtifactResourceErrorKind::InputArtifactTooLarge
@@ -171,14 +178,19 @@ mod tests {
     fn bom_malformed() {
         let mut v = vec![0xEF, 0xBB, 0xBF];
         v.extend_from_slice(b"a: 1\n");
-        assert_eq!(decompose_artifact(&v), DecompositionOutcome::Malformed);
+        assert_eq!(
+            decompose_artifact(&v, &crate::ArtifactResourceLimits::unbounded())
+                .expect("unbounded artifact policy"),
+            DecompositionOutcome::Malformed
+        );
     }
 
     #[test]
     fn signed_split() {
         let a = b"foo: bar\n---\nschema: YamlSigilSignature.v1alpha1\n\
                   alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\nsignature: eA\n";
-        let r = decompose_artifact(a);
+        let r = decompose_artifact(a, &crate::ArtifactResourceLimits::unbounded())
+            .expect("unbounded artifact policy");
         match r {
             DecompositionOutcome::Signed(s) => {
                 assert_eq!(&a[s.payload], b"foo: bar\n");
@@ -206,7 +218,8 @@ mod tests {
             .windows(4)
             .rposition(|window| window == b"---\n")
             .expect("fixture contains markers");
-        let r = decompose_artifact(a);
+        let r = decompose_artifact(a, &crate::ArtifactResourceLimits::unbounded())
+            .expect("unbounded artifact policy");
         match r {
             DecompositionOutcome::Signed(s) => {
                 assert_eq!(s.payload.end, expected_marker);

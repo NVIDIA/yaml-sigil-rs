@@ -122,7 +122,8 @@ async fn p256_fixtures_preserve_provider_outcomes() {
             VerifierOptions::default(),
         ))
         .await
-        .unwrap();
+        .unwrap()
+        .state;
         let unqualified_result = send_future(UnqualifiedProviderAsyncVerifier::default().verify(
             &artifact,
             form,
@@ -130,7 +131,8 @@ async fn p256_fixtures_preserve_provider_outcomes() {
             VerifierOptions::default(),
         ))
         .await
-        .unwrap();
+        .unwrap()
+        .state;
         assert_eq!(result, unqualified_result, "{file}");
         if verified {
             assert!(matches!(result, VerifierState::Verified { .. }), "{file}");

@@ -11,9 +11,9 @@
 //! # Resource boundaries
 //!
 //! YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
-//! size. The [`resource`] module and `_with_resource_limits` entry points let
-//! callers opt into implementation-local complete-artifact byte limits. The
-//! existing entry points remain unbounded by that policy.
+//! size. The primary codec arguments and operation requests let callers
+//! select implementation-local complete-artifact byte limits. Operation
+//! options default to unbounded; an explicit default resource policy is 4 MiB.
 //!
 //! To enforce a limit, use a resource-aware entry point at the affected trust
 //! boundary or enforce an equivalent earlier bound on the original raw input. The
@@ -22,6 +22,13 @@
 //! address-space limits, allocator limits, and deployment controls still
 //! apply.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(feature = "alloc")]
+extern crate alloc;
+#[cfg(all(test, not(feature = "std")))]
+extern crate std;
+
+#[cfg(feature = "protobuf")]
 mod generated_proto {
     #![allow(clippy::all)]
     #![allow(dead_code)]
@@ -34,16 +41,21 @@ pub mod v1alpha1;
 pub mod algorithm;
 pub mod conformance;
 pub mod decomposition;
+#[cfg(feature = "alloc")]
 pub mod error;
 #[cfg(feature = "p256-encoding")]
 pub mod p256_encoding;
 pub mod payload;
+#[cfg(feature = "protobuf")]
 pub mod pb;
+#[cfg(feature = "protobuf")]
 pub mod proto_outer;
 pub mod resource;
+#[cfg(feature = "yaml")]
 pub mod signature_doc;
 #[cfg(feature = "json-schema-validate")]
 pub mod tier_a_schema;
+#[cfg(feature = "protobuf")]
 pub mod wire;
 
 pub use algorithm::{AlgorithmId, SCHEMA_V1ALPHA1};
@@ -52,33 +64,36 @@ pub use conformance::{
     YamlSignatureDocumentDuplicateKeyPolicy, YamlSignatureDocumentUnknownFieldPolicy,
     yaml_unknown_field_policies,
 };
-pub use decomposition::{
-    DecompositionOutcome, SignatureRanges, decompose_artifact,
-    decompose_artifact_with_resource_limits,
-};
+pub use decomposition::{DecompositionOutcome, SignatureRanges, decompose_artifact};
+#[cfg(feature = "alloc")]
 pub use error::CoreError;
 #[cfg(feature = "p256-encoding")]
 pub use p256_encoding::{
     P256EncodingError, p256_der_signature_to_raw, p256_public_key_to_uncompressed,
 };
 pub use payload::{PayloadInvariantError, validate_payload_stream};
+#[cfg(feature = "protobuf")]
 pub use proto_outer::{
-    ProtoOuterDecomposeOutcome, compose_proto_outer, compose_proto_outer_with_resource_limits,
-    decode_signature_carrier, decompose_proto_outer, decompose_proto_outer_with_resource_limits,
+    ProtoOuterDecomposeOutcome, compose_proto_outer, decode_signature_carrier,
+    decompose_proto_outer,
 };
 pub use resource::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm, ArtifactResourceLimits,
     ArtifactResourceResult, DEFAULT_MAX_ARTIFACT_BYTES,
 };
+#[cfg(feature = "yaml")]
 pub use signature_doc::{
     SignatureDocument, TIER_A_TOP_LEVEL_KEYS, has_unknown_signature_document_fields,
     parse_signature_document, serialize_signature_document, signature_document_top_level_keys,
 };
 #[cfg(feature = "json-schema-validate")]
 pub use tier_a_schema::signature_document_validates_tier_a_schema;
+#[cfg(feature = "protobuf")]
 pub use wire::{
-    ProtoArtifactView, decode_signed_yaml_artifact,
-    decode_signed_yaml_artifact_with_resource_limits, encode_signed_yaml_artifact,
-    encode_signed_yaml_artifact_with_resource_limits, view_signature_carrier,
-    view_signed_yaml_artifact,
+    ProtoArtifactView, decode_signed_yaml_artifact, encode_signed_yaml_artifact,
+    view_signature_carrier, view_signed_yaml_artifact,
+};
+pub use yaml_sigil_traits::codec::{
+    ArtifactDecodeError, ArtifactEncodeError, DecodeError, DecodeErrorKind, EncodeError,
+    EncodeErrorKind,
 };

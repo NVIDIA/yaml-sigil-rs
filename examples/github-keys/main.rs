@@ -29,11 +29,11 @@ use russh::keys::ssh_key::Fingerprint;
 use yaml_sigil_core::v1alpha1::{AlgorithmId, ArtifactResourceLimits};
 use yaml_sigil_signing::v1alpha1::{
     AsyncProviderSignRequest, AsyncProviderSigningKeyBuilder, AsyncProviderSigningKeys, OutputForm,
-    SignOutcome, sign_with_async_provider_and_resource_limits,
+    sign_with_async_provider,
 };
 use yaml_sigil_verification::v1alpha1::{
-    PreVerifyOutcome, PublicKeys, VerifierOptions, VerifierState,
-    pre_verify_yaml_with_resource_limits, verify_from_pre_verify_yaml,
+    PreVerifyOutcome, PublicKeys, VerifierOptions, VerifierState, pre_verify,
+    verify_from_pre_verify,
 };
 
 use github::GitHubAccount;
@@ -198,26 +198,27 @@ async fn run(
             let key = AsyncProviderSigningKeyBuilder::ed25519(&adapter, matched.key.as_bytes())
                 .build()
                 .context("could not bind the SSH-agent public key")?;
-            let signed = sign_with_async_provider_and_resource_limits(
-                &AsyncProviderSignRequest {
-                    payload: &payload,
-                    algorithm: AlgorithmId::Ed25519,
-                    key: AsyncProviderSigningKeys::Ed25519(&key),
-                    // Agent identities and directly supplied keys have no account source.
-                    keyid: matched.source.as_deref(),
-                    append_missing_final_newline: true,
-                    output_form: OutputForm::Yaml,
-                    algorithm_parameters: &[],
-                },
-                &resource_limits(),
-            )
-            .await
-            .context("signed document exceeds the example limit")?
-            .context("could not encode signed YAML")?;
+            let signed = sign_with_async_provider(&AsyncProviderSignRequest {
+                resource_limits: resource_limits(),
+                payload: &payload,
+                algorithm: AlgorithmId::Ed25519,
+                key: AsyncProviderSigningKeys::Ed25519(&key),
+                // Agent identities and directly supplied keys have no account source.
+                keyid: matched.source.as_deref(),
+                append_missing_final_newline: true,
+                output_form: OutputForm::Yaml,
+                algorithm_parameters: &[],
+            })
+            .await;
             let artifact = match signed {
-                SignOutcome::Success(signed) => signed.artifact,
-                SignOutcome::Invocation(error) => bail!("signing invocation failed: {error}"),
-                SignOutcome::Signer(error) => bail!(
+                Ok(signed) => signed.artifact,
+                Err(yaml_sigil_traits::signing::SignError::Resource(error)) => {
+                    bail!("signed document exceeds the example limit: {error}")
+                }
+                Err(yaml_sigil_traits::signing::SignError::Invocation(error)) => {
+                    bail!("signing invocation failed: {error}")
+                }
+                Err(error) => bail!(
                     "SSH-agent signing failed: {error}; check that the agent permits the request and still holds the selected key"
                 ),
             };
@@ -349,8 +350,16 @@ fn verify_artifact<W: Write>(
 ) -> Result<Verified> {
     print_step(progress, 3, 5, "Check signature metadata")?;
     // Pre-verification extracts untrusted metadata; it is not signature success.
-    let pre = pre_verify_yaml_with_resource_limits(artifact, false, &resource_limits())
-        .context("signed document exceeds the example limit")?;
+    let pre = pre_verify(
+        artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        yaml_sigil_traits::verification::PreVerifyOptions {
+            allow_unsigned: false,
+            include_parser_observations: false,
+            resource_limits: resource_limits().clone(),
+        },
+    )
+    .context("signed document exceeds the example limit")?;
     ensure!(
         pre.outcome == PreVerifyOutcome::Ok,
         "artifact cannot be verified: {:?}",
@@ -372,7 +381,7 @@ fn verify_artifact<W: Write>(
     writeln!(progress, "Supported Ed25519 keys: {}.", candidates.len())?;
     print_step(progress, 5, 5, "Verify the signature")?;
     for candidate in candidates {
-        let state = verify_from_pre_verify_yaml(
+        let state = verify_from_pre_verify(
             &pre,
             &PublicKeys {
                 ed25519: Some(&candidate.key),
@@ -383,13 +392,14 @@ fn verify_artifact<W: Write>(
                 ..Default::default()
             },
         )
+        .map(|result| result.state)
         .context("verification invocation failed")?;
         match state {
             VerifierState::Verified { payload, .. } => {
                 // Only bytes returned by Verified have passed the signature check.
                 // The application still owns every decision about their contents.
                 return Ok(Verified {
-                    payload,
+                    payload: payload.to_vec(),
                     fingerprint: candidate.fingerprint,
                     source: candidate.source,
                 });

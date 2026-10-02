@@ -16,14 +16,14 @@
 //! };
 //!
 //! let independent_wire = encode_independent();
-//! let borrowed = SignedYamlArtifactRef::decode(&independent_wire).unwrap();
+//! let borrowed = SignedYamlArtifactRef::decode(&independent_wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded()).unwrap();
 //! assert_eq!(borrowed.payload(), b"message\n");
 //!
 //! let signature =
 //!     YamlSigilSignature::new(AlgorithmId::EcdsaP256Sha256, vec![4, 5, 6]);
 //! let facade_wire =
 //!     SignedYamlArtifact::new(b"other\n".to_vec(), Some(signature))
-//!         .encode_to_vec()
+//!         .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
 //!         .unwrap();
 //! assert_eq!(
 //!     decode_independent(&facade_wire).unwrap(),
@@ -75,27 +75,27 @@ mod tests {
     #[test]
     fn independently_generated_buffa_messages_exchange_bytes_with_the_facade() {
         let independent_wire = super::encode_independent();
-        let borrowed = SignedYamlArtifactRef::decode_with_resource_limits(
-            &independent_wire,
-            &ArtifactResourceLimits::default(),
-        )
-        .unwrap()
-        .unwrap();
+        let borrowed =
+            SignedYamlArtifactRef::decode(&independent_wire, &ArtifactResourceLimits::default())
+                .unwrap();
         let signature = borrowed.signature().unwrap();
         assert_eq!(borrowed.payload(), b"message\n");
         assert_eq!(signature.algorithm(), Some(AlgorithmId::Ed25519));
         assert_eq!(signature.keyid(), Some("key-1"));
         assert_eq!(signature.signature(), [1, 2, 3]);
 
-        let facade_signature =
-            YamlSigilSignature::new(AlgorithmId::EcdsaP256Sha256, vec![4, 5, 6]);
+        let facade_signature = YamlSigilSignature::new(AlgorithmId::EcdsaP256Sha256, vec![4, 5, 6]);
         let facade = SignedYamlArtifact::new(b"other\n".to_vec(), Some(facade_signature));
-        let decoded = super::decode_independent(&facade.encode_to_vec().unwrap()).unwrap();
+        let decoded = super::decode_independent(
+            &facade
+                .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(decoded, (b"other\n".to_vec(), 2, vec![4, 5, 6]));
         assert_eq!(
             borrowed
-                .encode_to_vec_with_resource_limits(&ArtifactResourceLimits::default())
-                .unwrap()
+                .encode_to_vec(&ArtifactResourceLimits::default())
                 .unwrap(),
             independent_wire
         );
