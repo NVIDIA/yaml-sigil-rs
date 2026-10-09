@@ -39,19 +39,23 @@ include = [
 workspace = true
 
 [dependencies]
-base64 = { version = "0.23.1", default-features = false, features = ["std"] }
-curve25519-dalek = { workspace = true }
-ed25519-dalek = { workspace = true }
-p256 = { workspace = true }
-sha2 = { workspace = true }
-signature = { workspace = true }
-tracing = "0.1"
-yaml-sigil-core = { workspace = true, default-features = false, features = ["p256-encoding"] }
+base64 = { workspace = true, optional = true }
+curve25519-dalek = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true, optional = true }
+p256 = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+signature = { workspace = true, optional = true }
+yaml-sigil-core = { workspace = true, default-features = false }
 yaml-sigil-traits = { workspace = true, default-features = false }
 yaml-sigil-transcription = { workspace = true, default-features = false }
 
 [features]
-json-schema-validate = ["yaml-sigil-core/json-schema-validate"]
+default = ["std", "yaml", "protobuf"]
+alloc = ["yaml-sigil-core/alloc", "yaml-sigil-core/p256-encoding", "yaml-sigil-traits/alloc", "yaml-sigil-transcription/alloc", "dep:base64", "dep:curve25519-dalek", "dep:ed25519-dalek", "dep:p256", "dep:sha2", "dep:signature"]
+std = ["alloc", "yaml-sigil-core/std", "yaml-sigil-traits/std", "yaml-sigil-transcription/std"]
+yaml = ["alloc", "yaml-sigil-core/yaml", "yaml-sigil-transcription/yaml"]
+protobuf = ["alloc", "yaml-sigil-core/protobuf", "yaml-sigil-transcription/protobuf"]
+json-schema-validate = ["std", "yaml", "yaml-sigil-core/json-schema-validate"]
 
 [dev-dependencies]
 # These adapters test interoperability. The non-fips backend avoids

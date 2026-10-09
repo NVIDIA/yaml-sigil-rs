@@ -29,11 +29,19 @@ fn finite_limit(maximum: usize) -> ArtifactResourceLimits {
 
 fn p256_r_component(artifact: Uint8Array, form: &str) -> [u8; 32] {
     let wire = match form {
-        "yaml" => yaml_sigil_signing::signed_yaml_stream_to_proto_wire(&artifact.to_vec()).unwrap(),
+        "yaml" => yaml_sigil_signing::signed_yaml_stream_to_proto_wire(
+            &artifact.to_vec(),
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap(),
         "protobuf" => artifact.to_vec(),
         _ => panic!("unexpected artifact form"),
     };
-    let decoded = yaml_sigil_core::pb::SignedYamlArtifact::decode(&wire).unwrap();
+    let decoded = yaml_sigil_core::pb::SignedYamlArtifact::decode(
+        &wire,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
     decoded.signature().unwrap().signature()[..32]
         .try_into()
         .unwrap()

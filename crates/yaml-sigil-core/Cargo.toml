@@ -53,26 +53,29 @@ workspace = true
 path = "src/lib.rs"
 
 [features]
-# Tier A JSON Schema validation helper (`tier_a_schema` module).
-json-schema-validate = ["dep:jsonschema", "dep:serde_json"]
-# Optional provider-input conversions; parsing-only consumers need no crypto.
+default = ["std", "yaml", "protobuf"]
+alloc = ["yaml-sigil-traits/alloc", "base64?/alloc", "serde?/alloc"]
+std = ["alloc", "yaml-sigil-traits/std", "base64?/std", "serde?/std", "noyalib?/std", "buffa?/std", "dep:tracing", "tracing/std", "thiserror/std"]
+yaml = ["alloc", "dep:base64", "dep:serde", "dep:noyalib"]
+protobuf = ["alloc", "dep:buffa", "dep:buf-tools", "dep:buffa-build"]
+json-schema-validate = ["std", "yaml", "dep:jsonschema", "dep:serde_json"]
 p256-encoding = ["dep:p256"]
 
 [dependencies]
-base64 = { version = "0.23.1", default-features = false, features = ["std"] }
-serde = { version = "1", features = ["derive"] }
-noyalib = { workspace = true }
+base64 = { workspace = true, optional = true }
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+noyalib = { workspace = true, optional = true }
 p256 = { workspace = true, optional = true }
-thiserror = "2"
-tracing = "0.1"
+thiserror = { version = "2", default-features = false }
+tracing = { workspace = true, optional = true }
 yaml-sigil-traits = { workspace = true, default-features = false }
-buffa = { workspace = true }
+buffa = { workspace = true, optional = true }
 jsonschema = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 [build-dependencies]
-buf-tools = { workspace = true }
-buffa-build = { workspace = true }
+buf-tools = { workspace = true, optional = true }
+buffa-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 jsonschema = { workspace = true }

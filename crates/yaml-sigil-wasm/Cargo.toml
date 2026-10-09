@@ -51,10 +51,10 @@ ed25519-dalek = { workspace = true }
 js-sys = { workspace = true }
 p256 = { workspace = true }
 wasm-bindgen = { workspace = true }
-yaml-sigil-core = { workspace = true }
-yaml-sigil-signing = { workspace = true }
-yaml-sigil-transcription = { workspace = true }
-yaml-sigil-verification = { workspace = true }
+yaml-sigil-core = { workspace = true, features = ["std", "yaml", "protobuf"] }
+yaml-sigil-signing = { workspace = true, features = ["std", "yaml", "protobuf", "system-rng"] }
+yaml-sigil-transcription = { workspace = true, features = ["std", "yaml", "protobuf"] }
+yaml-sigil-verification = { workspace = true, features = ["std", "yaml", "protobuf"] }
 zeroize = { workspace = true }
 
 [dev-dependencies]

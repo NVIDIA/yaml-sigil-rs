@@ -25,13 +25,14 @@ workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+yaml-sigil-traits = { workspace = true, features = ["std"] }
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 p256 = { workspace = true }
-yaml-sigil-core = { path = "../yaml-sigil-core", default-features = false }
-yaml-sigil-transcription = { path = "../yaml-sigil-transcription", default-features = false }
-yaml-sigil-verification = { path = "../yaml-sigil-verification", default-features = false }
-yaml-sigil-signing = { path = "../yaml-sigil-signing", default-features = false }
+yaml-sigil-core = { path = "../yaml-sigil-core", default-features = false, features = ["std", "yaml", "protobuf"] }
+yaml-sigil-transcription = { path = "../yaml-sigil-transcription", default-features = false, features = ["std", "yaml", "protobuf"] }
+yaml-sigil-verification = { path = "../yaml-sigil-verification", default-features = false, features = ["std", "yaml", "protobuf"] }
+yaml-sigil-signing = { path = "../yaml-sigil-signing", default-features = false, features = ["std", "yaml", "protobuf", "system-rng"] }
 
 [dev-dependencies]
 signature = { workspace = true }

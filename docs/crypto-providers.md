@@ -174,7 +174,7 @@ borrow the keys.
 | Sign with a qualified key. | `sign_with_provider(&request, callback)` |
 | Sign with an unqualified key. | `sign_with_unqualified_provider(&request, callback)` |
 | Sign a P-256 digest. | `sign_with_p256_digest_provider(&request, callback)` |
-| Apply resource limits. | Pass `(&request, &limits, callback)` to the corresponding resource-aware operation. |
+| Apply resource limits. | Set `request.resource_limits` and call the primary operation. |
 
 Supply your own closure or `signature_signing_callback(&adapter)` as the
 callback. Callback failures propagate as
@@ -358,34 +358,24 @@ it incurs the repeated provider and local work and owns the retry policy.
 
 Whole-artifact limits are opt-in operational policy. They do not establish
 conformance and do not alter the separate 16,384-octet YAML signature-carrier
-constraint. Ordinary provider operations and trait facades remain unbounded
-by this optional policy.
+constraint. Default operation options choose an unbounded policy.
 
-Use `sign_with_provider_and_resource_limits`,
-`sign_with_unqualified_provider_and_resource_limits`, or
-`sign_with_p256_digest_provider_and_resource_limits` for bounded synchronous
-signing. Pass `(request, limits, callback)`. The async counterparts are
-`sign_with_async_provider_and_resource_limits` and
-`sign_with_unqualified_async_provider_and_resource_limits`.
+Set `request.resource_limits` for sync callbacks, digest callbacks, and async
+signing. The primary APIs return one `SignError`, distinguishing invocation,
+resource, encoding, and operational failures. Early projected-size rejection
+avoids provider work. YAML escaping can require a final exact check after its
+single signing call and before complete-artifact allocation.
 
-These functions apply the signing preflight and exact output checks.
-After request-shape validation, protobuf output computes the exact encoded
-length before scanning caller buffers or invoking a provider. YAML first
-checks a conclusive lower bound. It checks the exact serialized output size
-after signing and carrier serialization, before allocating the complete
-artifact. Escaping can make that final check necessary even after a successful
-preflight. Resource rejection is the outer result, a protobuf encoding error
-has its own middle layer, and the existing `SignOutcome` remains inside.
+Verification takes the policy through `VerifierOptions`; pre-verification uses
+`PreVerifyOptions`. `PreVerifyResponse::source_artifact` retains the encoded
+source so every handoff can enforce its own policy before provider work.
+Checking extracted payload length does not replace encoded-input admission.
+Apply admission before remote binding when that binding depends on the input.
 
-For verification, call
-`ArtifactResourceLimits::check_input_size` on the original encoded artifact
-before a provider operation, or call `pre_verify_with_resource_limits` and
-pass its admitted response to a provider `verify_from_pre_verify` operation.
-Both approaches work with sync or async and either qualification choice.
-These checks reject oversized artifacts before artifact-dependent parsing,
-copying, or verification. If binding itself requires remote work, apply
-admission before that work too. Checking extracted payload length afterward
-is not an equivalent encoded-input limit.
+These APIs and provider qualification work with `no_std + alloc`. Callers
+supply async execution, provider entropy, and timeout policy. Native P-256
+signing can use `sign_with_rng` when `system-rng` is disabled. The
+[portable API guide](./no-std.md) documents feature and error migration.
 
 ## Checklist of checks and evidence
 

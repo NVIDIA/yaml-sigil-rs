@@ -90,7 +90,7 @@ pub fn p256_der_signature_to_raw(bytes: &[u8]) -> Result<[u8; 64], P256EncodingE
 /// let canonical = p256_public_key_to_uncompressed(compressed.as_bytes())?;
 /// assert_eq!(canonical[0], 0x04);
 /// assert_eq!(canonical.as_slice(), key.verifying_key().to_sec1_point(false).as_bytes());
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # Ok::<(), Box<dyn core::error::Error>>(())
 /// ```
 pub fn p256_public_key_to_uncompressed(bytes: &[u8]) -> Result<[u8; 65], P256EncodingError> {
     // SEC 1 section 2.3.3 defines these compressed/uncompressed point tags.

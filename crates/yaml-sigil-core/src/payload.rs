@@ -21,7 +21,7 @@ fn bom_at_zero(bytes: &[u8]) -> bool {
 
 /// Validate UTF-8, no BOM, and trailing line terminator for non-empty payloads.
 pub fn validate_payload_stream(payload: &[u8]) -> Result<(), PayloadInvariantError> {
-    if std::str::from_utf8(payload).is_err() {
+    if core::str::from_utf8(payload).is_err() {
         return Err(PayloadInvariantError::InvalidUtf8);
     }
     if bom_at_zero(payload) {

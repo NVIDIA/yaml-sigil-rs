@@ -20,10 +20,9 @@ use sha2::{Digest, Sha256, Sha512};
 use signature::Signer as _;
 use yaml_sigil_core::AlgorithmId;
 use yaml_sigil_signing::{
-    OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys, SignOutcome,
-    SignProtoParams, SignYamlParams, SigningKey, UnqualifiedProviderSignRequest,
-    UnqualifiedProviderSigningKeys, sign_proto, sign_with_provider, sign_with_unqualified_provider,
-    sign_yaml, signature_signing_callback,
+    OutputForm, ProviderSignRequest, ProviderSigningKeyBuilder, ProviderSigningKeys, SignRequest,
+    SigningKey, UnqualifiedProviderSignRequest, UnqualifiedProviderSigningKeys, sign,
+    sign_with_provider, sign_with_unqualified_provider, signature_signing_callback,
 };
 use yaml_sigil_verification::{
     ArtifactForm, InvocationError, PreVerifyOutcome, PreVerifyResponse, ProviderPublicKeys,
@@ -32,7 +31,7 @@ use yaml_sigil_verification::{
     UnqualifiedProviderPublicKeys, UnverifiedSignature, VerificationProviderBuilder,
     VerifierOptions, VerifierState, pre_verify, verify_from_pre_verify_with_provider,
     verify_from_pre_verify_with_unqualified_provider, verify_with_provider,
-    verify_with_provider_and_metadata, verify_with_unqualified_provider,
+    verify_with_unqualified_provider,
 };
 
 fn signature_error() -> signature::Error {
@@ -360,6 +359,7 @@ fn exercise_qualified_pair<F: ProviderVerifierFactory>(
     .build()
     .unwrap();
     let request = ProviderSignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"provider-matrix: signed\n",
         algorithm,
         key: match algorithm {
@@ -371,9 +371,7 @@ fn exercise_qualified_pair<F: ProviderVerifierFactory>(
         output_form,
         algorithm_parameters: &[],
     };
-    let SignOutcome::Success(success) =
-        sign_with_provider(&request, signature_signing_callback(signer))
-    else {
+    let Ok(success) = sign_with_provider(&request, signature_signing_callback(signer)) else {
         panic!("qualified provider signing failed for {algorithm:?}");
     };
 
@@ -390,12 +388,13 @@ fn exercise_qualified_pair<F: ProviderVerifierFactory>(
         OutputForm::Yaml => ArtifactForm::Yaml,
         OutputForm::Protobuf => ArtifactForm::Proto,
     };
-    let state =
-        verify_with_provider(&success.artifact, form, &keys, VerifierOptions::default()).unwrap();
+    let state = verify_with_provider(&success.artifact, form, &keys, VerifierOptions::default())
+        .map(|result| result.state)
+        .unwrap();
     assert_eq!(
         state,
         VerifierState::Verified {
-            payload: b"provider-matrix: signed\n".to_vec(),
+            payload: b"provider-matrix: signed\n",
             algorithm,
         }
     );
@@ -485,6 +484,7 @@ fn provider_keys_can_be_shared_across_workers() {
     let provider = VerificationProviderBuilder::new(ReferenceFactory).qualify();
     let verifying_key = provider.bind_ed25519(&public_key).unwrap();
     let request = ProviderSignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"provider: shared workers\n",
         algorithm: AlgorithmId::Ed25519,
         key: ProviderSigningKeys::Ed25519(&signing_key),
@@ -501,8 +501,7 @@ fn provider_keys_can_be_shared_across_workers() {
     std::thread::scope(|scope| {
         for _ in 0..2 {
             scope.spawn(|| {
-                let SignOutcome::Success(success) =
-                    sign_with_provider(&request, signature_signing_callback(&signer))
+                let Ok(success) = sign_with_provider(&request, signature_signing_callback(&signer))
                 else {
                     panic!("shared provider signing failed");
                 };
@@ -511,11 +510,12 @@ fn provider_keys_can_be_shared_across_workers() {
                         &success.artifact,
                         ArtifactForm::Proto,
                         &keys,
-                        VerifierOptions::default(),
+                        VerifierOptions::default()
                     )
+                    .map(|result| result.state)
                     .unwrap(),
                     VerifierState::Verified {
-                        payload: request.payload.to_vec(),
+                        payload: request.payload,
                         algorithm: AlgorithmId::Ed25519,
                     },
                 );
@@ -594,21 +594,29 @@ fn signed_ed25519_artifact(form: ArtifactForm) -> (Vec<u8>, ed25519_dalek::Verif
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&[40; 32]);
     let verifying_key = signing_key.verifying_key();
     let artifact = match form {
-        ArtifactForm::Yaml => sign_yaml(&SignYamlParams {
+        ArtifactForm::Yaml => sign(&SignRequest {
+            resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+            output_form: yaml_sigil_signing::OutputForm::Yaml,
+            algorithm_parameters: &[],
             payload: b"scripted-provider: test\n",
             algorithm: AlgorithmId::Ed25519,
             key: SigningKey::Ed25519(&signing_key),
             keyid: None,
             append_missing_final_newline: false,
         })
+        .map(|success| success.artifact)
         .unwrap(),
-        ArtifactForm::Proto => sign_proto(&SignProtoParams {
+        ArtifactForm::Proto => sign(&SignRequest {
+            resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+            output_form: yaml_sigil_signing::OutputForm::Protobuf,
+            algorithm_parameters: &[],
             payload: b"scripted-provider: test\n",
             algorithm: AlgorithmId::Ed25519,
             key: SigningKey::Ed25519(&signing_key),
             keyid: None,
             append_missing_final_newline: false,
         })
+        .map(|success| success.artifact)
         .unwrap(),
     };
     (artifact, verifying_key)
@@ -624,7 +632,9 @@ fn verification_preserves_mismatch_and_provider_failure_categories() {
         ),
         (
             ProviderVerificationOutcome::ProviderFailure,
-            Err(InvocationError::KeyResolutionFailure),
+            Err(yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::KeyResolutionFailure,
+            )),
         ),
     ] {
         let (factory, calls, _) = scripted_factory(outcome);
@@ -639,8 +649,9 @@ fn verification_preserves_mismatch_and_provider_failure_categories() {
                 &artifact,
                 ArtifactForm::Yaml,
                 &keys,
-                VerifierOptions::default(),
-            ),
+                VerifierOptions::default()
+            )
+            .map(|result| result.state),
             expected
         );
         assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -662,9 +673,11 @@ fn malformed_signature_octets_never_reach_a_provider() {
 
     for signature_octets in [vec![0xff; 64], vec![0; 63], vec![0x30; 70]] {
         let pre = PreVerifyResponse {
+            source_artifact: &[],
+
             outcome: PreVerifyOutcome::Ok,
             form: ArtifactForm::Yaml,
-            unverified_payload_bytes: Some(b"payload\n".to_vec()),
+            unverified_payload_bytes: Some(b"payload\n"),
             unverified_signature: Some(UnverifiedSignature {
                 algorithm: AlgorithmId::Ed25519,
                 keyid: None,
@@ -676,8 +689,9 @@ fn malformed_signature_octets_never_reach_a_provider() {
             verify_from_pre_verify_with_unqualified_provider(
                 &pre,
                 &keys,
-                VerifierOptions::default(),
-            ),
+                VerifierOptions::default()
+            )
+            .map(|result| result.state),
             Ok(VerifierState::MalformedAttemptedSigned)
         );
     }
@@ -699,9 +713,11 @@ fn malformed_signature_octets_never_reach_a_provider() {
     let valid_signature: p256::ecdsa::Signature = p256_signing_key.sign(b"payload\n");
     for signature_octets in [vec![0; 64], valid_signature.to_der().as_bytes().to_vec()] {
         let pre = PreVerifyResponse {
+            source_artifact: &[],
+
             outcome: PreVerifyOutcome::Ok,
             form: ArtifactForm::Proto,
-            unverified_payload_bytes: Some(b"payload\n".to_vec()),
+            unverified_payload_bytes: Some(b"payload\n"),
             unverified_signature: Some(UnverifiedSignature {
                 algorithm: AlgorithmId::EcdsaP256Sha256,
                 keyid: None,
@@ -713,8 +729,9 @@ fn malformed_signature_octets_never_reach_a_provider() {
             verify_from_pre_verify_with_unqualified_provider(
                 &pre,
                 &p256_keys,
-                VerifierOptions::default(),
-            ),
+                VerifierOptions::default()
+            )
+            .map(|result| result.state),
             Ok(VerifierState::MalformedAttemptedSigned)
         );
     }
@@ -738,19 +755,30 @@ fn pre_verification_handoff_runs_provider_verification_once() {
         p256: None,
     };
 
-    let pre = pre_verify(&artifact, ArtifactForm::Proto, false, false);
+    let pre = pre_verify(
+        &artifact,
+        ArtifactForm::Proto,
+        yaml_sigil_traits::verification::PreVerifyOptions {
+            allow_unsigned: false,
+            include_parser_observations: false,
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+        },
+    )
+    .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert!(matches!(
         verify_from_pre_verify_with_unqualified_provider(
             &pre,
             &unqualified_keys,
-            VerifierOptions::default(),
-        ),
+            VerifierOptions::default()
+        )
+        .map(|result| result.state),
         Ok(VerifierState::Verified { .. })
     ));
     assert_eq!(calls.load(Ordering::Relaxed), 1);
     assert!(matches!(
-        verify_from_pre_verify_with_provider(&pre, &keys, VerifierOptions::default()),
+        verify_from_pre_verify_with_provider(&pre, &keys, VerifierOptions::default())
+            .map(|result| result.state),
         Ok(VerifierState::Verified { .. })
     ));
 }
@@ -795,6 +823,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             .build()
             .unwrap();
         let request = ProviderSignRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             payload,
             algorithm: AlgorithmId::EcdsaP256Sha256,
             key: ProviderSigningKeys::EcdsaP256Sha256(&key),
@@ -803,9 +832,7 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
             output_form,
             algorithm_parameters: &[],
         };
-        let SignOutcome::Success(success) =
-            sign_with_provider(&request, signature_signing_callback(&signer))
-        else {
+        let Ok(success) = sign_with_provider(&request, signature_signing_callback(&signer)) else {
             panic!("qualified P-256 signing failed");
         };
         assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -829,8 +856,9 @@ fn p256_providers_receive_message_bytes_without_a_yaml_sigil_prehash() {
                 &success.artifact,
                 form,
                 &keys,
-                VerifierOptions::default(),
-            ),
+                VerifierOptions::default()
+            )
+            .map(|result| result.state),
             Ok(VerifierState::Verified { .. })
         ));
         assert_eq!(verify_calls.load(Ordering::Relaxed), 1);
@@ -846,6 +874,7 @@ fn qualified_p256_signing_rejects_an_adapter_that_hashes_twice() {
         .build()
         .unwrap();
     let request = ProviderSignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"p256-provider: one hash\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: ProviderSigningKeys::EcdsaP256Sha256(&key),
@@ -857,7 +886,7 @@ fn qualified_p256_signing_rejects_an_adapter_that_hashes_twice() {
 
     assert!(matches!(
         sign_with_provider(&request, signature_signing_callback(&signer)),
-        SignOutcome::Signer(yaml_sigil_signing::SignError::KeyOperationFailure)
+        Err(yaml_sigil_signing::SignError::KeyOperationFailure)
     ));
 }
 
@@ -872,12 +901,14 @@ fn provider_metadata_and_exact_message_paths_remain_available() {
         p256: None,
     };
 
-    let result = yaml_sigil_verification::verify_with_unqualified_provider_and_metadata(
+    let result = yaml_sigil_verification::verify_with_unqualified_provider(
         &artifact,
         ArtifactForm::Yaml,
         &keys,
-        VerifierOptions::default(),
-        true,
+        yaml_sigil_traits::verification::VerifierOptions {
+            include_parser_observations: true,
+            ..VerifierOptions::default()
+        },
     )
     .unwrap();
     assert!(matches!(result.state, VerifierState::Verified { .. }));
@@ -893,12 +924,14 @@ fn provider_metadata_and_exact_message_paths_remain_available() {
         ed25519: Some(&qualified_key),
         p256: None,
     };
-    let result = verify_with_provider_and_metadata(
+    let result = verify_with_provider(
         &artifact,
         ArtifactForm::Yaml,
         &qualified_keys,
-        VerifierOptions::default(),
-        true,
+        yaml_sigil_traits::verification::VerifierOptions {
+            include_parser_observations: true,
+            ..VerifierOptions::default()
+        },
     )
     .unwrap();
     assert!(matches!(result.state, VerifierState::Verified { .. }));
@@ -907,10 +940,7 @@ fn provider_metadata_and_exact_message_paths_remain_available() {
 #[test]
 fn p256_digest_callbacks_preserve_payloads_through_both_artifact_verifiers() {
     use signature::hazmat::PrehashSigner as _;
-    use yaml_sigil_signing::{
-        ArtifactResourceLimits, SignError, sign_with_p256_digest_provider,
-        sign_with_p256_digest_provider_and_resource_limits,
-    };
+    use yaml_sigil_signing::{ArtifactResourceLimits, SignError, sign_with_p256_digest_provider};
     use yaml_sigil_verification::{PublicKeys, verify};
 
     // Deterministic signatures isolate payload/encoding equivalence in this
@@ -943,7 +973,8 @@ fn p256_digest_callbacks_preserve_payloads_through_both_artifact_verifiers() {
         ),
         (OutputForm::Protobuf, b"".as_slice(), b"".as_slice()),
     ] {
-        let req = ProviderSignRequest {
+        let mut req = ProviderSignRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             payload,
             algorithm: AlgorithmId::EcdsaP256Sha256,
             key: ProviderSigningKeys::EcdsaP256Sha256(&key),
@@ -963,18 +994,13 @@ fn p256_digest_callbacks_preserve_payloads_through_both_artifact_verifiers() {
                     .map_err(|_| SignError::KeyOperationFailure)?;
                 Ok(signature.to_bytes().into())
             };
-            let outcome = if bounded {
-                sign_with_p256_digest_provider_and_resource_limits(
-                    &req,
-                    &ArtifactResourceLimits::default(),
-                    callback,
-                )
-                .unwrap()
-                .unwrap()
+            req.resource_limits = if bounded {
+                ArtifactResourceLimits::default()
             } else {
-                sign_with_p256_digest_provider(&req, callback)
+                ArtifactResourceLimits::unbounded()
             };
-            let SignOutcome::Success(signed) = outcome else {
+            let outcome = sign_with_p256_digest_provider(&req, callback);
+            let Ok(signed) = outcome else {
                 panic!("digest signing failed");
             };
             assert_eq!(calls, 1);
@@ -988,9 +1014,10 @@ fn p256_digest_callbacks_preserve_payloads_through_both_artifact_verifiers() {
                     artifact_form,
                     &keys,
                     VerifierOptions::default()
-                ),
+                )
+                .map(|result| result.state),
                 Ok(VerifierState::Verified {
-                    payload: expected.to_vec(),
+                    payload: expected,
                     algorithm: AlgorithmId::EcdsaP256Sha256,
                 }),
             );
@@ -1006,6 +1033,7 @@ fn unqualified_provider_signing_accepts_protobuf_output() {
         .build_unqualified()
         .unwrap();
     let request = UnqualifiedProviderSignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"provider: output\n",
         algorithm: AlgorithmId::Ed25519,
         key: UnqualifiedProviderSigningKeys::Ed25519(&signing_key),
@@ -1014,8 +1042,5 @@ fn unqualified_provider_signing_accepts_protobuf_output() {
         output_form: OutputForm::Protobuf,
         algorithm_parameters: &[],
     };
-    assert!(matches!(
-        sign_with_unqualified_provider(&request, signature_signing_callback(&signer)),
-        SignOutcome::Success(_)
-    ));
+    assert!(sign_with_unqualified_provider(&request, signature_signing_callback(&signer)).is_ok());
 }

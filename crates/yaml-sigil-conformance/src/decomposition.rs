@@ -8,8 +8,8 @@
 //! See [`docs/conformance-validation.md`](../../docs/conformance-validation.md) § 2.
 
 use yaml_sigil_transcription::{
-    AsyncTranscriber, DecomposeOutcome, DecomposeRequest, DecomposeResponse,
-    DecomposeStructuralResult, Transcriber, TranscriptionForm,
+    AsyncTranscriber, DecomposeOutcome, DecomposeRequest, DecomposeStructuralResult, Transcriber,
+    TranscriptionForm,
 };
 use yaml_sigil_verification::{ArtifactForm, AsyncVerifier, PreVerifyOutcome, Verifier};
 
@@ -103,11 +103,9 @@ fn assert_marker_dense_split(artifact: &[u8], structural: &DecomposeStructuralRe
         .expect("marker-dense fixture must contain the final marker");
     let payload = structural
         .payload
-        .as_deref()
         .expect("marker-dense decompose must return payload bytes");
     let carrier = structural
         .signature_carrier
-        .as_deref()
         .expect("marker-dense decompose must return carrier bytes");
 
     assert_eq!(
@@ -137,7 +135,6 @@ fn assert_marker_dense_split(artifact: &[u8], structural: &DecomposeStructuralRe
 fn assert_document_end_remains_payload(structural: &DecomposeStructuralResult) {
     let payload = structural
         .payload
-        .as_deref()
         .expect("document-end-in-payload decompose must return payload bytes");
     assert!(
         payload.ends_with(b"...\n"),
@@ -156,13 +153,14 @@ where
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
         let resp = t.decompose(&DecomposeRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             artifact: &bytes,
             form: TranscriptionForm::Yaml,
             outer_conformance: None,
         });
         let structural = match resp {
-            DecomposeResponse::Structural(s) => s,
-            DecomposeResponse::Invocation(e) => panic!(
+            Ok(s) => s,
+            Err(e) => panic!(
                 "{}/{}: unexpected invocation error {e:?}",
                 CATEGORY, fx.file
             ),
@@ -180,7 +178,17 @@ where
         }
 
         if let Some(expected_pre) = fx.pre_verify {
-            let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, true, false);
+            let pre = v
+                .pre_verify(
+                    &bytes,
+                    ArtifactForm::Yaml,
+                    yaml_sigil_traits::verification::PreVerifyOptions {
+                        allow_unsigned: true,
+                        include_parser_observations: false,
+                        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                    },
+                )
+                .unwrap();
             assert_eq!(
                 pre.outcome, expected_pre,
                 "{}/{}: PreVerifyOutcome mismatch (verifier-stage)",
@@ -200,14 +208,15 @@ where
         let bytes = load_bytes(CATEGORY, fx.file);
         let resp = t
             .decompose(&DecomposeRequest {
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
                 artifact: &bytes,
                 form: TranscriptionForm::Yaml,
                 outer_conformance: None,
             })
             .await;
         let structural = match resp {
-            DecomposeResponse::Structural(s) => s,
-            DecomposeResponse::Invocation(e) => panic!(
+            Ok(s) => s,
+            Err(e) => panic!(
                 "{}/{} (async): unexpected invocation error {e:?}",
                 CATEGORY, fx.file
             ),
@@ -225,7 +234,18 @@ where
         }
 
         if let Some(expected_pre) = fx.pre_verify {
-            let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, true, false).await;
+            let pre = v
+                .pre_verify(
+                    &bytes,
+                    ArtifactForm::Yaml,
+                    yaml_sigil_traits::verification::PreVerifyOptions {
+                        allow_unsigned: true,
+                        include_parser_observations: false,
+                        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                    },
+                )
+                .await
+                .unwrap();
             assert_eq!(
                 pre.outcome, expected_pre,
                 "{}/{} (async): PreVerifyOutcome mismatch (verifier-stage)",

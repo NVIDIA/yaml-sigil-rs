@@ -13,15 +13,13 @@ use yaml_sigil_core::{
     decode_signed_yaml_artifact, decompose_artifact, view_signed_yaml_artifact,
 };
 use yaml_sigil_signing::{
-    SignProtoParams, SignYamlParams, SigningKey, TranscodeError, sign_proto, sign_yaml,
-    signed_yaml_stream_to_proto_wire,
+    SignRequest, SigningKey, TranscodeError, sign, signed_yaml_stream_to_proto_wire,
 };
 use yaml_sigil_verification::{
     AdvertisedConformanceProfile, ArtifactForm, AsyncVerifier, DefaultAsyncVerifier,
     InvocationError, PreVerifyOutcome, PreVerifyResponse, PublicKeys, UnverifiedSignature,
-    VerifierOptions, VerifierState, can_pre_verify, pre_verify_proto, pre_verify_yaml,
-    resolve_ed25519_verifying_key, verifier_capabilities, verify, verify_from_pre_verify_proto,
-    verify_from_pre_verify_yaml, verify_proto, verify_yaml,
+    VerifierOptions, VerifierState, can_pre_verify, pre_verify, resolve_ed25519_verifying_key,
+    verifier_capabilities, verify, verify_from_pre_verify,
 };
 
 const SIGNATURE_CARRIER_MAX_BYTES: usize = 16 * 1024;
@@ -71,7 +69,7 @@ fn quote_signature_with_whitespace(artifact: &[u8], leading: &str, trailing: &st
     mutated.into_bytes()
 }
 
-fn strict_verifier_options() -> VerifierOptions {
+fn strict_verifier_options() -> VerifierOptions<'static> {
     VerifierOptions {
         reject_unknown_signature_document_fields: true,
         ..VerifierOptions::default()
@@ -80,13 +78,17 @@ fn strict_verifier_options() -> VerifierOptions {
 
 fn signed_yaml_for_metadata_budget_tests() -> Vec<u8> {
     let (sk, _) = ed25519_pair();
-    sign_yaml(&SignYamlParams {
+    sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"metadata-budget: test\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap()
 }
 
@@ -107,7 +109,11 @@ fn yaml_with_too_many_signature_fields() -> Vec<u8> {
 }
 
 fn yaml_with_signature_carrier_length(artifact: &[u8], target_len: usize) -> Vec<u8> {
-    let DecompositionOutcome::Signed(ranges) = decompose_artifact(artifact) else {
+    let DecompositionOutcome::Signed(ranges) = decompose_artifact(
+        artifact,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .expect("unbounded artifact policy") else {
         panic!("expected signed YAML artifact");
     };
     let carrier_len = ranges.signature_carrier.len();
@@ -118,7 +124,11 @@ fn yaml_with_signature_carrier_length(artifact: &[u8], target_len: usize) -> Vec
     padded.extend(std::iter::repeat_n(b'x', target_len - carrier_len - 2));
     padded.push(b'\n');
 
-    let DecompositionOutcome::Signed(ranges) = decompose_artifact(&padded) else {
+    let DecompositionOutcome::Signed(ranges) = decompose_artifact(
+        &padded,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .expect("unbounded artifact policy") else {
         panic!("expected padded signed YAML artifact");
     };
     assert_eq!(ranges.signature_carrier.len(), target_len);
@@ -128,19 +138,30 @@ fn yaml_with_signature_carrier_length(artifact: &[u8], target_len: usize) -> Vec
 #[test]
 fn verify_yaml_ed25519_sign_then_verify_and_display() {
     let (sk, vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"k: v\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: Some("kid"),
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let keys = PublicKeys {
         ed25519: Some(&vk),
         p256: None,
     };
-    let st = verify_yaml(&artifact, &keys, VerifierOptions::default()).unwrap();
+    let st = verify(
+        &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        &keys,
+        VerifierOptions::default(),
+    )
+    .map(|result| result.state)
+    .unwrap();
     assert_eq!(st.to_string(), "Verified");
     let VerifierState::Verified { payload, algorithm } = st else {
         panic!("expected Verified");
@@ -152,19 +173,30 @@ fn verify_yaml_ed25519_sign_then_verify_and_display() {
 #[test]
 fn verify_yaml_ecdsa_sign_then_verify() {
     let (sk, vk) = p256_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"x: y\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let keys = PublicKeys {
         ed25519: None,
         p256: Some(&vk),
     };
-    let st = verify_yaml(&artifact, &keys, VerifierOptions::default()).unwrap();
+    let st = verify(
+        &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        &keys,
+        VerifierOptions::default(),
+    )
+    .map(|result| result.state)
+    .unwrap();
     assert!(matches!(
         st,
         VerifierState::Verified {
@@ -177,42 +209,54 @@ fn verify_yaml_ecdsa_sign_then_verify() {
 #[test]
 fn verify_proto_ed25519_and_ecdsa() {
     let (sk_ed, vk_ed) = ed25519_pair();
-    let wire_ed = sign_proto(&SignProtoParams {
+    let wire_ed = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"a: b\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk_ed),
         keyid: Some("k"),
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
-    let st = verify_proto(
+    let st = verify(
         &wire_ed,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
         &PublicKeys {
             ed25519: Some(&vk_ed),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert!(matches!(st, VerifierState::Verified { .. }));
 
     let (sk_p, vk_p) = p256_pair();
-    let wire_p = sign_proto(&SignProtoParams {
+    let wire_p = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"z: 9\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&sk_p),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
-    let st = verify_proto(
+    let st = verify(
         &wire_p,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
         &PublicKeys {
             ed25519: None,
             p256: Some(&vk_p),
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert!(matches!(st, VerifierState::Verified { .. }));
 }
@@ -223,31 +267,44 @@ fn verify_proto_malformed_wire() {
         ed25519: None,
         p256: None,
     };
-    let st = verify_proto(b"\xffnot-protobuf", &keys, VerifierOptions::default()).unwrap();
+    let st = verify(
+        b"\xffnot-protobuf",
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
+        &keys,
+        VerifierOptions::default(),
+    )
+    .map(|result| result.state)
+    .unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
 }
 
 #[test]
 fn verify_proto_rejects_out_of_range_field_alias() {
     let (sk, vk) = ed25519_pair();
-    let mut wire = sign_proto(&SignProtoParams {
+    let mut wire = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"authorized: true\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     append_len_delimited_field(&mut wire, (1_u64 << 29) + 1, b"authorized: false\n");
 
-    let state = verify_proto(
+    let state = verify(
         &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
         &PublicKeys {
             ed25519: Some(&vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(state, VerifierState::MalformedAttemptedSigned);
 }
@@ -258,7 +315,14 @@ fn verify_yaml_malformed_unsigned_disallowed() {
         ed25519: None,
         p256: None,
     };
-    let st = verify_yaml(b"unsigned: only\n", &keys, VerifierOptions::default()).unwrap();
+    let st = verify(
+        b"unsigned: only\n",
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        &keys,
+        VerifierOptions::default(),
+    )
+    .map(|result| result.state)
+    .unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
     assert_eq!(st.to_string(), "MalformedAttemptedSigned");
 }
@@ -267,18 +331,30 @@ fn verify_yaml_malformed_unsigned_disallowed() {
 fn strict_verify_rejects_oversized_carrier_before_key_resolution() {
     let artifact = yaml_with_oversized_signature_carrier();
     assert_eq!(
-        pre_verify_yaml(&artifact, false).outcome,
+        pre_verify(
+            &artifact,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: false,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+        .outcome,
         PreVerifyOutcome::MetadataParseFailure
     );
 
-    let state = verify_yaml(
+    let state = verify(
         &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: None,
             p256: None,
         },
         strict_verifier_options(),
     )
+    .map(|result| result.state)
     .expect("metadata failure must not reach key resolution");
     assert_eq!(state, VerifierState::MalformedAttemptedSigned);
 }
@@ -287,18 +363,30 @@ fn strict_verify_rejects_oversized_carrier_before_key_resolution() {
 fn strict_verify_rejects_excess_mapping_keys_before_key_resolution() {
     let artifact = yaml_with_too_many_signature_fields();
     assert_eq!(
-        pre_verify_yaml(&artifact, false).outcome,
+        pre_verify(
+            &artifact,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: false,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+        .outcome,
         PreVerifyOutcome::MetadataParseFailure
     );
 
-    let state = verify_yaml(
+    let state = verify(
         &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: None,
             p256: None,
         },
         strict_verifier_options(),
     )
+    .map(|result| result.state)
     .expect("metadata failure must not reach key resolution");
     assert_eq!(state, VerifierState::MalformedAttemptedSigned);
 }
@@ -315,7 +403,13 @@ async fn async_strict_verify_matches_sync_for_metadata_budget_failures() {
     };
 
     for artifact in artifacts {
-        let sync = verify_yaml(&artifact, &keys, strict_verifier_options());
+        let sync = verify(
+            &artifact,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
+            &keys,
+            strict_verifier_options(),
+        )
+        .map(|result| result.state);
         let asynchronous = AsyncVerifier::verify(
             &DefaultAsyncVerifier,
             &artifact,
@@ -323,7 +417,8 @@ async fn async_strict_verify_matches_sync_for_metadata_budget_failures() {
             &keys,
             strict_verifier_options(),
         )
-        .await;
+        .await
+        .map(|result| result.state);
         assert_eq!(asynchronous, sync);
         assert_eq!(sync.unwrap(), VerifierState::MalformedAttemptedSigned);
     }
@@ -333,20 +428,32 @@ async fn async_strict_verify_matches_sync_for_metadata_budget_failures() {
 fn yaml_to_proto_uses_markerless_carrier_byte_limit() {
     const PAYLOAD: &[u8] = b"carrier-boundary: test\n";
     let (sk, vk) = ed25519_pair();
-    let baseline = sign_yaml(&SignYamlParams {
+    let baseline = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: PAYLOAD,
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: Some("carrier-boundary"),
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let keys = PublicKeys {
         ed25519: Some(&vk),
         p256: None,
     };
-    let expected_wire = signed_yaml_stream_to_proto_wire(&baseline).unwrap();
-    let expected_artifact = decode_signed_yaml_artifact(&expected_wire).unwrap();
+    let expected_wire = signed_yaml_stream_to_proto_wire(
+        &baseline,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
+    let expected_artifact = decode_signed_yaml_artifact(
+        &expected_wire,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
     let expected = view_signed_yaml_artifact(&expected_artifact).unwrap();
 
     assert_eq!(expected.payload, PAYLOAD);
@@ -357,15 +464,30 @@ fn yaml_to_proto_uses_markerless_carrier_byte_limit() {
     for carrier_len in [16_380, 16_381, SIGNATURE_CARRIER_MAX_BYTES] {
         let artifact = yaml_with_signature_carrier_length(&baseline, carrier_len);
         assert_eq!(
-            verify_yaml(&artifact, &keys, strict_verifier_options()).unwrap(),
+            verify(
+                &artifact,
+                yaml_sigil_traits::verification::ArtifactForm::Yaml,
+                &keys,
+                strict_verifier_options()
+            )
+            .map(|result| result.state)
+            .unwrap(),
             VerifierState::Verified {
-                payload: PAYLOAD.to_vec(),
+                payload: PAYLOAD,
                 algorithm: AlgorithmId::Ed25519,
             }
         );
 
-        let wire = signed_yaml_stream_to_proto_wire(&artifact).unwrap();
-        let decoded = decode_signed_yaml_artifact(&wire).unwrap();
+        let wire = signed_yaml_stream_to_proto_wire(
+            &artifact,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap();
+        let decoded = decode_signed_yaml_artifact(
+            &wire,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap();
         let actual = view_signed_yaml_artifact(&decoded).unwrap();
         assert_eq!(actual.payload, expected.payload);
         assert_eq!(actual.alg_wire, expected.alg_wire);
@@ -375,11 +497,21 @@ fn yaml_to_proto_uses_markerless_carrier_byte_limit() {
 
     let oversized = yaml_with_signature_carrier_length(&baseline, SIGNATURE_CARRIER_MAX_BYTES + 1);
     assert_eq!(
-        verify_yaml(&oversized, &keys, strict_verifier_options()).unwrap(),
+        verify(
+            &oversized,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
+            &keys,
+            strict_verifier_options()
+        )
+        .map(|result| result.state)
+        .unwrap(),
         VerifierState::MalformedAttemptedSigned
     );
     assert!(matches!(
-        signed_yaml_stream_to_proto_wire(&oversized),
+        signed_yaml_stream_to_proto_wire(
+            &oversized,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        ),
         Err(TranscodeError::Core(CoreError::SignatureYaml(_)))
     ));
 }
@@ -387,27 +519,33 @@ fn yaml_to_proto_uses_markerless_carrier_byte_limit() {
 #[test]
 fn verify_yaml_rejects_noncanonical_algorithm_whitespace() {
     let (sk, vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"k: v\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let text = String::from_utf8(artifact).unwrap();
     let noncanonical = text.replace(
         "alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL",
         "alg: \" ED25519_PUREEDDSA_RAW_RS64_CANONICAL\"",
     );
-    let state = verify_yaml(
+    let state = verify(
         noncanonical.as_bytes(),
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: Some(&vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(state, VerifierState::MalformedAttemptedSigned);
 }
@@ -415,25 +553,31 @@ fn verify_yaml_rejects_noncanonical_algorithm_whitespace() {
 #[test]
 fn verify_yaml_rejects_signature_whitespace() {
     let (sk, vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"k: v\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
 
     for (leading, trailing) in [(" ", ""), ("", " "), (" ", " ")] {
         let mutated = quote_signature_with_whitespace(&artifact, leading, trailing);
-        let state = verify_yaml(
+        let state = verify(
             &mutated,
+            yaml_sigil_traits::verification::ArtifactForm::Yaml,
             &PublicKeys {
                 ed25519: Some(&vk),
                 p256: None,
             },
             VerifierOptions::default(),
         )
+        .map(|result| result.state)
         .unwrap();
         assert_eq!(state, VerifierState::MalformedAttemptedSigned);
     }
@@ -441,7 +585,16 @@ fn verify_yaml_rejects_signature_whitespace() {
 
 #[test]
 fn pre_verify_unsigned_allow_unsigned() {
-    let pre = pre_verify_yaml(b"u: 1\n", true);
+    let pre = pre_verify(
+        b"u: 1\n",
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        yaml_sigil_traits::verification::PreVerifyOptions {
+            allow_unsigned: true,
+            include_parser_observations: false,
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+        },
+    )
+    .unwrap();
     assert_eq!(pre.outcome, PreVerifyOutcome::Unsigned);
     assert!(pre.unverified_signature.is_none());
 }
@@ -449,24 +602,30 @@ fn pre_verify_unsigned_allow_unsigned() {
 #[test]
 fn verify_ed25519_wrong_key_fails() {
     let (sk, _vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"p: q\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let other = EdSigningKey::from_bytes(&[3u8; 32]);
     let wrong_vk = ed25519_dalek::VerifyingKey::from(&other);
-    let st = verify_yaml(
+    let st = verify(
         &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: Some(&wrong_vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(st, VerifierState::SignedButFailedVerification);
     assert_eq!(st.to_string(), "SignedButFailedVerification");
@@ -490,18 +649,29 @@ fn verify_ed25519_rejects_direct_weak_public_key() {
     forged_signature[0] = 1;
     let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, forged_signature);
     let outer = SignedYamlArtifact::new(b"attacker: chosen\n".to_vec(), Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let wire = encode_signed_yaml_artifact(
+        &outer,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
 
-    let error = verify_proto(
+    let error = verify(
         &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
         &PublicKeys {
             ed25519: Some(&weak_vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .expect_err("small-order keys must fail at key resolution");
-    assert_eq!(error, InvocationError::KeyResolutionFailure);
+    assert_eq!(
+        error,
+        yaml_sigil_traits::verification::VerifyError::Invocation(
+            InvocationError::KeyResolutionFailure
+        )
+    );
 }
 
 // The public resolver must enforce canonical encoding in addition to the
@@ -539,27 +709,33 @@ fn ed25519_resolver_rejects_wrong_key_lengths() {
 #[test]
 fn verify_ed25519_algorithm_disabled() {
     let (sk, vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"p: q\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let opts = VerifierOptions {
         verify_ed25519: false,
         verify_ecdsa_p256_sha256: true,
         ..VerifierOptions::default()
     };
-    let st = verify_yaml(
+    let st = verify(
         &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: Some(&vk),
             p256: None,
         },
         opts,
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(
         st,
@@ -573,27 +749,33 @@ fn verify_ed25519_algorithm_disabled() {
 #[test]
 fn verify_ecdsa_algorithm_disabled() {
     let (sk, vk) = p256_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"p: q\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let opts = VerifierOptions {
         verify_ed25519: true,
         verify_ecdsa_p256_sha256: false,
         ..VerifierOptions::default()
     };
-    let st = verify_yaml(
+    let st = verify(
         &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: None,
             p256: Some(&vk),
         },
         opts,
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(
         st,
@@ -606,30 +788,43 @@ fn verify_ecdsa_algorithm_disabled() {
 #[test]
 fn verify_ed25519_missing_public_key_errors() {
     let (sk, _) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"p: q\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
-    let err = verify_yaml(
+    let err = verify(
         &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: None,
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap_err();
-    assert_eq!(err, InvocationError::KeyResolutionFailure);
+    assert_eq!(
+        err,
+        yaml_sigil_traits::verification::VerifyError::Invocation(
+            InvocationError::KeyResolutionFailure
+        )
+    );
     assert!(err.to_string().contains("key material"));
 }
 
 #[test]
 fn verify_from_pre_verify_rejects_invalid_pre() {
     let pre = PreVerifyResponse {
+        source_artifact: &[],
+
         outcome: PreVerifyOutcome::StructuralFailure,
         form: ArtifactForm::Yaml,
         unverified_payload_bytes: None,
@@ -640,16 +835,25 @@ fn verify_from_pre_verify_rejects_invalid_pre() {
         ed25519: None,
         p256: None,
     };
-    let err = verify_from_pre_verify_yaml(&pre, &keys, VerifierOptions::default()).unwrap_err();
-    assert_eq!(err, InvocationError::InvalidPreVerifyResult);
+    let err = verify_from_pre_verify(&pre, &keys, VerifierOptions::default())
+        .map(|result| result.state)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        yaml_sigil_traits::verification::VerifyError::Invocation(
+            InvocationError::InvalidPreVerifyResult
+        )
+    );
 }
 
 #[test]
-fn verify_from_pre_verify_yaml_rejects_proto_shaped_pre() {
+fn verify_from_pre_verify_uses_the_recorded_artifact_form() {
     let pre = PreVerifyResponse {
+        source_artifact: &[],
+
         outcome: PreVerifyOutcome::Ok,
         form: ArtifactForm::Proto,
-        unverified_payload_bytes: Some(b"x\n".to_vec()),
+        unverified_payload_bytes: Some(b"x\n"),
         unverified_signature: Some(UnverifiedSignature {
             algorithm: AlgorithmId::Ed25519,
             keyid: None,
@@ -663,8 +867,12 @@ fn verify_from_pre_verify_yaml_rejects_proto_shaped_pre() {
         ed25519: Some(&vk),
         p256: None,
     };
-    let err = verify_from_pre_verify_yaml(&pre, &keys, VerifierOptions::default()).unwrap_err();
-    assert_eq!(err, InvocationError::InvalidPreVerifyResult);
+    let state = verify_from_pre_verify(&pre, &keys, VerifierOptions::default())
+        .map(|result| result.state)
+        .unwrap();
+    // The primary handoff selects its form from the pre-response. This
+    // protobuf attempt reaches signature structure checks, not a YAML-only API.
+    assert_eq!(state, VerifierState::MalformedAttemptedSigned);
 }
 
 #[test]
@@ -672,14 +880,16 @@ fn verify_yaml_bad_schema_is_malformed() {
     let artifact = b"root: ok\n---\nschema: Wrong\n\
                      alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\nsignature: Zm9v\n";
     let (_, vk) = ed25519_pair();
-    let st = verify_yaml(
+    let st = verify(
         artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: Some(&vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
 }
@@ -689,14 +899,16 @@ fn verify_yaml_unknown_alg_is_malformed() {
     let artifact =
         b"r: 1\n---\nschema: YamlSigilSignature.v1alpha1\nalg: NOT_AN_ALG\nsignature: Zm9v\n";
     let (_, vk) = ed25519_pair();
-    let st = verify_yaml(
+    let st = verify(
         artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
         &PublicKeys {
             ed25519: Some(&vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
 }
@@ -714,16 +926,22 @@ fn verify_proto_accepts_non_yaml_fit_payload() {
     // docs/conformance-validation.md §3f and §5.r (§5b resolved).
     let inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![0u8; 64]);
     let outer = SignedYamlArtifact::new(vec![0xEF, 0xBB, 0xBF, b'h', b'i', b'\n'], Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let wire = encode_signed_yaml_artifact(
+        &outer,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
     let (_, vk) = ed25519_pair();
-    let st = verify_proto(
+    let st = verify(
         &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
         &PublicKeys {
             ed25519: Some(&vk),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert_eq!(st, VerifierState::SignedButFailedVerification);
 }
@@ -736,29 +954,53 @@ fn verify_proto_unspecified_alg_wire() {
     let mut inner = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
     inner.set_algorithm_wire_value(0);
     let outer = SignedYamlArtifact::new(b"ok\n".to_vec(), Some(inner));
-    let wire = encode_signed_yaml_artifact(&outer).unwrap();
+    let wire = encode_signed_yaml_artifact(
+        &outer,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
     let keys = PublicKeys {
         ed25519: None,
         p256: None,
     };
-    let st = verify_proto(&wire, &keys, VerifierOptions::default()).unwrap();
+    let st = verify(
+        &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
+        &keys,
+        VerifierOptions::default(),
+    )
+    .map(|result| result.state)
+    .unwrap();
     assert_eq!(st, VerifierState::MalformedAttemptedSigned);
 }
 
 #[test]
 fn verify_from_pre_verify_yaml_happy_path() {
     let (sk, vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"path: test\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
-    let pre = pre_verify_yaml(&artifact, false);
+    let pre = pre_verify(
+        &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        yaml_sigil_traits::verification::PreVerifyOptions {
+            allow_unsigned: false,
+            include_parser_observations: false,
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+        },
+    )
+    .unwrap();
     assert_eq!(pre.outcome, PreVerifyOutcome::Ok);
-    let st = verify_from_pre_verify_yaml(
+    let st = verify_from_pre_verify(
         &pre,
         &PublicKeys {
             ed25519: Some(&vk),
@@ -766,6 +1008,7 @@ fn verify_from_pre_verify_yaml_happy_path() {
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap();
     assert!(matches!(st, VerifierState::Verified { .. }));
 }
@@ -773,26 +1016,37 @@ fn verify_from_pre_verify_yaml_happy_path() {
 #[test]
 fn verify_proto_ecdsa_missing_p256_key_errors() {
     let (sk, _) = p256_pair();
-    let wire = sign_proto(&SignProtoParams {
+    let wire = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"p: q\n",
         algorithm: AlgorithmId::EcdsaP256Sha256,
         key: SigningKey::EcdsaP256Sha256(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let (sk_ed, vk_ed) = ed25519_pair();
     let _ = sk_ed;
-    let err = verify_proto(
+    let err = verify(
         &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
         &PublicKeys {
             ed25519: Some(&vk_ed),
             p256: None,
         },
         VerifierOptions::default(),
     )
+    .map(|result| result.state)
     .unwrap_err();
-    assert_eq!(err, InvocationError::KeyResolutionFailure);
+    assert_eq!(
+        err,
+        yaml_sigil_traits::verification::VerifyError::Invocation(
+            InvocationError::KeyResolutionFailure
+        )
+    );
 }
 
 #[test]
@@ -828,33 +1082,59 @@ fn verifier_capabilities_surface() {
 #[test]
 fn unified_verify_matches_per_form_helpers() {
     let (sk, vk) = ed25519_pair();
-    let artifact = sign_yaml(&SignYamlParams {
+    let artifact = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Yaml,
+        algorithm_parameters: &[],
         payload: b"k: v\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let keys = PublicKeys {
         ed25519: Some(&vk),
         p256: None,
     };
     let opt = VerifierOptions::default();
-    let st_yaml = verify_yaml(&artifact, &keys, opt.clone()).unwrap();
-    let st_unified = verify(&artifact, ArtifactForm::Yaml, &keys, opt.clone()).unwrap();
+    let st_yaml = verify(
+        &artifact,
+        yaml_sigil_traits::verification::ArtifactForm::Yaml,
+        &keys,
+        opt.clone(),
+    )
+    .map(|result| result.state)
+    .unwrap();
+    let st_unified = verify(&artifact, ArtifactForm::Yaml, &keys, opt.clone())
+        .map(|result| result.state)
+        .unwrap();
     assert_eq!(st_yaml, st_unified);
 
-    let wire = sign_proto(&SignProtoParams {
+    let wire = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"k: v\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
-    let st_proto = verify_proto(&wire, &keys, opt.clone()).unwrap();
-    let st_u2 = verify(&wire, ArtifactForm::Proto, &keys, opt).unwrap();
+    let st_proto = verify(
+        &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
+        &keys,
+        opt.clone(),
+    )
+    .map(|result| result.state)
+    .unwrap();
+    let st_u2 = verify(&wire, ArtifactForm::Proto, &keys, opt)
+        .map(|result| result.state)
+        .unwrap();
     assert_eq!(st_proto, st_u2);
 }
 
@@ -870,43 +1150,102 @@ fn artifact_form_try_from_idl_discriminants() {
 
 #[test]
 fn can_pre_verify_yaml_unsigned_respects_allow_unsigned() {
-    assert!(!can_pre_verify(b"a: 1\n", ArtifactForm::Yaml, false));
-    assert!(can_pre_verify(b"a: 1\n", ArtifactForm::Yaml, true));
+    assert!(
+        !can_pre_verify(
+            b"a: 1\n",
+            ArtifactForm::Yaml,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: false,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+    );
+    assert!(
+        can_pre_verify(
+            b"a: 1\n",
+            ArtifactForm::Yaml,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: true,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+    );
 }
 
 #[test]
 fn can_pre_verify_proto_happy_path() {
     let (sk, _) = ed25519_pair();
-    let wire = sign_proto(&SignProtoParams {
+    let wire = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"z: 9\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
-    assert!(can_pre_verify(&wire, ArtifactForm::Proto, false));
+    assert!(
+        can_pre_verify(
+            &wire,
+            ArtifactForm::Proto,
+            yaml_sigil_traits::verification::PreVerifyOptions {
+                allow_unsigned: false,
+                include_parser_observations: false,
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded()
+            }
+        )
+        .unwrap()
+    );
 }
 
 #[test]
 fn verify_from_pre_verify_proto_matches_verify_proto() {
     let (sk, vk) = ed25519_pair();
-    let wire = sign_proto(&SignProtoParams {
+    let wire = sign(&SignRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        output_form: yaml_sigil_signing::OutputForm::Protobuf,
+        algorithm_parameters: &[],
         payload: b"m: n\n",
         algorithm: AlgorithmId::Ed25519,
         key: SigningKey::Ed25519(&sk),
         keyid: None,
         append_missing_final_newline: false,
     })
+    .map(|success| success.artifact)
     .unwrap();
     let keys = PublicKeys {
         ed25519: Some(&vk),
         p256: None,
     };
     let opt = VerifierOptions::default();
-    let full = verify_proto(&wire, &keys, opt.clone()).unwrap();
-    let pre = pre_verify_proto(&wire);
-    let step = verify_from_pre_verify_proto(&pre, &keys, opt).unwrap();
+    let full = verify(
+        &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
+        &keys,
+        opt.clone(),
+    )
+    .map(|result| result.state)
+    .unwrap();
+    let pre = pre_verify(
+        &wire,
+        yaml_sigil_traits::verification::ArtifactForm::Proto,
+        yaml_sigil_traits::verification::PreVerifyOptions {
+            allow_unsigned: false,
+            include_parser_observations: false,
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+        },
+    )
+    .unwrap();
+    let step = verify_from_pre_verify(&pre, &keys, opt)
+        .map(|result| result.state)
+        .unwrap();
     assert_eq!(full, step);
 }
 
@@ -939,7 +1278,7 @@ fn verifier_state_display_variants() {
     assert_eq!(VerifierState::Unsigned.to_string(), "Unsigned");
     assert_eq!(
         VerifierState::Verified {
-            payload: vec![],
+            payload: &[],
             algorithm: AlgorithmId::Ed25519,
         }
         .to_string(),

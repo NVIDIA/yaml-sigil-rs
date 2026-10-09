@@ -25,8 +25,19 @@ fn write_len_delimited_field(out: &mut Vec<u8>, field_number: u64, value: &[u8])
 #[test]
 fn roundtrip_opaque_carrier() {
     let inner = b"inner-carrier-bytes";
-    let wire = compose_proto_outer(b"k: v\n", inner);
-    match decompose_proto_outer(&wire, OuterConformance::Strict) {
+    let wire = compose_proto_outer(
+        b"k: v\n",
+        inner,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .expect("unbounded artifact policy");
+    match decompose_proto_outer(
+        &wire,
+        OuterConformance::Strict,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .expect("unbounded artifact policy")
+    {
         ProtoOuterDecomposeOutcome::Ok {
             payload,
             signature_carrier,
@@ -45,7 +56,12 @@ fn duplicate_signature_malformed() {
     write_len_delimited_field(&mut wire, 2, b"a");
     write_len_delimited_field(&mut wire, 2, b"b");
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::SignatureStrict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
@@ -55,7 +71,12 @@ fn missing_signature_malformed() {
     let mut wire = Vec::new();
     write_len_delimited_field(&mut wire, 1, b"p\n");
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::Strict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::Strict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
@@ -67,7 +88,12 @@ fn duplicate_payload_strict() {
     write_len_delimited_field(&mut wire, 1, b"second\n");
     write_len_delimited_field(&mut wire, 2, b"sig");
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::Strict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::Strict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
@@ -79,7 +105,12 @@ fn unknown_outer_field_strict() {
     write_len_delimited_field(&mut wire, 2, b"sig");
     write_len_delimited_field(&mut wire, 99, b"unknown");
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::Strict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::Strict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
@@ -90,7 +121,13 @@ fn last_payload_wins() {
     write_len_delimited_field(&mut wire, 1, b"first\n");
     write_len_delimited_field(&mut wire, 1, b"second\n");
     write_len_delimited_field(&mut wire, 2, b"sig");
-    match decompose_proto_outer(&wire, OuterConformance::SignatureStrict) {
+    match decompose_proto_outer(
+        &wire,
+        OuterConformance::SignatureStrict,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .expect("unbounded artifact policy")
+    {
         ProtoOuterDecomposeOutcome::Ok {
             payload,
             signature_carrier,
@@ -110,7 +147,12 @@ fn invalid_outer_field_numbers_are_malformed() {
         write_len_delimited_field(&mut wire, 2, b"sig");
         write_len_delimited_field(&mut wire, field_number, b"attacker\n");
         assert_eq!(
-            decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+            decompose_proto_outer(
+                &wire,
+                OuterConformance::SignatureStrict,
+                &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+            )
+            .expect("unbounded artifact policy"),
             ProtoOuterDecomposeOutcome::Malformed,
             "field number {field_number} must be rejected"
         );
@@ -126,7 +168,12 @@ fn overflowing_tenth_tag_varint_byte_is_malformed() {
     write_len_delimited_field(&mut wire, 2, b"sig");
 
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::SignatureStrict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
@@ -140,7 +187,12 @@ fn oversized_known_field_length_is_malformed_on_every_pointer_width() {
     write_len_delimited_field(&mut wire, 2, b"sig");
 
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::SignatureStrict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }
@@ -155,7 +207,12 @@ fn oversized_unknown_field_length_is_malformed_on_every_pointer_width() {
     write_len_delimited_field(&mut wire, 2, b"sig");
 
     assert_eq!(
-        decompose_proto_outer(&wire, OuterConformance::SignatureStrict),
+        decompose_proto_outer(
+            &wire,
+            OuterConformance::SignatureStrict,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+        )
+        .expect("unbounded artifact policy"),
         ProtoOuterDecomposeOutcome::Malformed
     );
 }

@@ -191,7 +191,8 @@ an unnatural workaround.
   reviewed specification revision. No conformance divergence is added.
 
   The coordinated
-  [`yaml-sigil-traits` update](https://github.com/NVIDIA/yaml-sigil-traits/pull/126)
+  [`yaml-sigil-traits`
+update](https://github.com/NVIDIA/yaml-sigil-traits/pull/126)
   advances its specification pin and notice link to the same revision without
   changing public trait or DTO definitions. This workspace retains
   `yaml-sigil-traits` `0.4.0`; no dependency or API reconciliation is needed.
@@ -443,8 +444,8 @@ YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
 size. `yaml-sigil-rs` provides opt-in `ArtifactResourceLimits` operations as
 implementation-local operational hardening. `DEFAULT_MAX_ARTIFACT_BYTES`
 defines the explicitly selected default. A caller may apply a smaller or
-larger bound, or no additional library-level bound. Existing unbounded
-operations do not select this policy implicitly.
+larger bound, or no additional library-level bound. Primary request and option
+defaults remain unbounded.
 
 Whole-artifact limits do not affect conformance results. Rejecting an artifact
 under a local resource policy does not make it malformed or non-conforming.
@@ -455,7 +456,8 @@ when no additional whole-artifact bound is selected.
 
 The resource API adds no fixture, fixture remapping, expected-outcome change,
 or deliberate conformance divergence. Availability alone does not remediate an
-existing unbounded caller. The caller must adopt a resource-aware operation at
+existing unbounded caller. The caller must select the policy on the primary
+operation at
 the affected trust boundary or demonstrate an equivalent earlier bound on the
 original raw input.
 
@@ -464,7 +466,8 @@ original raw input.
 `crates/yaml-sigil-core/src/p256_encoding.rs` provides optional conversions
 for provider inputs. Signing and verification re-export the helpers. Tests
 require strict DER, nonzero in-range signature components, valid public points,
-and fixed 64-octet signature and 65-octet public-key outputs. They preserve high-S
+and fixed 64-octet signature and 65-octet public-key outputs. They preserve
+high-S
 and low-S values and reject malformed, trailing, and unsupported encodings.
 `crates/yaml-sigil-verification/src/crypto.rs` verifies converted low-S and
 high-S signatures while retaining rejection of unconverted DER and compressed
@@ -641,3 +644,27 @@ When importing fixtures from a spec checkout:
    or expected outcomes change.
 4. Run `cargo test -p yaml-sigil-conformance --all-features` while iterating.
 5. Run `cargo xtask check` as the final validation gate.
+
+## Portable API validation
+
+The paired traits and implementation changes move resource policy into primary
+requests/options and flatten typed errors. Read results borrow the original
+artifact; write results own their output. `PreVerifyResponse::source_artifact`
+lets native and provider handoffs admit the original encoded input again.
+Sync and async contracts share these behaviors. Native P-256 additionally
+accepts a fallible caller CSPRNG without changing nonce sampling.
+
+`tests/no-std` validates isolated bare, alloc-only, YAML-only, protobuf-only,
+and combined consumers on Rust 1.95 and 1.98 with `thumbv7em-none-eabi`.
+It checks capabilities, borrowed payload identity and lifetimes, encoded-input
+handoff rejection, full signing/verification/transcription, and entropy failure.
+`cargo xtask no-std` inspects normal dependency features and verifies an
+allocator-free link with an alloc-enabled negative control. Hosted conformance
+and provider tests still exercise canonicality, qualification, call counts,
+error precedence, and unknown-field forwarding.
+
+These are Rust API and portability changes. Specification identifiers,
+algorithm profiles, fixture bytes, expected conformance outcomes, notices,
+and the existing JavaScript operation names remain unchanged. Full codecs
+require `alloc`; the byte scanner, payload validation, portable vocabulary,
+resource policy, and optional P-256 encoding conversions are allocator-free.

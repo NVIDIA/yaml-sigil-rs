@@ -3,6 +3,7 @@
 
 //! Encode inner `YamlSigilSignature` protobuf bytes for outer [`compose_proto_outer`].
 
+use alloc::{string::String, vec::Vec};
 use yaml_sigil_traits::AlgorithmId;
 
 /// Length-delimited body of outer field 2 (`signature` message).

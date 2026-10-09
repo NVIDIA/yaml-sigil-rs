@@ -56,7 +56,22 @@ fn placeholder_keys() -> EdVk {
     EdSk::from_bytes(&[1u8; 32]).verifying_key()
 }
 
-fn verify_with<V: ConformanceVerifier>(v: &V, file: &str, opts: VerifierOptions) -> VerifierState {
+fn fixture_state(state: VerifierState<'_>) -> VerifierState<'static> {
+    match state {
+        VerifierState::Verified { .. } => panic!("placeholder signature unexpectedly verified"),
+        VerifierState::Unsigned => VerifierState::Unsigned,
+        VerifierState::MalformedAttemptedSigned => VerifierState::MalformedAttemptedSigned,
+        VerifierState::SignedButFailedVerification => VerifierState::SignedButFailedVerification,
+        VerifierState::SignedButAlgorithmUnsupported { algorithm } => {
+            VerifierState::SignedButAlgorithmUnsupported { algorithm }
+        }
+    }
+}
+fn verify_with<V: ConformanceVerifier>(
+    v: &V,
+    file: &str,
+    opts: VerifierOptions<'_>,
+) -> VerifierState<'static> {
     let bytes = load_bytes(CATEGORY, file);
     let vk = placeholder_keys();
     let keys = PublicKeys {
@@ -64,6 +79,7 @@ fn verify_with<V: ConformanceVerifier>(v: &V, file: &str, opts: VerifierOptions)
         p256: None,
     };
     v.verify(&bytes, ArtifactForm::Yaml, &keys, opts)
+        .map(|result| fixture_state(result.state))
         .unwrap_or_else(|e| {
             panic!(
                 "{}/{}: unexpected invocation error {e:?} (suite expects only state values)",
@@ -91,7 +107,17 @@ pub fn run_yaml_signature_suite<V: ConformanceVerifier>(v: &V) {
 fn assert_universal_metadata_failures<V: ConformanceVerifier>(v: &V) {
     for file in UNIVERSAL_METADATA_FAILURES {
         let bytes = load_bytes(CATEGORY, file);
-        let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false);
+        let pre = v
+            .pre_verify(
+                &bytes,
+                ArtifactForm::Yaml,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .unwrap();
         assert_eq!(
             pre.outcome,
             PreVerifyOutcome::MetadataParseFailure,
@@ -166,8 +192,8 @@ fn assert_permissive_column<V: ConformanceVerifier>(v: &V) {
 async fn verify_with_async<V: ConformanceAsyncVerifier>(
     v: &V,
     file: &str,
-    opts: VerifierOptions,
-) -> VerifierState {
+    opts: VerifierOptions<'_>,
+) -> VerifierState<'static> {
     let bytes = load_bytes(CATEGORY, file);
     let vk = placeholder_keys();
     let keys = PublicKeys {
@@ -176,6 +202,7 @@ async fn verify_with_async<V: ConformanceAsyncVerifier>(
     };
     v.verify(&bytes, ArtifactForm::Yaml, &keys, opts)
         .await
+        .map(|result| fixture_state(result.state))
         .unwrap_or_else(|e| {
             panic!(
                 "{}/{}: unexpected invocation error {e:?} (suite expects only state values)",
@@ -200,7 +227,18 @@ pub async fn run_yaml_signature_suite_async<V: ConformanceAsyncVerifier>(v: &V) 
 async fn assert_universal_metadata_failures_async<V: ConformanceAsyncVerifier>(v: &V) {
     for file in UNIVERSAL_METADATA_FAILURES {
         let bytes = load_bytes(CATEGORY, file);
-        let pre = v.pre_verify(&bytes, ArtifactForm::Yaml, false, false).await;
+        let pre = v
+            .pre_verify(
+                &bytes,
+                ArtifactForm::Yaml,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(
             pre.outcome,
             PreVerifyOutcome::MetadataParseFailure,

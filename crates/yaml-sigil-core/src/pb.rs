@@ -8,8 +8,8 @@
 //! dependency version does not become part of this crate's public contract.
 //!
 //! YamlSigil `v1alpha1` defines no maximum complete artifact size. These
-//! types provide explicit resource-aware decode and encode variants. Existing
-//! methods retain their unbounded behavior. The protobuf format's own size
+//! artifact methods take resource policy directly and return flat categorized
+//! errors. Use `ArtifactResourceLimits::unbounded()` to omit the optional limit. The protobuf format's own size
 //! ceiling and the decoder's implementation safeguards still apply.
 //!
 //! # Construction and borrowed inspection
@@ -24,16 +24,16 @@
 //!     pb::{SignedYamlArtifact, SignedYamlArtifactRef, YamlSigilSignature},
 //! };
 //!
-//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # fn example() -> Result<(), Box<dyn core::error::Error>> {
 //! let signature =
 //!     YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
 //! let artifact =
 //!     SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
 //!
 //! let mut wire = Vec::with_capacity(artifact.encoded_len()?);
-//! artifact.encode_into(&mut wire)?;
+//! artifact.encode_into(&mut wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())?;
 //!
-//! let decoded = SignedYamlArtifactRef::decode(&wire)?;
+//! let decoded = SignedYamlArtifactRef::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())?;
 //! assert_eq!(decoded.payload(), b"message\n");
 //! assert_eq!(
 //!     decoded.signature().unwrap().algorithm(),
@@ -41,7 +41,7 @@
 //! );
 //!
 //! wire.clear();
-//! artifact.encode_into(&mut wire)?;
+//! artifact.encode_into(&mut wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())?;
 //! # Ok(())
 //! # }
 //! # example().unwrap();
@@ -49,8 +49,8 @@
 //!
 //! # External input boundaries
 //!
-//! Use [`SignedYamlArtifact::decode_with_resource_limits`] or
-//! [`SignedYamlArtifactRef::decode_with_resource_limits`] to check the original
+//! Use [`SignedYamlArtifact::decode`] or
+//! [`SignedYamlArtifactRef::decode`] to check the original
 //! wire length before Buffa parses or copies fields. The borrowed form keeps
 //! payload and signature bytes in the admitted input allocation.
 //!
@@ -65,21 +65,18 @@
 //! let signature =
 //!     YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
 //! let wire = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature))
-//!     .encode_to_vec_with_resource_limits(&ArtifactResourceLimits::default())
-//!     .unwrap()
+//!     .encode_to_vec(&ArtifactResourceLimits::default())
 //!     .unwrap();
 //!
-//! let owned = SignedYamlArtifact::decode_with_resource_limits(
+//! let owned = SignedYamlArtifact::decode(
 //!     &wire,
 //!     &ArtifactResourceLimits::default(),
 //! )
-//! .unwrap()
 //! .unwrap();
-//! let borrowed = SignedYamlArtifactRef::decode_with_resource_limits(
+//! let borrowed = SignedYamlArtifactRef::decode(
 //!     &wire,
 //!     &ArtifactResourceLimits::default(),
 //! )
-//! .unwrap()
 //! .unwrap();
 //! assert_eq!(owned.payload(), borrowed.payload());
 //! assert_eq!(borrowed.payload().as_ptr(), wire[2..].as_ptr());
@@ -105,11 +102,10 @@
 //! output.extend_from_slice(&[0xaa, 0xbb]);
 //! let allocation = output.as_ptr();
 //! artifact
-//!     .encode_into_with_resource_limits(
+//!     .encode_into(
 //!         &mut output,
 //!         &ArtifactResourceLimits::default(),
 //!     )
-//!     .unwrap()
 //!     .unwrap();
 //! assert_eq!(output.as_ptr(), allocation);
 //!
@@ -118,7 +114,7 @@
 //!     .with_max_artifact_bytes(NonZeroUsize::new(encoded_size - 1).unwrap());
 //! assert!(
 //!     artifact
-//!         .encode_into_with_resource_limits(&mut output, &too_small)
+//!         .encode_into(&mut output, &too_small)
 //!         .is_err()
 //! );
 //! assert_eq!(output, before);
@@ -127,7 +123,9 @@
 //! A local rejection does not make an artifact malformed or non-conforming.
 //! The `v1alpha1` 16,384-octet YAML signature-carrier constraint is separate.
 
-use std::fmt;
+use alloc::{string::String, vec::Vec};
+
+use core::fmt;
 
 use buffa::MessageView as _;
 
@@ -139,177 +137,30 @@ use crate::generated_proto::yaml_sigil::v1alpha1::{
 };
 use crate::{AlgorithmId, ArtifactResourceForm, ArtifactResourceLimits, ArtifactResourceResult};
 
-/// Stable categories for protobuf decoding failures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum DecodeErrorKind {
-    /// The input ended before the current value was complete.
-    UnexpectedEnd,
-    /// A varint exceeded the protobuf encoding width.
-    InvalidVarint,
-    /// A tag contained field number zero or an unrepresentable field number.
-    InvalidFieldNumber,
-    /// A tag used a wire type that protobuf does not define.
-    InvalidWireType,
-    /// A known field used a wire type other than its schema-defined type.
-    UnexpectedWireType,
-    /// A protobuf `string` field was not valid UTF-8.
-    InvalidUtf8,
-    /// The input exceeded the protobuf message-size ceiling.
-    MessageTooLarge,
-    /// The input exceeded the decoder's nesting safeguard.
-    RecursionLimitExceeded,
-    /// The input exceeded the decoder's unknown-field safeguard.
-    UnknownFieldLimitExceeded,
-    /// The input exceeded the decoder's element-memory safeguard.
-    ElementMemoryLimitExceeded,
-    /// A protobuf group was incomplete or had a mismatched terminator.
-    InvalidGroup,
-    /// A decoder failure did not match another stable category.
-    Other,
-}
+pub use yaml_sigil_traits::codec::{
+    ArtifactDecodeError, ArtifactEncodeError, DecodeError, DecodeErrorKind, EncodeError,
+    EncodeErrorKind,
+};
 
-impl DecodeErrorKind {
-    fn description(self) -> &'static str {
-        match self {
-            Self::UnexpectedEnd => "unexpected end of input",
-            Self::InvalidVarint => "invalid varint",
-            Self::InvalidFieldNumber => "invalid field number",
-            Self::InvalidWireType => "invalid wire type",
-            Self::UnexpectedWireType => "unexpected wire type for field",
-            Self::InvalidUtf8 => "invalid UTF-8 string field",
-            Self::MessageTooLarge => "message exceeds the protobuf size ceiling",
-            Self::RecursionLimitExceeded => "decoder recursion safeguard exceeded",
-            Self::UnknownFieldLimitExceeded => "decoder unknown-field safeguard exceeded",
-            Self::ElementMemoryLimitExceeded => "decoder element-memory safeguard exceeded",
-            Self::InvalidGroup => "invalid protobuf group",
-            Self::Other => "other protobuf decode failure",
+fn decode_error_from_buffa(error: buffa::DecodeError) -> DecodeError {
+    let kind = match error {
+        buffa::DecodeError::UnexpectedEof => DecodeErrorKind::UnexpectedEnd,
+        buffa::DecodeError::VarintTooLong => DecodeErrorKind::InvalidVarint,
+        buffa::DecodeError::InvalidWireType(_) => DecodeErrorKind::InvalidWireType,
+        buffa::DecodeError::InvalidFieldNumber => DecodeErrorKind::InvalidFieldNumber,
+        buffa::DecodeError::MessageTooLarge => DecodeErrorKind::MessageTooLarge,
+        buffa::DecodeError::WireTypeMismatch { .. } => DecodeErrorKind::UnexpectedWireType,
+        buffa::DecodeError::InvalidUtf8 => DecodeErrorKind::InvalidUtf8,
+        buffa::DecodeError::RecursionLimitExceeded => DecodeErrorKind::RecursionLimitExceeded,
+        buffa::DecodeError::InvalidEndGroup(_) => DecodeErrorKind::InvalidGroup,
+        buffa::DecodeError::UnknownFieldLimitExceeded => DecodeErrorKind::UnknownFieldLimitExceeded,
+        buffa::DecodeError::ElementMemoryLimitExceeded => {
+            DecodeErrorKind::ElementMemoryLimitExceeded
         }
-    }
+        _ => DecodeErrorKind::Other,
+    };
+    DecodeError::from_kind(kind)
 }
-
-/// Opaque, redacted protobuf decoding error.
-#[derive(Clone, PartialEq, Eq)]
-pub struct DecodeError {
-    kind: DecodeErrorKind,
-}
-
-impl DecodeError {
-    /// Return the stable failure category.
-    #[must_use]
-    pub const fn kind(&self) -> DecodeErrorKind {
-        self.kind
-    }
-
-    fn from_buffa(error: buffa::DecodeError) -> Self {
-        let kind = match error {
-            buffa::DecodeError::UnexpectedEof => DecodeErrorKind::UnexpectedEnd,
-            buffa::DecodeError::VarintTooLong => DecodeErrorKind::InvalidVarint,
-            buffa::DecodeError::InvalidWireType(_) => DecodeErrorKind::InvalidWireType,
-            buffa::DecodeError::InvalidFieldNumber => DecodeErrorKind::InvalidFieldNumber,
-            buffa::DecodeError::MessageTooLarge => DecodeErrorKind::MessageTooLarge,
-            buffa::DecodeError::WireTypeMismatch { .. } => DecodeErrorKind::UnexpectedWireType,
-            buffa::DecodeError::InvalidUtf8 => DecodeErrorKind::InvalidUtf8,
-            buffa::DecodeError::RecursionLimitExceeded => DecodeErrorKind::RecursionLimitExceeded,
-            buffa::DecodeError::InvalidEndGroup(_) => DecodeErrorKind::InvalidGroup,
-            buffa::DecodeError::UnknownFieldLimitExceeded => {
-                DecodeErrorKind::UnknownFieldLimitExceeded
-            }
-            buffa::DecodeError::ElementMemoryLimitExceeded => {
-                DecodeErrorKind::ElementMemoryLimitExceeded
-            }
-            _ => DecodeErrorKind::Other,
-        };
-        Self { kind }
-    }
-}
-
-impl fmt::Debug for DecodeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DecodeError")
-            .field("kind", &self.kind)
-            .finish_non_exhaustive()
-    }
-}
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "protobuf decode failed: {}",
-            self.kind.description()
-        )
-    }
-}
-
-impl std::error::Error for DecodeError {}
-
-/// Stable categories for protobuf encoding failures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum EncodeErrorKind {
-    /// The encoded message would exceed the protobuf size ceiling.
-    MessageTooLarge,
-    /// An encoder failure did not match another stable category.
-    Other,
-}
-
-impl EncodeErrorKind {
-    fn description(self) -> &'static str {
-        match self {
-            Self::MessageTooLarge => "message exceeds the protobuf size ceiling",
-            Self::Other => "other protobuf encode failure",
-        }
-    }
-}
-
-/// Opaque, redacted protobuf encoding error.
-#[derive(Clone, PartialEq, Eq)]
-pub struct EncodeError {
-    kind: EncodeErrorKind,
-}
-
-impl EncodeError {
-    /// Return the stable failure category.
-    #[must_use]
-    pub const fn kind(&self) -> EncodeErrorKind {
-        self.kind
-    }
-
-    const fn message_too_large() -> Self {
-        Self {
-            kind: EncodeErrorKind::MessageTooLarge,
-        }
-    }
-
-    const fn other() -> Self {
-        Self {
-            kind: EncodeErrorKind::Other,
-        }
-    }
-}
-
-impl fmt::Debug for EncodeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("EncodeError")
-            .field("kind", &self.kind)
-            .finish_non_exhaustive()
-    }
-}
-
-impl fmt::Display for EncodeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "protobuf encode failed: {}",
-            self.kind.description()
-        )
-    }
-}
-
-impl std::error::Error for EncodeError {}
 
 fn algorithm_wire_value(algorithm: AlgorithmId) -> i32 {
     match algorithm {
@@ -760,23 +611,16 @@ impl SignedYamlArtifact {
         }
     }
 
-    /// Decode an owned artifact.
-    pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
-        decode_generated_artifact(input, &buffa::DecodeOptions::new())
-    }
-
     /// Decode an owned artifact after applying an explicit input policy.
-    pub fn decode_with_resource_limits(
+    pub fn decode(
         input: &[u8],
         limits: &ArtifactResourceLimits,
-    ) -> ArtifactResourceResult<Result<Self, DecodeError>> {
+    ) -> Result<Self, ArtifactDecodeError> {
         let input = limits.check_input_size(ArtifactResourceForm::Protobuf, input)?;
-        Ok(Self::decode(input))
-    }
-
-    /// Alias for [`Self::decode`].
-    pub fn decode_from_slice(input: &[u8]) -> Result<Self, DecodeError> {
-        Self::decode(input)
+        Ok(decode_generated_artifact(
+            input,
+            &buffa::DecodeOptions::new(),
+        )?)
     }
 
     /// Return the arbitrary payload octets.
@@ -839,36 +683,28 @@ impl SignedYamlArtifact {
         facade_encoded_len(self)
     }
 
-    /// Encode into a new byte vector.
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError> {
-        encode_facade_to_vec(self)
-    }
-
     /// Encode into a new byte vector after applying an explicit output policy.
-    pub fn encode_to_vec_with_resource_limits(
+    pub fn encode_to_vec(
         &self,
         limits: &ArtifactResourceLimits,
-    ) -> ArtifactResourceResult<Result<Vec<u8>, EncodeError>> {
-        encode_facade_to_vec_with_resource_limits(self, limits)
-    }
-
-    /// Append the encoded message to a reusable destination.
-    ///
-    /// If this method returns an error, `destination` is unchanged.
-    pub fn encode_into(&self, destination: &mut Vec<u8>) -> Result<(), EncodeError> {
-        encode_facade_into(self, destination)
+    ) -> Result<Vec<u8>, ArtifactEncodeError> {
+        Ok(encode_facade_to_vec_with_resource_limits(self, limits)??)
     }
 
     /// Append after applying an explicit output policy.
     ///
     /// The artifact size excludes pre-existing destination bytes and capacity.
     /// Every returned error leaves `destination` unchanged.
-    pub fn encode_into_with_resource_limits(
+    pub fn encode_into(
         &self,
         destination: &mut Vec<u8>,
         limits: &ArtifactResourceLimits,
-    ) -> ArtifactResourceResult<Result<(), EncodeError>> {
-        encode_facade_into_with_resource_limits(self, destination, limits)
+    ) -> Result<(), ArtifactEncodeError> {
+        Ok(encode_facade_into_with_resource_limits(
+            self,
+            destination,
+            limits,
+        )??)
     }
 
     fn from_generated(generated: GeneratedSignedYamlArtifact) -> Self {
@@ -911,7 +747,7 @@ impl FacadeEncode for SignedYamlArtifact {
 ///
 /// fn invalid() -> SignedYamlArtifactRef<'static> {
 ///     let wire = vec![0x12, 0x00];
-///     SignedYamlArtifactRef::decode(&wire).unwrap()
+///     SignedYamlArtifactRef::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded()).unwrap()
 /// }
 /// ```
 pub struct SignedYamlArtifactRef<'a> {
@@ -930,23 +766,16 @@ impl fmt::Debug for SignedYamlArtifactRef<'_> {
 }
 
 impl<'a> SignedYamlArtifactRef<'a> {
-    /// Decode a borrowed artifact view without copying byte fields.
-    pub fn decode(input: &'a [u8]) -> Result<Self, DecodeError> {
-        decode_generated_artifact_ref(input, &buffa::DecodeOptions::new())
-    }
-
     /// Decode a borrowed view after applying an explicit input policy.
-    pub fn decode_with_resource_limits(
+    pub fn decode(
         input: &'a [u8],
         limits: &ArtifactResourceLimits,
-    ) -> ArtifactResourceResult<Result<Self, DecodeError>> {
+    ) -> Result<Self, ArtifactDecodeError> {
         let input = limits.check_input_size(ArtifactResourceForm::Protobuf, input)?;
-        Ok(Self::decode(input))
-    }
-
-    /// Alias for [`Self::decode`].
-    pub fn decode_from_slice(input: &'a [u8]) -> Result<Self, DecodeError> {
-        Self::decode(input)
+        Ok(decode_generated_artifact_ref(
+            input,
+            &buffa::DecodeOptions::new(),
+        )?)
     }
 
     /// Return the arbitrary payload octets borrowed from the input.
@@ -982,7 +811,7 @@ impl<'a> SignedYamlArtifactRef<'a> {
         self.inner
             .to_owned_message()
             .map(SignedYamlArtifact::from_generated)
-            .map_err(DecodeError::from_buffa)
+            .map_err(decode_error_from_buffa)
     }
 
     /// Return the encoded protobuf size after normal protobuf merge semantics.
@@ -990,36 +819,28 @@ impl<'a> SignedYamlArtifactRef<'a> {
         facade_encoded_len(self)
     }
 
-    /// Re-encode the borrowed view into a new byte vector.
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError> {
-        encode_facade_to_vec(self)
-    }
-
     /// Re-encode into a new byte vector after applying an explicit output policy.
-    pub fn encode_to_vec_with_resource_limits(
+    pub fn encode_to_vec(
         &self,
         limits: &ArtifactResourceLimits,
-    ) -> ArtifactResourceResult<Result<Vec<u8>, EncodeError>> {
-        encode_facade_to_vec_with_resource_limits(self, limits)
-    }
-
-    /// Append the re-encoded view to a reusable destination.
-    ///
-    /// If this method returns an error, `destination` is unchanged.
-    pub fn encode_into(&self, destination: &mut Vec<u8>) -> Result<(), EncodeError> {
-        encode_facade_into(self, destination)
+    ) -> Result<Vec<u8>, ArtifactEncodeError> {
+        Ok(encode_facade_to_vec_with_resource_limits(self, limits)??)
     }
 
     /// Append after applying an explicit output policy.
     ///
     /// The artifact size excludes pre-existing destination bytes and capacity.
     /// Every returned error leaves `destination` unchanged.
-    pub fn encode_into_with_resource_limits(
+    pub fn encode_into(
         &self,
         destination: &mut Vec<u8>,
         limits: &ArtifactResourceLimits,
-    ) -> ArtifactResourceResult<Result<(), EncodeError>> {
-        encode_facade_into_with_resource_limits(self, destination, limits)
+    ) -> Result<(), ArtifactEncodeError> {
+        Ok(encode_facade_into_with_resource_limits(
+            self,
+            destination,
+            limits,
+        )??)
     }
 }
 
@@ -1117,7 +938,7 @@ impl<'a> YamlSigilSignatureRef<'a> {
         self.generated()
             .to_owned_message()
             .map(YamlSigilSignature::from_generated)
-            .map_err(DecodeError::from_buffa)
+            .map_err(decode_error_from_buffa)
     }
 
     /// Return the encoded protobuf size after normal protobuf merge semantics.
@@ -1167,7 +988,7 @@ fn decode_generated_artifact(
     options
         .decode_from_slice::<GeneratedSignedYamlArtifact>(input)
         .map(SignedYamlArtifact::from_generated)
-        .map_err(DecodeError::from_buffa)
+        .map_err(decode_error_from_buffa)
 }
 
 fn decode_generated_signature(
@@ -1177,7 +998,7 @@ fn decode_generated_signature(
     options
         .decode_from_slice::<GeneratedYamlSigilSignature>(input)
         .map(YamlSigilSignature::from_generated)
-        .map_err(DecodeError::from_buffa)
+        .map_err(decode_error_from_buffa)
 }
 
 fn decode_generated_artifact_ref<'a>(
@@ -1187,7 +1008,7 @@ fn decode_generated_artifact_ref<'a>(
     options
         .decode_view::<GeneratedSignedYamlArtifactView<'a>>(input)
         .map(|inner| SignedYamlArtifactRef { inner })
-        .map_err(DecodeError::from_buffa)
+        .map_err(decode_error_from_buffa)
 }
 
 fn decode_generated_signature_ref<'a>(
@@ -1199,14 +1020,14 @@ fn decode_generated_signature_ref<'a>(
         .map(|inner| YamlSigilSignatureRef {
             inner: SignatureRefInner::Direct(inner),
         })
-        .map_err(DecodeError::from_buffa)
+        .map_err(decode_error_from_buffa)
 }
 
-pub(crate) enum RawOuterDecomposeOutcome {
+pub(crate) enum RawOuterDecomposeOutcome<'input> {
     Malformed,
     Ok {
-        payload: Vec<u8>,
-        signature_carrier: Vec<u8>,
+        payload: &'input [u8],
+        signature_carrier: &'input [u8],
     },
 }
 
@@ -1281,6 +1102,7 @@ impl FacadeEncode for RawOuter<'_> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn compose_raw_outer(payload: &[u8], signature_carrier: &[u8]) -> Vec<u8> {
     let raw = RawOuter {
         payload,
@@ -1324,10 +1146,10 @@ pub(crate) fn compose_raw_outer_with_resource_limits(
 pub(crate) fn decompose_raw_outer(
     wire: &[u8],
     mode: crate::OuterConformance,
-) -> RawOuterDecomposeOutcome {
-    let mut payload: Option<Vec<u8>> = None;
+) -> RawOuterDecomposeOutcome<'_> {
+    let mut payload: Option<&[u8]> = None;
     let mut payload_count = 0u32;
-    let mut signature_carrier: Option<Vec<u8>> = None;
+    let mut signature_carrier: Option<&[u8]> = None;
     let mut signature_count = 0u32;
     let mut index = 0usize;
 
@@ -1366,14 +1188,14 @@ pub(crate) fn decompose_raw_outer(
                 if mode == crate::OuterConformance::Strict && payload_count > 1 {
                     return RawOuterDecomposeOutcome::Malformed;
                 }
-                payload = Some(value.to_vec());
+                payload = Some(value);
             }
             2 => {
                 signature_count += 1;
                 if signature_count > 1 {
                     return RawOuterDecomposeOutcome::Malformed;
                 }
-                signature_carrier = Some(value.to_vec());
+                signature_carrier = Some(value);
             }
             _ => {
                 if mode == crate::OuterConformance::Strict {
@@ -1395,7 +1217,7 @@ pub(crate) fn decompose_raw_outer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::num::NonZeroUsize;
+    use core::num::NonZeroUsize;
 
     fn assert_send_sync<T: Send + Sync>() {}
 
@@ -1600,14 +1422,14 @@ mod tests {
             .decode_from_slice::<ElementChargedMessage>(&[0x08, 0x01])
             .unwrap_err();
         assert_eq!(
-            DecodeError::from_buffa(error).kind(),
+            decode_error_from_buffa(error).kind(),
             DecodeErrorKind::ElementMemoryLimitExceeded
         );
     }
 
     #[test]
     fn redacted_errors_contain_categories_only() {
-        let error = DecodeError::from_buffa(buffa::DecodeError::WireTypeMismatch {
+        let error = decode_error_from_buffa(buffa::DecodeError::WireTypeMismatch {
             field_number: 99,
             expected: 2,
             actual: 0,

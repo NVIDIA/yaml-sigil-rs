@@ -55,7 +55,17 @@ pub fn run_verification_runtime_suite<V: ConformanceVerifier>(verifier: &V) {
     for (extension, form) in FORMS {
         let valid_file = format!("valid.{extension}");
         let valid = load_bytes(CATEGORY, &valid_file);
-        let pre = verifier.pre_verify(&valid, *form, false, false);
+        let pre = verifier
+            .pre_verify(
+                &valid,
+                *form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .unwrap();
         assert_eq!(
             pre.outcome,
             PreVerifyOutcome::Ok,
@@ -63,6 +73,7 @@ pub fn run_verification_runtime_suite<V: ConformanceVerifier>(verifier: &V) {
         );
         let state = verifier
             .verify(&valid, *form, &keys, VerifierOptions::default())
+            .map(|result| result.state)
             .unwrap_or_else(|error| panic!("{valid_file}: verification error: {error}"));
         assert_verified(state, &expected_payload, &valid_file);
 
@@ -72,6 +83,7 @@ pub fn run_verification_runtime_suite<V: ConformanceVerifier>(verifier: &V) {
         };
         let state = verifier
             .verify(&valid, *form, &keys, unsupported)
+            .map(|result| result.state)
             .unwrap_or_else(|error| panic!("{valid_file}: unsupported check error: {error}"));
         assert_eq!(
             state,
@@ -83,7 +95,17 @@ pub fn run_verification_runtime_suite<V: ConformanceVerifier>(verifier: &V) {
 
         let mismatch_file = format!("cryptographic-mismatch.{extension}");
         let mismatch = load_bytes(CATEGORY, &mismatch_file);
-        let pre = verifier.pre_verify(&mismatch, *form, false, false);
+        let pre = verifier
+            .pre_verify(
+                &mismatch,
+                *form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .unwrap();
         assert_eq!(
             pre.outcome,
             PreVerifyOutcome::Ok,
@@ -91,6 +113,7 @@ pub fn run_verification_runtime_suite<V: ConformanceVerifier>(verifier: &V) {
         );
         let state = verifier
             .verify(&mismatch, *form, &keys, VerifierOptions::default())
+            .map(|result| result.state)
             .unwrap_or_else(|error| panic!("{mismatch_file}: verification error: {error}"));
         assert_eq!(
             state,
@@ -113,7 +136,18 @@ pub async fn run_verification_runtime_suite_async<V: ConformanceAsyncVerifier>(v
     for (extension, form) in FORMS {
         let valid_file = format!("valid.{extension}");
         let valid = load_bytes(CATEGORY, &valid_file);
-        let pre = verifier.pre_verify(&valid, *form, false, false).await;
+        let pre = verifier
+            .pre_verify(
+                &valid,
+                *form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(
             pre.outcome,
             PreVerifyOutcome::Ok,
@@ -122,6 +156,7 @@ pub async fn run_verification_runtime_suite_async<V: ConformanceAsyncVerifier>(v
         let state = verifier
             .verify(&valid, *form, &keys, VerifierOptions::default())
             .await
+            .map(|result| result.state)
             .unwrap_or_else(|error| panic!("{valid_file}: async verification error: {error}"));
         assert_verified(state, &expected_payload, &valid_file);
 
@@ -132,6 +167,7 @@ pub async fn run_verification_runtime_suite_async<V: ConformanceAsyncVerifier>(v
         let state = verifier
             .verify(&valid, *form, &keys, unsupported)
             .await
+            .map(|result| result.state)
             .unwrap_or_else(|error| panic!("{valid_file}: async unsupported error: {error}"));
         assert_eq!(
             state,
@@ -143,7 +179,18 @@ pub async fn run_verification_runtime_suite_async<V: ConformanceAsyncVerifier>(v
 
         let mismatch_file = format!("cryptographic-mismatch.{extension}");
         let mismatch = load_bytes(CATEGORY, &mismatch_file);
-        let pre = verifier.pre_verify(&mismatch, *form, false, false).await;
+        let pre = verifier
+            .pre_verify(
+                &mismatch,
+                *form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(
             pre.outcome,
             PreVerifyOutcome::Ok,
@@ -152,6 +199,7 @@ pub async fn run_verification_runtime_suite_async<V: ConformanceAsyncVerifier>(v
         let state = verifier
             .verify(&mismatch, *form, &keys, VerifierOptions::default())
             .await
+            .map(|result| result.state)
             .unwrap_or_else(|error| panic!("{mismatch_file}: async verification error: {error}"));
         assert_eq!(
             state,

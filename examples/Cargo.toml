@@ -21,12 +21,13 @@ build = false
 workspace = true
 
 [dev-dependencies]
+yaml-sigil-traits = { workspace = true, features = ["std"] }
 # These groups describe usage, including shared modules and tests. Cargo makes
 # every entry available to every example target; the groups do not gate builds.
 
 # Every example: error handling and public document/artifact types.
 anyhow = "1.0"
-yaml-sigil-core = { workspace = true }
+yaml-sigil-core = { workspace = true, features = ["std", "yaml", "protobuf"] }
 
 # ring-provider, aws-lc-provider, ring-unqualified-provider, async-provider,
 # and github-keys:
@@ -34,8 +35,8 @@ yaml-sigil-core = { workspace = true }
 base64 = { workspace = true }
 clap = { version = "4.6", features = ["derive"] }
 signature = { workspace = true }
-yaml-sigil-signing = { workspace = true }
-yaml-sigil-verification = { workspace = true }
+yaml-sigil-signing = { workspace = true, features = ["std", "yaml", "protobuf", "system-rng"] }
+yaml-sigil-verification = { workspace = true, features = ["std", "yaml", "protobuf"] }
 
 # Provider and github-keys file-input tests.
 tempfile = "3"

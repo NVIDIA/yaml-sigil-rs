@@ -88,25 +88,24 @@ mod tests {
             0
         );
 
-        let composed = yaml_sigil_transcription::compose_with_resource_limits(
-            &yaml_sigil_transcription::ComposeRequest {
+        let composed =
+            yaml_sigil_transcription::compose(&yaml_sigil_transcription::ComposeRequest {
+                resource_limits: limits.clone(),
                 payload: input,
                 signature_carrier: b"carrier",
                 form: yaml_sigil_transcription::TranscriptionForm::Protobuf,
-            },
-            &limits,
-        )
-        .unwrap()
-        .unwrap();
-        assert!(matches!(
-            composed,
-            yaml_sigil_transcription::ComposeOutcome::Success(_)
-        ));
+            })
+            .unwrap();
+        assert!(!composed.artifact.is_empty());
 
-        let pre = yaml_sigil_verification::pre_verify_yaml_with_resource_limits(
+        let pre = yaml_sigil_verification::pre_verify(
             input,
-            true,
-            &limits,
+            yaml_sigil_verification::ArtifactForm::Yaml,
+            yaml_sigil_verification::PreVerifyOptions {
+                allow_unsigned: true,
+                include_parser_observations: false,
+                resource_limits: limits.clone(),
+            },
         )
         .unwrap();
         assert_eq!(
@@ -117,10 +116,8 @@ mod tests {
         // Referencing these concrete function items proves that the signing
         // and transcoding resource surface is usable without naming a
         // `yaml-sigil-traits` type in this downstream manifest.
-        let _ = yaml_sigil_signing::sign_with_resource_limits;
-        let _ = yaml_sigil_signing::sign_yaml_with_resource_limits;
-        let _ = yaml_sigil_signing::sign_proto_with_resource_limits;
-        let _ = yaml_sigil_signing::signed_yaml_stream_to_proto_wire_with_resource_limits;
-        let _ = yaml_sigil_signing::proto_wire_to_signed_yaml_stream_with_resource_limits;
+        let _ = yaml_sigil_signing::sign;
+        let _ = yaml_sigil_signing::signed_yaml_stream_to_proto_wire;
+        let _ = yaml_sigil_signing::proto_wire_to_signed_yaml_stream;
     }
 }

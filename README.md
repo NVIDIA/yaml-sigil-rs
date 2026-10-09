@@ -47,6 +47,16 @@ existing result classes and resource-policy objects.
 Selecting the namespace preserves feature requirements, runtime behavior,
 and YAML and protobuf wire formats.
 
+## Portable builds
+
+The four Rust implementation crates support `no_std`. Defaults enable `std`,
+`yaml`, and `protobuf`; signing also enables `system-rng`. Disable defaults
+for an allocator-free core, or select `yaml` and/or `protobuf` for complete
+operations with `alloc`. Format features are independent: YAML-only builds
+omit Buffa and protobuf generation, and protobuf-only builds omit the YAML
+parser. P-256 signing without `system-rng` uses a fallible caller RNG or a
+provider. Read the [portable API and migration guide](./docs/no-std.md).
+
 ## Crates
 
 The workspace provides four Rust implementation crates and a WebAssembly
@@ -219,8 +229,9 @@ boundary selection uses the last constrained marker.
 
 YamlSigil `v1alpha1` defines no maximum complete YAML or protobuf artifact
 size. The implementation crates expose one shared `ArtifactResourceLimits`
-policy and explicit `_with_resource_limits` operations for complete artifact
-inputs and outputs. `ArtifactResourceLimits::default()` selects
+policy through the primary Rust requests, verifier options, and codec
+arguments for complete artifact inputs and outputs.
+`ArtifactResourceLimits::default()` selects
 `DEFAULT_MAX_ARTIFACT_BYTES`. You can choose a lower ceiling, a higher ceiling,
 or no additional byte limit.
 
@@ -236,7 +247,7 @@ fn inspect(
     limits: &ArtifactResourceLimits,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let artifact =
-        SignedYamlArtifactRef::decode_with_resource_limits(input, limits)??;
+        SignedYamlArtifactRef::decode(input, limits)?;
     Ok(artifact.payload().len())
 }
 
@@ -257,17 +268,14 @@ conclusive lower bound for its earliest check and still checks the final exact
 serialized size. A lower-bound rejection intentionally reports no exact output
 size.
 
-For an operation that produces protobuf through the raw outer composer, the
-outer result reports resource rejection, a middle result preserves the
-protobuf format error, and the existing operation return remains the inner
-value. This keeps the selected resource ceiling ahead of the protobuf format
-ceiling without changing portable trait outcomes.
+Each primary Rust operation returns one typed `Result`. Match resource,
+invocation, or encoding error variants directly. Signing and composition
+produce owned output; decomposition and successful verification borrow the
+original artifact. `PreVerifyResponse::source_artifact` retains that encoded
+input so verification can apply its own policy before using extracted data.
 
-The existing entry points remain unbounded by this optional policy. Merely
-upgrading to a release that provides the bounded APIs does not remediate an
-existing caller. Adopt a resource-aware operation at the affected trust
-boundary, or establish that an equivalent earlier bound covers the original
-raw input.
+Operation options default to unbounded. Select the default policy explicitly
+at each trust boundary, or enforce an equivalent earlier raw-input bound.
 
 Protobuf format limits, parser safeguards, address-space limits, allocator
 limits, and other deployment controls still apply. The existing 16,384-octet
@@ -289,8 +297,8 @@ The development toolchain follows Rust `stable` through
 `1.95.0`, as declared in the root `Cargo.toml`. Protobuf code generation uses
 the Buf executable provided by the Cargo-resolved `buf-tools` build dependency.
 Its minimum version requirement is declared in [Cargo.toml](Cargo.toml). A system
-`buf` or `protoc` installation is not required. The first uncached build downloads
-and verifies the corresponding official Buf release asset.
+`buf` or `protoc` installation is not required. The first uncached build
+downloads and verifies the corresponding official Buf release asset.
 
 The root workspace publishes library crates and does not commit `Cargo.lock`.
 Cargo may generate an ignored local lockfile while building or testing. The
@@ -330,7 +338,15 @@ Run the full local validation gate or select checks while iterating:
 cargo xtask check
 cargo xtask check --only=fmt,clippy,test
 cargo xtask check --exclude=audit
+cargo xtask no-std
 ```
+
+`no-std` is opt-in and uses an isolated consumer workspace, independent of
+hosted workspace feature unification. Install `thumbv7em-none-eabi` for the
+selected toolchains first. Use `--traits-path ../yaml-sigil-traits` on the
+xtask when validating an unpublished paired traits change; its temporary
+Cargo patch covers nested commands and is restored on exit. This does not
+change publication dependencies or select a release version.
 
 The registry runs in this order: `markdown`, `protobuf`, `fmt`, `versions`,
 `package-content`, `check`, `clippy`, `test`, `downstream`, `machete`, `deny`,

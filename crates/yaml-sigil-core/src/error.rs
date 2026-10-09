@@ -3,6 +3,8 @@
 
 //! Errors surfaced by `yaml-sigil-core`.
 
+use alloc::string::{String, ToString};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -26,8 +28,8 @@ pub enum CoreError {
     EmptySignature,
 }
 
-impl From<crate::pb::DecodeError> for CoreError {
-    fn from(error: crate::pb::DecodeError) -> Self {
+impl From<crate::DecodeError> for CoreError {
+    fn from(error: crate::DecodeError) -> Self {
         CoreError::ProtobufDecode(error.to_string())
     }
 }

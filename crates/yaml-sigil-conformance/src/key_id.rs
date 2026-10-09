@@ -5,8 +5,7 @@
 //! Covers keyid presence, byte bounds, multibyte boundaries, and line breaks.
 
 use yaml_sigil_transcription::{
-    AsyncTranscriber, ComposeOutcome, ComposeRequest, Transcriber, TranscriberError,
-    TranscriptionForm,
+    AsyncTranscriber, ComposeRequest, Transcriber, TranscriberError, TranscriptionForm,
 };
 use yaml_sigil_verification::{ArtifactForm, AsyncVerifier, PreVerifyOutcome, Verifier};
 
@@ -103,7 +102,17 @@ const FIXTURES: &[KeyidFixture] = &[
 pub fn run_keyid_suite<V: Verifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
-        let pre = v.pre_verify(&bytes, fx.form, false, false);
+        let pre = v
+            .pre_verify(
+                &bytes,
+                fx.form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .unwrap();
         match fx.expect {
             Expectation::Accepted => assert_eq!(
                 pre.outcome,
@@ -130,7 +139,18 @@ pub fn run_keyid_suite<V: Verifier>(v: &V) {
 pub async fn run_keyid_suite_async<V: AsyncVerifier>(v: &V) {
     for fx in FIXTURES {
         let bytes = load_bytes(CATEGORY, fx.file);
-        let pre = v.pre_verify(&bytes, fx.form, false, false).await;
+        let pre = v
+            .pre_verify(
+                &bytes,
+                fx.form,
+                yaml_sigil_traits::verification::PreVerifyOptions {
+                    allow_unsigned: false,
+                    include_parser_observations: false,
+                    resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                },
+            )
+            .await
+            .unwrap();
         match fx.expect {
             Expectation::Accepted => assert_eq!(
                 pre.outcome,
@@ -156,13 +176,16 @@ pub async fn run_keyid_suite_async<V: AsyncVerifier>(v: &V) {
 pub fn run_keyid_compose_suite<T: Transcriber>(t: &T) {
     let carrier = load_bytes(CATEGORY, "keyid-marker-injection.carrier.txt");
     let outcome = t.compose(&ComposeRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload: b"payload: example\n",
         signature_carrier: &carrier,
         form: TranscriptionForm::Yaml,
     });
     assert!(matches!(
         outcome,
-        ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier)
+        Err(yaml_sigil_traits::transcription::ComposeError::Content(
+            TranscriberError::InvalidSignatureCarrier
+        ))
     ));
 }
 
@@ -170,6 +193,7 @@ pub async fn run_keyid_compose_suite_async<T: AsyncTranscriber>(t: &T) {
     let carrier = load_bytes(CATEGORY, "keyid-marker-injection.carrier.txt");
     let outcome = t
         .compose(&ComposeRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             payload: b"payload: example\n",
             signature_carrier: &carrier,
             form: TranscriptionForm::Yaml,
@@ -177,6 +201,8 @@ pub async fn run_keyid_compose_suite_async<T: AsyncTranscriber>(t: &T) {
         .await;
     assert!(matches!(
         outcome,
-        ComposeOutcome::Error(TranscriberError::InvalidSignatureCarrier)
+        Err(yaml_sigil_traits::transcription::ComposeError::Content(
+            TranscriberError::InvalidSignatureCarrier
+        ))
     ));
 }

@@ -43,6 +43,7 @@ mod tests {
             ),
         ] {
             let request: yaml_sigil_signing::SignRequest<'_> = signing::SignRequest {
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
                 payload: b"namespace: v1alpha1\n",
                 algorithm: contract::AlgorithmId::Ed25519,
                 key: signing::SigningKey::Ed25519(&key),
@@ -51,13 +52,11 @@ mod tests {
                 output_form,
                 algorithm_parameters: &[],
             };
-            let signing::SignOutcome::Success(explicit) =
-                signing::Signer::sign(&yaml_sigil_signing::DefaultSigner, &request)
+            let Ok(explicit) = signing::Signer::sign(&yaml_sigil_signing::DefaultSigner, &request)
             else {
                 panic!("versioned signing failed");
             };
-            let default_traits::signing::SignOutcome::Success(default) =
-                traits::signing::Signer::sign(&signing::DefaultSigner, &request)
+            let Ok(default) = traits::signing::Signer::sign(&signing::DefaultSigner, &request)
             else {
                 panic!("selected trait signing failed");
             };
@@ -67,9 +66,10 @@ mod tests {
                 default_verification::VerifierOptions::default();
             assert_eq!(
                 default_verification::verify(&explicit.artifact, form, &keys, options.clone())
+                    .map(|result| result.state)
                     .unwrap(),
                 verification::VerifierState::Verified {
-                    payload: request.payload.to_vec(),
+                    payload: request.payload,
                     algorithm: contract::AlgorithmId::Ed25519,
                 }
             );
@@ -79,11 +79,12 @@ mod tests {
                     &default.artifact,
                     form,
                     &keys,
-                    options.clone(),
+                    options.clone()
                 )
+                .map(|result| result.state)
                 .unwrap(),
                 traits::verification::VerifierState::Verified {
-                    payload: request.payload.to_vec(),
+                    payload: request.payload,
                     algorithm: contract::AlgorithmId::Ed25519,
                 }
             );
@@ -92,17 +93,19 @@ mod tests {
                 signing::ArtifactResourceLimits::default();
             let _: &core::ArtifactResourceLimits = &limits;
             assert_eq!(
-                verification::verify_with_resource_limits(
+                verification::verify(
                     &explicit.artifact,
                     form,
                     &keys,
-                    options,
-                    &limits,
+                    yaml_sigil_traits::verification::VerifierOptions {
+                        resource_limits: limits.clone(),
+                        ..options
+                    }
                 )
-                .unwrap()
+                .map(|result| result.state)
                 .unwrap(),
                 default_verification::VerifierState::Verified {
-                    payload: request.payload.to_vec(),
+                    payload: request.payload,
                     algorithm: contract::AlgorithmId::Ed25519,
                 }
             );
@@ -122,23 +125,21 @@ mod tests {
             ),
         ] {
             let request = transcription::ComposeRequest {
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
                 payload: b"namespace: shared\n",
                 signature_carrier: b"opaque carrier\n",
                 form,
             };
-            let default_transcription::ComposeOutcome::Success(composed) =
-                transcriber.compose(&request)
-            else {
+            let Ok(composed) = transcriber.compose(&request) else {
                 panic!("compose failed");
             };
             let request = default_transcription::DecomposeRequest {
+                resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
                 artifact: &composed.artifact,
                 form,
                 outer_conformance,
             };
-            let traits::transcription::DecomposeResponse::Structural(split) =
-                transcription::decompose(&request)
-            else {
+            let Ok(split) = transcription::decompose(&request) else {
                 panic!("decompose failed");
             };
             assert_eq!(split.outcome, transcription::DecomposeOutcome::Ok);
@@ -160,13 +161,23 @@ mod tests {
             contract::pb::YamlSigilSignature::new(algorithm, vec![1, 2, 3]);
         let artifact: contract::pb::SignedYamlArtifact =
             core::pb::SignedYamlArtifact::new(b"shared\n".to_vec(), Some(signature));
-        let wire = artifact.encode_to_vec().unwrap();
+        let wire = artifact
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
         assert_eq!(
-            contract::pb::SignedYamlArtifact::decode(&wire).unwrap(),
+            contract::pb::SignedYamlArtifact::decode(
+                &wire,
+                &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+            )
+            .unwrap(),
             artifact
         );
         let borrowed: core::pb::SignedYamlArtifactRef<'_> =
-            contract::pb::SignedYamlArtifactRef::decode(&wire).unwrap();
+            contract::pb::SignedYamlArtifactRef::decode(
+                &wire,
+                &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+            )
+            .unwrap();
         assert_eq!(borrowed.payload(), b"shared\n");
 
         let document: core::SignatureDocument = contract::SignatureDocument {
@@ -192,6 +203,7 @@ mod tests {
                 .build()
                 .unwrap();
         let request: signing::ProviderSignRequest<'_> = yaml_sigil_signing::ProviderSignRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             payload: b"provider: shared\n",
             algorithm: contract::AlgorithmId::Ed25519,
             key: signing::ProviderSigningKeys::Ed25519(&provider_key),
@@ -200,28 +212,28 @@ mod tests {
             output_form: signing::OutputForm::Yaml,
             algorithm_parameters: &[],
         };
-        let traits::signing::SignOutcome::Success(signed) =
-            signing::sign_with_provider(&request, |payload| {
-                let signature: ed25519_dalek::Signature =
-                    ed25519_dalek::Signer::try_sign(&key, payload)
-                        .map_err(|_| signing::SignError::KeyOperationFailure)?;
-                Ok(signature.to_bytes())
-            })
-        else {
+        let Ok(signed) = signing::sign_with_provider(&request, |payload| {
+            let signature: ed25519_dalek::Signature =
+                ed25519_dalek::Signer::try_sign(&key, payload)
+                    .map_err(|_| signing::SignError::KeyOperationFailure)?;
+            Ok(signature.to_bytes())
+        }) else {
             panic!("provider signing failed");
         };
         assert_eq!(
-            verification::verify_yaml(
+            verification::verify(
                 &signed.artifact,
+                yaml_sigil_traits::verification::ArtifactForm::Yaml,
                 &default_verification::PublicKeys {
                     ed25519: Some(&public),
                     p256: None
                 },
-                verification::VerifierOptions::default(),
+                verification::VerifierOptions::default()
             )
+            .map(|result| result.state)
             .unwrap(),
             verification::VerifierState::Verified {
-                payload: request.payload.to_vec(),
+                payload: request.payload,
                 algorithm: contract::AlgorithmId::Ed25519,
             }
         );

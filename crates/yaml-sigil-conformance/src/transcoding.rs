@@ -43,12 +43,17 @@ const CASES: &[TranscodingCase] = &[
 ];
 
 fn effective_fields(wire: &[u8]) -> ProtoArtifactView {
-    let artifact = decode_signed_yaml_artifact(wire).expect("decode transcoding protobuf fixture");
+    let artifact =
+        decode_signed_yaml_artifact(wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .expect("decode transcoding protobuf fixture");
     view_signed_yaml_artifact(&artifact).expect("view transcoding protobuf fixture")
 }
 
 fn assert_yaml_signature_value(yaml: &[u8], expected: &str, context: &str) {
-    let DecompositionOutcome::Signed(ranges) = decompose_artifact(yaml) else {
+    let DecompositionOutcome::Signed(ranges) =
+        decompose_artifact(yaml, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .expect("unbounded artifact policy")
+    else {
         panic!("{context}: expected a signed YAML artifact");
     };
     let doc = parse_signature_document(&yaml[ranges.signature_carrier])
@@ -70,38 +75,53 @@ pub fn run_transcoding_suite() {
 
         assert_yaml_signature_value(&fixture_yaml, case.signature_text, &yaml_file);
 
-        let proto_from_fixture_yaml = signed_yaml_stream_to_proto_wire(&fixture_yaml)
-            .unwrap_or_else(|error| panic!("{yaml_file}: transcode to protobuf: {error}"));
+        let proto_from_fixture_yaml = signed_yaml_stream_to_proto_wire(
+            &fixture_yaml,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_or_else(|error| panic!("{yaml_file}: transcode to protobuf: {error}"));
         assert_eq!(
             effective_fields(&proto_from_fixture_yaml),
             expected_fields,
             "{yaml_file}: effective protobuf fields mismatch"
         );
 
-        let yaml_from_fixture_proto = proto_wire_to_signed_yaml_stream(&fixture_proto)
-            .unwrap_or_else(|error| panic!("{proto_file}: transcode to YAML: {error}"));
+        let yaml_from_fixture_proto = proto_wire_to_signed_yaml_stream(
+            &fixture_proto,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_or_else(|error| panic!("{proto_file}: transcode to YAML: {error}"));
         assert_yaml_signature_value(
             &yaml_from_fixture_proto,
             case.signature_text,
             &format!("{proto_file} → YAML"),
         );
-        let proto_round_trip = signed_yaml_stream_to_proto_wire(&yaml_from_fixture_proto)
-            .unwrap_or_else(|error| panic!("{proto_file}: round-trip through YAML: {error}"));
+        let proto_round_trip = signed_yaml_stream_to_proto_wire(
+            &yaml_from_fixture_proto,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_or_else(|error| panic!("{proto_file}: round-trip through YAML: {error}"));
         assert_eq!(
             effective_fields(&proto_round_trip),
             expected_fields,
             "{proto_file}: protobuf → YAML → protobuf fields mismatch"
         );
 
-        let yaml_round_trip = proto_wire_to_signed_yaml_stream(&proto_from_fixture_yaml)
-            .unwrap_or_else(|error| panic!("{yaml_file}: round-trip through protobuf: {error}"));
+        let yaml_round_trip = proto_wire_to_signed_yaml_stream(
+            &proto_from_fixture_yaml,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_or_else(|error| panic!("{yaml_file}: round-trip through protobuf: {error}"));
         assert_yaml_signature_value(
             &yaml_round_trip,
             case.signature_text,
             &format!("{yaml_file} → protobuf → YAML"),
         );
-        let second_proto = signed_yaml_stream_to_proto_wire(&yaml_round_trip)
-            .unwrap_or_else(|error| panic!("{yaml_file}: decode round-trip YAML: {error}"));
+        let second_proto = signed_yaml_stream_to_proto_wire(
+            &yaml_round_trip,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap_or_else(|error| panic!("{yaml_file}: decode round-trip YAML: {error}"));
         assert_eq!(
             effective_fields(&second_proto),
             expected_fields,

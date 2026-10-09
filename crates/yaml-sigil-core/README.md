@@ -142,26 +142,15 @@ policy. `DEFAULT_MAX_ARTIFACT_BYTES` defines its default ceiling. Use
 or use `unbounded` to disable every optional resource dimension known to this
 crate version.
 
-The complete-artifact core helpers and the owned and borrowed
-`SignedYamlArtifact` facades provide `_with_resource_limits` variants. Bounded
-decode checks the original wire slice before Buffa processing. Bounded encode
-uses one checked wire traversal for exact sizing and emission, including
-retained unknown fields and nested groups. It applies resource policy before
-the protobuf format ceiling and before allocation. A failed bounded
-`encode_into` leaves the reusable destination unchanged.
+Primary complete-artifact helpers and `SignedYamlArtifact` facade methods
+accept `&ArtifactResourceLimits`. Decode admits the original encoded slice
+before Buffa processing. Encode checks exact output size, including unknown
+fields and nested groups, before allocation. Every returned `encode_into`
+error leaves the reusable destination unchanged. `ArtifactDecodeError` and
+`ArtifactEncodeError` separate resource and format failures in flat results.
 
-Raw outer composition also preserves that order. Its outer result reports
-resource rejection, and an admitted protobuf format rejection remains an inner
-`pb::EncodeError`. Implementation crates that project a raw message from
-component lengths use `pb::check_encoded_message_size` after applying the
-selected resource policy.
-
-Existing helpers remain unbounded by this policy. Adopt a bounded entry point
-at the affected trust boundary, or enforce an equivalent earlier bound on the
-original raw input. The existing 16,384-octet YAML signature-carrier
-constraint is separate from complete artifact size. Protobuf format limits,
-parser safeguards, address-space limits, allocator limits, and deployment
-controls still apply.
+Use `unbounded()` explicitly to disable the optional whole-artifact ceiling.
+The 16,384-octet YAML signature-carrier constraint remains independent.
 
 Whole-artifact limits do not affect conformance results. Rejecting an artifact
 under a local resource policy does not make it malformed or non-conforming.
@@ -194,3 +183,15 @@ The crate source archive includes
 which records the current scope, attribution, source terms, disclaimers,
 intellectual-property caveats, and non-endorsement language for identified
 third-party material.
+
+## Features
+
+Defaults enable `std`, `yaml`, and `protobuf`. With defaults disabled, the
+byte scanner, payload validation, algorithm vocabulary, resource policy, and
+portable error categories need neither `std` nor `alloc`. `p256-encoding`
+also works without an allocator. `yaml` and `protobuf` independently enable
+`alloc`; YAML-only builds omit Buffa/codegen and protobuf-only builds omit the
+YAML parser. `json-schema-validate` requires `std` and `yaml`.
+
+Read the [portable API guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/no-std.md)
+for dependency examples and migration.

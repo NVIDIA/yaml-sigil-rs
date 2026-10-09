@@ -28,8 +28,10 @@ crate's SemVer.
 ## API Surface
 
 - `compose` and `decompose` perform the byte operations.
-- `compose_with_resource_limits` and `decompose_with_resource_limits` apply an
-  explicit complete-artifact policy.
+- `ComposeRequest::resource_limits` and `DecomposeRequest::resource_limits`
+  select complete-artifact policy on those same operations.
+- `decompose` borrows payload and carrier slices from the original artifact;
+  `compose` produces an owned artifact.
 - `EncodeError` and `EncodeErrorKind` re-export the common protobuf format
   error used by resource-aware protobuf composition.
 - `DefaultTranscriber` and `DefaultAsyncTranscriber` delegate to the free
@@ -43,23 +45,26 @@ boundary should wire the trait API into their own deployment.
 
 ## Resource boundaries
 
-`compose_with_resource_limits` validates the request shape, computes the exact
-YAML or protobuf output size with checked arithmetic, and applies the policy
-before component scans and complete-output allocation. The outer result reports
-resource rejection, and the inner result preserves a protobuf format error
-when the selected form is protobuf. The existing `ComposeOutcome` remains the
-admitted value.
-`decompose_with_resource_limits` checks the original complete input before
-form, outer-conformance, or artifact processing. Resource errors remain
-separate from transcription outcomes.
+`compose` validates request shape, computes exact output size with checked
+arithmetic, and applies `request.resource_limits` before component scans and
+complete-output allocation. `ComposeError` distinguishes invocation, resource,
+encoding, and content failures in one result. `decompose` checks the original
+input before form, conformance, or artifact processing and returns
+`DecomposeError` on invocation or resource failure.
 
-`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`. You
-can lower, raise, or disable that ceiling. Existing `compose`, `decompose`, and
-default trait implementations remain unbounded by this policy. Callers must
-adopt the bounded operations at the affected trust boundary or enforce an
-equivalent earlier raw-input bound.
+`ArtifactResourceLimits::default()` selects `DEFAULT_MAX_ARTIFACT_BYTES`.
+Use `unbounded()` explicitly when no whole-artifact ceiling is required.
+Default sync and async trait implementations honor the same request policy.
 
 YamlSigil `v1alpha1` defines no maximum complete artifact size. These limits
 are operational hardening and do not affect conformance results. The existing
 16,384-octet YAML signature-carrier constraint remains separate and applies
 where signature metadata is parsed.
+
+## Features
+
+Defaults enable `std`, `yaml`, and `protobuf`. Each format enables `alloc`
+without requiring `std`. With defaults disabled, portable resource types
+remain available; full operations require `alloc` and an enabled format.
+The [portable API guide](https://github.com/NVIDIA/yaml-sigil-rs/blob/main/docs/no-std.md)
+describes migration and isolated validation.

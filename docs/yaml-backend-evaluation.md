@@ -9,10 +9,11 @@ have implementation context. It is not a user-facing support matrix.
 `yaml-sigil-core` uses `noyalib` `0.0.57` as its private backend for
 `YamlSigilSignature.v1alpha1` YAML signature documents. The root `Cargo.toml`
 declares the dependency with an exact version pin, and
-`crates/yaml-sigil-core` inherits it with `noyalib = { workspace = true }`.
+`crates/yaml-sigil-core` inherits it as an optional dependency.
 
-The workspace does not expose YAML parser or protobuf codegen selection
-features. `yaml-sigil-core` generates protobuf wire helpers with `buffa`.
+The `yaml` and `protobuf` features select artifact support while keeping
+serialization backends private. The core `protobuf` feature enables Buffa
+wire helpers and host code generation.
 
 `parse_signature_document` decodes UTF-8 before YAML parsing and calls
 `noyalib::load_all_with_config` and `noyalib::from_str_with_config` with these
@@ -51,8 +52,9 @@ default-shaped backend configuration to check event, node, and cumulative
 scalar limits on the streaming path; that check does not replace the
 authoritative parser for untrusted input.
 
-The dependency enables only `std` and disables default features. The optional
-`noyalib` features do not improve this parser:
+The `yaml` feature enables the backend with default features disabled.
+The core `std` feature forwards `std` to the backend when YAML support is
+enabled. The other optional `noyalib` features do not improve this parser:
 
 - `lossless-u64` does not apply because every signature-document field is a
   string. Unquoted numeric scalars must fail string deserialization, including
@@ -147,3 +149,12 @@ implementation decisions.
 - Prefer structural decomposition with `yaml-sigil-core::decompose_artifact`
   before YAML parsing so the parser only sees the signature-document slice.
 - Re-run `cargo audit` after any YAML dependency bump.
+
+## Portable feature selection
+
+The current `yaml` feature enables the existing Serde model and private
+`noyalib` backend with `alloc`, independently of `std` and protobuf support.
+YAML-only consumers omit Buffa and protobuf code generation. Parser budgets,
+canonical serialization, unknown-field rejection, and carrier constraints
+remain unchanged. See the [portable API guide](./no-std.md) for the isolated
+consumer checks. Earlier evaluations above retain their original scope.

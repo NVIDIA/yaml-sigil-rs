@@ -15,7 +15,7 @@ mod versioned_js;
 
 use bytes::ByteInput;
 pub use resource::ArtifactResourceLimits;
-use resource::{Failure, flatten_encoding};
+use resource::Failure;
 
 use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
 use js_sys::Uint8Array;
@@ -23,19 +23,16 @@ use p256::ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey
 use wasm_bindgen::prelude::*;
 use yaml_sigil_core::{AlgorithmId, ArtifactResourceForm};
 use yaml_sigil_signing::{
-    OutputForm, SignError, SignInvocationError, SignOutcome, SignRequest, SigningKey,
-    sign as sign_runtime, sign_with_resource_limits,
+    OutputForm, SignError, SignInvocationError, SignRequest, SigningKey, sign as sign_runtime,
 };
 use yaml_sigil_transcription::{
-    ComposeOutcome, ComposeRequest, DecomposeOutcome, DecomposeRequest, DecomposeResponse,
-    OuterConformance, TranscriberError, TranscriberInvocationError, TranscriptionForm,
-    compose as compose_runtime, compose_with_resource_limits, decompose as decompose_runtime,
-    decompose_with_resource_limits,
+    ComposeRequest, DecomposeOutcome, DecomposeRequest, OuterConformance, TranscriberError,
+    TranscriberInvocationError, TranscriptionForm, compose as compose_runtime,
+    decompose as decompose_runtime,
 };
 use yaml_sigil_verification::{
     ArtifactForm, InvocationError, PublicKeys, VerifierOptions, VerifierState,
     resolve_ed25519_verifying_key, resolve_p256_verifying_key, verify as verify_runtime,
-    verify_with_resource_limits,
 };
 
 const ED25519_NAME: &str = "ED25519_PUREEDDSA_RAW_RS64_CANONICAL";
@@ -121,10 +118,9 @@ fn sign_error_code(error: &SignError) -> &'static str {
     match error {
         SignError::InvalidPayloadBytes => "invalid_payload_bytes",
         SignError::PayloadLineTerminatorRefusal => "payload_line_terminator_refusal",
-        SignError::InvalidOrUnsupportedAlgorithm => "invalid_or_unsupported_algorithm",
-        SignError::InvalidAlgorithmParameters => "invalid_algorithm_parameters",
-        SignError::InvalidOrUnsupportedOutputForm => "invalid_or_unsupported_output_form",
-        SignError::InvalidKeyid => "invalid_keyid",
+        SignError::Invocation(error) => sign_invocation_code(*error),
+        SignError::Resource(error) => Failure::from(error.clone()).code(),
+        SignError::Encoding(error) => Failure::from(error.clone()).code(),
         SignError::KeyOperationFailure => "key_operation_failure",
         SignError::YamlValidationFailure => "yaml_validation_failure",
         SignError::YamlSerialize(_) => "yaml_serialize",
@@ -230,30 +226,32 @@ fn compose_impl(
         Err(error) => return ComposeResult::failure(error),
     };
     let request = ComposeRequest {
+        resource_limits: limits
+            .map(|limits| limits.inner.clone())
+            .unwrap_or_else(yaml_sigil_core::ArtifactResourceLimits::unbounded),
         payload: &payload,
         signature_carrier: &signature_carrier,
         form,
     };
-    let outcome = if let Some(limits) = limits {
-        match flatten_encoding(compose_with_resource_limits(&request, &limits.inner)) {
-            Ok(outcome) => outcome,
-            Err(error) => return ComposeResult::failure(error),
-        }
-    } else {
-        compose_runtime(&request)
-    };
+    let outcome = compose_runtime(&request);
     match outcome {
-        ComposeOutcome::Success(success) => ComposeResult {
+        Ok(success) => ComposeResult {
             status: "success",
             code: None,
             artifact: Some(success.artifact),
         },
-        ComposeOutcome::Invocation(error) => ComposeResult {
+        Err(yaml_sigil_transcription::ComposeError::Invocation(error)) => ComposeResult {
             status: "invocation_error",
             code: Some(transcriber_invocation_code(error)),
             artifact: None,
         },
-        ComposeOutcome::Error(error) => ComposeResult {
+        Err(yaml_sigil_transcription::ComposeError::Resource(error)) => {
+            ComposeResult::failure(error.into())
+        }
+        Err(yaml_sigil_transcription::ComposeError::Encoding(error)) => {
+            ComposeResult::failure(error.into())
+        }
+        Err(yaml_sigil_transcription::ComposeError::Content(error)) => ComposeResult {
             status: "error",
             code: Some(transcriber_error_code(error)),
             artifact: None,
@@ -360,28 +358,27 @@ fn decompose_impl(
         Err(error) => return DecomposeResult::failure(error),
     };
     let request = DecomposeRequest {
+        resource_limits: limits
+            .map(|limits| limits.inner.clone())
+            .unwrap_or_else(yaml_sigil_core::ArtifactResourceLimits::unbounded),
         artifact: &artifact,
         form,
         outer_conformance: outer,
     };
-    let response = if let Some(limits) = limits {
-        match decompose_with_resource_limits(&request, &limits.inner) {
-            Ok(response) => response,
-            Err(error) => return DecomposeResult::failure(error.into()),
-        }
-    } else {
-        decompose_runtime(&request)
-    };
+    let response = decompose_runtime(&request);
     match response {
-        DecomposeResponse::Invocation(error) => {
+        Err(yaml_sigil_transcription::DecomposeError::Resource(error)) => {
+            DecomposeResult::failure(error.into())
+        }
+        Err(yaml_sigil_transcription::DecomposeError::Invocation(error)) => {
             DecomposeResult::invocation(transcriber_invocation_code(error))
         }
-        DecomposeResponse::Structural(result) => match result.outcome {
+        Ok(result) => match result.outcome {
             DecomposeOutcome::Ok => DecomposeResult {
                 status: "ok",
                 code: None,
-                payload: result.payload,
-                signature_carrier: result.signature_carrier,
+                payload: result.payload.map(<[u8]>::to_vec),
+                signature_carrier: result.signature_carrier.map(<[u8]>::to_vec),
             },
             DecomposeOutcome::Unsigned => DecomposeResult {
                 status: "unsigned",
@@ -599,6 +596,9 @@ fn sign_with_key(
     limits: Option<&ArtifactResourceLimits>,
 ) -> SignResult {
     let request = SignRequest {
+        resource_limits: limits
+            .map(|limits| limits.inner.clone())
+            .unwrap_or_else(yaml_sigil_core::ArtifactResourceLimits::unbounded),
         payload,
         algorithm,
         key,
@@ -607,24 +607,21 @@ fn sign_with_key(
         output_form,
         algorithm_parameters: &[],
     };
-    let outcome = if let Some(limits) = limits {
-        match flatten_encoding(sign_with_resource_limits(&request, &limits.inner)) {
-            Ok(outcome) => outcome,
-            Err(error) => return SignResult::failure(error),
-        }
-    } else {
-        sign_runtime(&request)
-    };
+    let outcome = sign_runtime(&request);
     match outcome {
-        SignOutcome::Success(success) => SignResult {
+        Ok(success) => SignResult {
             status: "success",
             code: None,
             artifact: Some(success.artifact),
             modified_payload: (!success.modified_payload.is_empty())
                 .then_some(success.modified_payload),
         },
-        SignOutcome::Invocation(error) => SignResult::invocation(sign_invocation_code(error)),
-        SignOutcome::Signer(error) => SignResult {
+        Err(yaml_sigil_signing::SignError::Invocation(error)) => {
+            SignResult::invocation(sign_invocation_code(error))
+        }
+        Err(SignError::Resource(error)) => SignResult::failure(error.into()),
+        Err(SignError::Encoding(error)) => SignResult::failure(error.into()),
+        Err(error) => SignResult {
             status: "signer_error",
             code: Some(sign_error_code(&error)),
             artifact: None,
@@ -803,20 +800,24 @@ fn verify_impl(
     if schema_validation_rejects(&artifact, form) {
         return VerifyResult::state("malformed_attempted_signed", None);
     }
-    let outcome = if let Some(limits) = limits {
-        match verify_with_resource_limits(&artifact, form, &keys, options, &limits.inner) {
-            Ok(outcome) => outcome,
-            Err(error) => return VerifyResult::failure(error.into()),
-        }
-    } else {
-        verify_runtime(&artifact, form, &keys, options)
+    let options = VerifierOptions {
+        resource_limits: limits
+            .map(|limits| limits.inner.clone())
+            .unwrap_or_else(yaml_sigil_core::ArtifactResourceLimits::unbounded),
+        ..options
     };
+    let outcome = verify_runtime(&artifact, form, &keys, options).map(|result| result.state);
     match outcome {
-        Err(error) => VerifyResult::invocation(verify_invocation_code(error)),
+        Err(yaml_sigil_verification::VerifyError::Invocation(error)) => {
+            VerifyResult::invocation(verify_invocation_code(error))
+        }
+        Err(yaml_sigil_verification::VerifyError::Resource(error)) => {
+            VerifyResult::failure(error.into())
+        }
         Ok(VerifierState::Verified { payload, algorithm }) => VerifyResult {
             status: "verified",
             code: None,
-            payload: Some(payload),
+            payload: Some(payload.to_vec()),
             algorithm: Some(algorithm_name(algorithm)),
         },
         Ok(VerifierState::Unsigned) => VerifyResult::state("unsigned", None),
@@ -839,11 +840,12 @@ fn schema_validation_rejects(artifact: &[u8], form: ArtifactForm) -> bool {
         return false;
     }
     let response = decompose_runtime(&DecomposeRequest {
+        resource_limits: yaml_sigil_core::ArtifactResourceLimits::unbounded(),
         artifact,
         form: TranscriptionForm::Yaml,
         outer_conformance: None,
     });
-    let DecomposeResponse::Structural(result) = response else {
+    let Ok(result) = response else {
         return false;
     };
     if result.outcome != DecomposeOutcome::Ok {
@@ -852,7 +854,7 @@ fn schema_validation_rejects(artifact: &[u8], form: ArtifactForm) -> bool {
     let Some(carrier) = result.signature_carrier else {
         return false;
     };
-    let Ok(document) = yaml_sigil_core::parse_signature_document(&carrier) else {
+    let Ok(document) = yaml_sigil_core::parse_signature_document(carrier) else {
         return false;
     };
     yaml_sigil_core::signature_document_validates_tier_a_schema(&document).is_err()

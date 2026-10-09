@@ -14,8 +14,8 @@
 
 use ed25519_dalek::{SigningKey as EdSk, VerifyingKey as EdVk};
 use yaml_sigil_transcription::{
-    AsyncTranscriber, DecomposeOutcome, DecomposeRequest, DecomposeResponse, OuterConformance,
-    Transcriber, TranscriptionForm,
+    AsyncTranscriber, DecomposeOutcome, DecomposeRequest, OuterConformance, Transcriber,
+    TranscriptionForm,
 };
 use yaml_sigil_verification::{ArtifactForm, PublicKeys, VerifierOptions, VerifierState};
 
@@ -140,13 +140,14 @@ const FIXTURES: &[ProtoFixture] = &[
 
 fn run_one<T: Transcriber>(t: &T, bytes: &[u8], mode: OuterConformance) -> DecomposeOutcome {
     let resp = t.decompose(&DecomposeRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         artifact: bytes,
         form: TranscriptionForm::Protobuf,
         outer_conformance: Some(mode),
     });
     match resp {
-        DecomposeResponse::Structural(s) => s.outcome,
-        DecomposeResponse::Invocation(e) => {
+        Ok(s) => s.outcome,
+        Err(e) => {
             panic!("unexpected invocation error from protobuf decompose: {e:?}")
         }
     }
@@ -199,6 +200,7 @@ fn binary_payload_no_yaml_fit_reaches_crypto<V: ConformanceVerifier>(v: &V) {
             &keys,
             VerifierOptions::default(),
         )
+        .map(|result| result.state)
         .expect("binary-payload-no-yaml-fit verify should not return invocation error");
     assert_ne!(
         state,
@@ -222,14 +224,15 @@ async fn run_one_async<T: AsyncTranscriber>(
 ) -> DecomposeOutcome {
     let resp = t
         .decompose(&DecomposeRequest {
+            resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
             artifact: bytes,
             form: TranscriptionForm::Protobuf,
             outer_conformance: Some(mode),
         })
         .await;
     match resp {
-        DecomposeResponse::Structural(s) => s.outcome,
-        DecomposeResponse::Invocation(e) => {
+        Ok(s) => s.outcome,
+        Err(e) => {
             panic!("unexpected invocation error from protobuf decompose (async): {e:?}")
         }
     }
@@ -266,14 +269,9 @@ async fn binary_payload_no_yaml_fit_reaches_crypto_async<V: ConformanceAsyncVeri
         p256: None,
     };
     let state = v
-        .verify(
-            &bytes,
-            ArtifactForm::Proto,
-            &keys,
-            VerifierOptions::default(),
-        )
-        .await
-        .expect("binary-payload-no-yaml-fit verify (async) should not return invocation error");
+        .verify(&bytes, ArtifactForm::Proto, &keys, VerifierOptions::default())
+        .await.map(|result| result.state)
+        .expect("binary-payload-no-yaml-fit verify(async).map(|result| result.state) should not return invocation error");
     assert_ne!(
         state,
         VerifierState::MalformedAttemptedSigned,

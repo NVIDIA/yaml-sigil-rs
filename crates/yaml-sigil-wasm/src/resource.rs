@@ -8,7 +8,7 @@ use std::num::NonZeroUsize;
 use wasm_bindgen::prelude::*;
 use yaml_sigil_core::{
     ArtifactResourceError, ArtifactResourceErrorKind, ArtifactResourceForm,
-    ArtifactResourceLimits as CoreLimits, ArtifactResourceResult,
+    ArtifactResourceLimits as CoreLimits,
     pb::{EncodeError, EncodeErrorKind},
 };
 
@@ -117,12 +117,6 @@ impl From<EncodeError> for Failure {
     }
 }
 
-pub(super) fn flatten_encoding<T>(
-    value: ArtifactResourceResult<Result<T, EncodeError>>,
-) -> Result<T, Failure> {
-    Ok(value??)
-}
-
 impl ArtifactResourceLimits {
     /// Core's slice-based admission requires bytes already in Rust memory.
     /// Apply the same ceiling to the JavaScript length before invoking any
@@ -180,8 +174,8 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
             -1.0,
-            -0.0,
             0.0,
+            -0.0,
             1.5,
             4_294_967_296.0,
         ] {

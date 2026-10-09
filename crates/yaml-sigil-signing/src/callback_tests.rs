@@ -6,8 +6,9 @@
 //! Fixed keys and deterministic P-256 signatures below are test fixtures for
 //! payload binding and call counts, not examples of production nonce sampling.
 
+use alloc::{string::String, vec::Vec};
+use core::num::NonZeroUsize;
 use std::cell::{Cell, RefCell};
-use std::num::NonZeroUsize;
 use std::rc::Rc;
 
 use signature::hazmat::PrehashSigner as _;
@@ -21,6 +22,7 @@ fn request<'a, K>(
     key: &'a K,
 ) -> GenericSignRequest<'a, K, K> {
     GenericSignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload,
         algorithm,
         key: match algorithm {
@@ -39,7 +41,7 @@ fn finite(maximum: usize) -> ArtifactResourceLimits {
 }
 
 fn success(outcome: SignOutcome) -> SignSuccess {
-    let SignOutcome::Success(success) = outcome else {
+    let Ok(success) = outcome else {
         panic!("expected signing success, got {outcome:?}");
     };
     success
@@ -142,7 +144,7 @@ fn signature_adapter_helper_accepts_local_adapters_and_maps_errors_once() {
     let req = request(b"payload", AlgorithmId::Ed25519, OutputForm::Protobuf, &key);
     assert!(matches!(
         sign_with_provider(&req, signature_signing_callback(&adapter)),
-        SignOutcome::Signer(SignError::KeyOperationFailure),
+        Err(SignError::KeyOperationFailure),
     ));
     assert_eq!(calls.get(), 1);
 }
@@ -162,7 +164,9 @@ fn message_paths_reject_bad_requests_without_calling() {
             req.algorithm_parameters = &[1];
             assert!(matches!(
                 $sign(&req, |_| panic!("invalid invocation called provider")),
-                SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters),
+                Err(yaml_sigil_traits::signing::SignError::Invocation(
+                    SignInvocationError::InvalidAlgorithmParameters
+                )),
             ));
             assert!(matches!(
                 $bounded(&req, &finite(1), |_| panic!(
@@ -170,13 +174,17 @@ fn message_paths_reject_bad_requests_without_calling() {
                 ))
                 .unwrap()
                 .unwrap(),
-                SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters),
+                Err(yaml_sigil_traits::signing::SignError::Invocation(
+                    SignInvocationError::InvalidAlgorithmParameters
+                )),
             ));
             req.algorithm_parameters = &[];
             req.keyid = Some("line\nbreak");
             assert!(matches!(
                 $sign(&req, |_| panic!("invalid keyid called provider")),
-                SignOutcome::Invocation(SignInvocationError::InvalidKeyid),
+                Err(yaml_sigil_traits::signing::SignError::Invocation(
+                    SignInvocationError::InvalidKeyid
+                )),
             ));
             // Bounded preflight rejects size before scanning keyid or payload.
             assert!($bounded(&req, &finite(1), |_| panic!("preflight called provider")).is_err());
@@ -186,27 +194,31 @@ fn message_paths_reject_bad_requests_without_calling() {
                 ))
                 .unwrap()
                 .unwrap(),
-                SignOutcome::Invocation(SignInvocationError::InvalidKeyid),
+                Err(yaml_sigil_traits::signing::SignError::Invocation(
+                    SignInvocationError::InvalidKeyid
+                )),
             ));
             req.keyid = None;
             for payload in [b"\xff".as_slice(), b"\xef\xbb\xbfkey: value\n"] {
                 req.payload = payload;
                 assert!(matches!(
                     $sign(&req, |_| panic!("invalid YAML called provider")),
-                    SignOutcome::Signer(SignError::InvalidPayloadBytes),
+                    Err(SignError::InvalidPayloadBytes),
                 ));
             }
             req.payload = b"key: value";
             req.append_missing_final_newline = false;
             assert!(matches!(
                 $sign(&req, |_| panic!("missing newline called provider")),
-                SignOutcome::Signer(SignError::PayloadLineTerminatorRefusal),
+                Err(SignError::PayloadLineTerminatorRefusal),
             ));
             // Neither the enum slot nor the key's actual algorithm may differ.
             req.algorithm = AlgorithmId::EcdsaP256Sha256;
             assert!(matches!(
                 $sign(&req, |_| panic!("wrong slot called provider")),
-                SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+                Err(yaml_sigil_traits::signing::SignError::Invocation(
+                    SignInvocationError::InvalidOrUnsupportedAlgorithm
+                )),
             ));
             req.key = GenericSigningKey::EcdsaP256Sha256($key);
             assert!(matches!(
@@ -215,7 +227,9 @@ fn message_paths_reject_bad_requests_without_calling() {
                 ))
                 .unwrap()
                 .unwrap(),
-                SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+                Err(yaml_sigil_traits::signing::SignError::Invocation(
+                    SignInvocationError::InvalidOrUnsupportedAlgorithm
+                )),
             ));
         }};
     }
@@ -249,7 +263,9 @@ fn both_algorithm_binding_mismatches_are_rejected_before_provider_work() {
         let req = request(b"\xff", algorithm, OutputForm::Yaml, key);
         assert!(matches!(
             sign_with_provider(&req, |_| panic!("algorithm mismatch called provider")),
-            SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+            Err(yaml_sigil_traits::signing::SignError::Invocation(
+                SignInvocationError::InvalidOrUnsupportedAlgorithm
+            )),
         ));
         assert!(matches!(
             sign_with_provider_and_resource_limits(&req, &finite(1), |_| panic!(
@@ -257,7 +273,9 @@ fn both_algorithm_binding_mismatches_are_rejected_before_provider_work() {
             ))
             .unwrap()
             .unwrap(),
-            SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+            Err(yaml_sigil_traits::signing::SignError::Invocation(
+                SignInvocationError::InvalidOrUnsupportedAlgorithm
+            )),
         ));
     }
 }
@@ -314,7 +332,9 @@ fn digest_path_rejects_other_algorithms_and_invalid_payloads_without_calling() {
     let mut req = request(b"\xff", AlgorithmId::Ed25519, OutputForm::Yaml, &ed_key);
     assert!(matches!(
         sign_with_p256_digest_provider(&req, |_| panic!("Ed25519 called digest provider")),
-        SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidOrUnsupportedAlgorithm
+        )),
     ));
     assert!(matches!(
         sign_with_p256_digest_provider_and_resource_limits(&req, &finite(1), |_| panic!(
@@ -322,13 +342,17 @@ fn digest_path_rejects_other_algorithms_and_invalid_payloads_without_calling() {
         ))
         .unwrap()
         .unwrap(),
-        SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidOrUnsupportedAlgorithm
+        )),
     ));
     req.algorithm = AlgorithmId::EcdsaP256Sha256;
     req.key = ProviderSigningKeys::EcdsaP256Sha256(&ed_key);
     assert!(matches!(
         sign_with_p256_digest_provider(&req, |_| panic!("wrong binding called digest provider")),
-        SignOutcome::Invocation(SignInvocationError::InvalidOrUnsupportedAlgorithm),
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidOrUnsupportedAlgorithm
+        )),
     ));
 
     let p256 = p256::ecdsa::SigningKey::from_slice(&[36; 32]).unwrap();
@@ -348,13 +372,15 @@ fn digest_path_rejects_other_algorithms_and_invalid_payloads_without_calling() {
         sign_with_p256_digest_provider(&req, |_| panic!(
             "invalid invocation called digest provider"
         )),
-        SignOutcome::Invocation(SignInvocationError::InvalidAlgorithmParameters),
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            SignInvocationError::InvalidAlgorithmParameters
+        )),
     ));
     req.algorithm_parameters = &[];
     req.append_missing_final_newline = false;
     assert!(matches!(
         sign_with_p256_digest_provider(&req, |_| panic!("missing newline called digest provider")),
-        SignOutcome::Signer(SignError::PayloadLineTerminatorRefusal),
+        Err(SignError::PayloadLineTerminatorRefusal),
     ));
     req.payload = b"\xff";
     assert!(matches!(
@@ -363,7 +389,7 @@ fn digest_path_rejects_other_algorithms_and_invalid_payloads_without_calling() {
         ))
         .unwrap()
         .unwrap(),
-        SignOutcome::Signer(SignError::InvalidPayloadBytes),
+        Err(SignError::InvalidPayloadBytes),
     ));
 }
 
@@ -458,7 +484,7 @@ fn digest_path_rejects_wrong_message_wrong_key_double_hash_and_malformed_output(
                 calls += 1;
                 Ok(invalid)
             }),
-            SignOutcome::Signer(SignError::KeyOperationFailure),
+            Err(SignError::KeyOperationFailure),
         ));
         assert_eq!(calls, 1);
     }
@@ -482,7 +508,7 @@ fn qualified_message_output_must_match_the_final_payload() {
             calls += 1;
             Ok(ed_signature(&native, req.payload))
         }),
-        SignOutcome::Signer(SignError::KeyOperationFailure),
+        Err(SignError::KeyOperationFailure),
     ));
     assert_eq!(calls, 1);
 }
@@ -508,7 +534,7 @@ fn callback_errors_and_malformed_unqualified_output_are_not_retried() {
         })
         .unwrap()
         .unwrap(),
-        SignOutcome::Signer(SignError::KeyOperationFailure),
+        Err(SignError::KeyOperationFailure),
     ));
     assert_eq!(calls, 1);
 
@@ -532,7 +558,7 @@ fn callback_errors_and_malformed_unqualified_output_are_not_retried() {
             calls += 1;
             response
         });
-        let SignOutcome::Signer(error) = outcome else {
+        let Err(error) = outcome else {
             panic!("expected callback rejection");
         };
         assert_eq!(

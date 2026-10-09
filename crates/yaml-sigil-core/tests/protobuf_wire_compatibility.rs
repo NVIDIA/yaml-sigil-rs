@@ -89,14 +89,23 @@ fn facade_decodes_buffa_0_5_known_algorithms_and_optional_keyids() {
         for keyid in [None, Some(""), Some("key-1")] {
             let carrier = signature_wire(wire_value, keyid, &[1, 2, 3]);
             let wire = artifact_wire(b"message\n", Some(&carrier));
-            let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
+            let decoded = SignedYamlArtifact::decode(
+                &wire,
+                &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+            )
+            .unwrap();
             let signature = decoded_signature(&decoded);
 
             assert_eq!(decoded.payload(), b"message\n");
             assert_eq!(signature.algorithm(), Some(algorithm));
             assert_eq!(signature.keyid(), keyid);
             assert_eq!(signature.signature(), [1, 2, 3]);
-            assert_eq!(decoded.encode_to_vec().unwrap(), wire);
+            assert_eq!(
+                decoded
+                    .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+                    .unwrap(),
+                wire
+            );
         }
     }
 }
@@ -106,14 +115,23 @@ fn facade_preserves_buffa_0_5_unknown_algorithm_numbers() {
     for wire_value in [99, -1] {
         let carrier = signature_wire(wire_value, None, &[0xaa]);
         let wire = artifact_wire(b"payload", Some(&carrier));
-        let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
+        let decoded = SignedYamlArtifact::decode(
+            &wire,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap();
 
         assert_eq!(decoded_signature(&decoded).algorithm(), None);
         assert_eq!(
             decoded_signature(&decoded).algorithm_wire_value(),
             wire_value
         );
-        assert_eq!(decoded.encode_to_vec().unwrap(), wire);
+        assert_eq!(
+            decoded
+                .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+                .unwrap(),
+            wire
+        );
     }
 }
 
@@ -121,14 +139,27 @@ fn facade_preserves_buffa_0_5_unknown_algorithm_numbers() {
 fn facade_accepts_buffa_0_5_arbitrary_payload_and_absent_signature() {
     let payload = [0xff, 0x00, 0x80, b'\n'];
     let with_signature = artifact_wire(&payload, Some(&signature_wire(1, None, &[7])));
-    let decoded = SignedYamlArtifact::decode_from_slice(&with_signature).unwrap();
+    let decoded = SignedYamlArtifact::decode(
+        &with_signature,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
     assert_eq!(decoded.payload(), payload);
 
     let without_signature = artifact_wire(&payload, None);
-    let decoded = SignedYamlArtifact::decode_from_slice(&without_signature).unwrap();
+    let decoded = SignedYamlArtifact::decode(
+        &without_signature,
+        &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+    )
+    .unwrap();
     assert_eq!(decoded.payload(), payload);
     assert!(decoded.signature().is_none());
-    assert_eq!(decoded.encode_to_vec().unwrap(), without_signature);
+    assert_eq!(
+        decoded
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap(),
+        without_signature
+    );
 }
 
 #[test]
@@ -139,7 +170,9 @@ fn facade_matches_buffa_0_5_duplicate_singular_field_merging() {
     push_len_field(&mut wire, 2, &signature_wire(1, Some("retained"), &[]));
     push_len_field(&mut wire, 2, &signature_wire(2, None, &[9, 8, 7]));
 
-    let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
+    let decoded =
+        SignedYamlArtifact::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
     let signature = decoded_signature(&decoded);
     assert_eq!(decoded.payload(), b"second");
     assert_eq!(signature.algorithm_wire_value(), 2);
@@ -150,7 +183,12 @@ fn facade_matches_buffa_0_5_duplicate_singular_field_merging() {
         b"second",
         Some(&signature_wire(2, Some("retained"), &[9, 8, 7])),
     );
-    assert_eq!(decoded.encode_to_vec().unwrap(), expected);
+    assert_eq!(
+        decoded
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap(),
+        expected
+    );
 }
 
 #[test]
@@ -178,36 +216,40 @@ fn facade_preserves_buffa_0_5_unknown_wire_types_and_nested_groups() {
     let mut wire = artifact_wire(b"payload", Some(&carrier));
     wire.extend_from_slice(&unknown_fields);
 
-    let decoded = SignedYamlArtifact::decode_from_slice(&wire).unwrap();
+    let decoded =
+        SignedYamlArtifact::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
     assert!(decoded.has_unknown_fields());
-    assert_eq!(decoded.encode_to_vec().unwrap(), wire);
+    assert_eq!(
+        decoded
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap(),
+        wire
+    );
 
-    let borrowed = SignedYamlArtifactRef::decode(&wire).unwrap();
+    let borrowed =
+        SignedYamlArtifactRef::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
     assert!(borrowed.has_unknown_fields());
-    assert_eq!(borrowed.encode_to_vec().unwrap(), wire);
+    assert_eq!(
+        borrowed
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap(),
+        wire
+    );
     assert_eq!(decoded.encoded_len().unwrap(), wire.len());
     assert_eq!(borrowed.encoded_len().unwrap(), wire.len());
 
-    assert_eq!(
-        decoded
-            .encode_to_vec_with_resource_limits(&finite(wire.len()))
-            .unwrap()
-            .unwrap(),
-        wire
-    );
-    assert_eq!(
-        borrowed
-            .encode_to_vec_with_resource_limits(&finite(wire.len()))
-            .unwrap()
-            .unwrap(),
-        wire
-    );
+    assert_eq!(decoded.encode_to_vec(&finite(wire.len())).unwrap(), wire);
+    assert_eq!(borrowed.encode_to_vec(&finite(wire.len())).unwrap(), wire);
 
     let mut discarded = borrowed.to_owned().unwrap();
     discarded.discard_unknown_fields();
     assert!(!discarded.has_unknown_fields());
     assert_eq!(
-        discarded.encode_to_vec().unwrap(),
+        discarded
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap(),
         artifact_wire(b"payload", Some(&signature_wire(1, None, &[1])))
     );
 }
@@ -237,10 +279,12 @@ fn facade_resource_decode_rejects_before_every_malformed_wire_shape() {
     ];
     let limits = finite(1);
     for input in inputs {
-        let owned = SignedYamlArtifact::decode_with_resource_limits(&input, &limits).unwrap_err();
-        let borrowed =
-            SignedYamlArtifactRef::decode_with_resource_limits(&input, &limits).unwrap_err();
+        let owned = SignedYamlArtifact::decode(&input, &limits).unwrap_err();
+        let borrowed = SignedYamlArtifactRef::decode(&input, &limits).unwrap_err();
         for error in [owned, borrowed] {
+            let yaml_sigil_core::ArtifactDecodeError::Resource(error) = error else {
+                panic!("expected resource rejection")
+            };
             assert_eq!(
                 error.kind(),
                 ArtifactResourceErrorKind::InputArtifactTooLarge
@@ -259,23 +303,27 @@ fn facade_sizing_matches_owned_and_borrowed_emission_at_varint_boundaries() {
     for payload_len in [0, 1, 127, 128, 16_383, 16_384] {
         let signature = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![7; 64]);
         let artifact = SignedYamlArtifact::new(vec![0xa5; payload_len], Some(signature));
-        let owned_wire = artifact.encode_to_vec().unwrap();
+        let owned_wire = artifact
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
         assert_eq!(artifact.encoded_len().unwrap(), owned_wire.len());
         assert_eq!(
-            artifact
-                .encode_to_vec_with_resource_limits(&finite(owned_wire.len()))
-                .unwrap()
-                .unwrap(),
+            artifact.encode_to_vec(&finite(owned_wire.len())).unwrap(),
             owned_wire
         );
 
-        let borrowed = SignedYamlArtifactRef::decode(&owned_wire).unwrap();
-        let borrowed_wire = borrowed.encode_to_vec().unwrap();
+        let borrowed = SignedYamlArtifactRef::decode(
+            &owned_wire,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap();
+        let borrowed_wire = borrowed
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
         assert_eq!(borrowed.encoded_len().unwrap(), borrowed_wire.len());
         assert_eq!(
             borrowed
-                .encode_to_vec_with_resource_limits(&finite(borrowed_wire.len()))
-                .unwrap()
+                .encode_to_vec(&finite(borrowed_wire.len()))
                 .unwrap(),
             borrowed_wire
         );
@@ -288,10 +336,18 @@ fn owned_and_borrowed_unknown_varint_sizes_follow_their_actual_output() {
     push_tag(&mut wire, 10, 0);
     wire.extend_from_slice(&[0x81, 0x00]);
 
-    let owned = SignedYamlArtifact::decode(&wire).unwrap();
-    let borrowed = SignedYamlArtifactRef::decode(&wire).unwrap();
-    let owned_wire = owned.encode_to_vec().unwrap();
-    let borrowed_wire = borrowed.encode_to_vec().unwrap();
+    let owned =
+        SignedYamlArtifact::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
+    let borrowed =
+        SignedYamlArtifactRef::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
+    let owned_wire = owned
+        .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+        .unwrap();
+    let borrowed_wire = borrowed
+        .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+        .unwrap();
     assert_eq!(owned_wire.last(), Some(&1));
     assert_eq!(borrowed_wire, wire);
     assert_eq!(owned.encoded_len().unwrap(), owned_wire.len());
@@ -320,9 +376,17 @@ fn facade_rejects_buffa_0_5_malformed_corpus_without_panicking() {
     ];
 
     for wire in malformed {
-        for decode in [SignedYamlArtifact::decode as fn(&[u8]) -> _, |input| {
-            SignedYamlArtifactRef::decode(input).map(|_| SignedYamlArtifact::default())
-        }] {
+        for decode in [
+            (|input: &[u8]| SignedYamlArtifact::decode(input, &ArtifactResourceLimits::unbounded()))
+                as fn(&[u8]) -> _,
+            |input| {
+                SignedYamlArtifactRef::decode(
+                    input,
+                    &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+                )
+                .map(|_| SignedYamlArtifact::default())
+            },
+        ] {
             let decoded = catch_unwind(AssertUnwindSafe(|| decode(&wire)));
             assert!(decoded.is_ok(), "decoder panicked for {wire:02x?}");
             assert!(
@@ -346,12 +410,21 @@ fn facade_reports_stable_error_categories() {
 
     for (wire, expected) in cases {
         assert_eq!(
-            SignedYamlArtifact::decode(wire).unwrap_err().kind(),
-            expected
+            SignedYamlArtifact::decode(wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+                .unwrap_err(),
+            yaml_sigil_core::ArtifactDecodeError::Decoding(
+                yaml_sigil_core::DecodeError::from_kind(expected)
+            )
         );
         assert_eq!(
-            SignedYamlArtifactRef::decode(wire).unwrap_err().kind(),
-            expected
+            SignedYamlArtifactRef::decode(
+                wire,
+                &yaml_sigil_core::ArtifactResourceLimits::unbounded()
+            )
+            .unwrap_err(),
+            yaml_sigil_core::ArtifactDecodeError::Decoding(
+                yaml_sigil_core::DecodeError::from_kind(expected)
+            )
         );
     }
 
@@ -377,7 +450,9 @@ fn facade_construction_matches_buffa_0_5_generated_wire() {
     let artifact = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
 
     assert_eq!(
-        artifact.encode_to_vec().unwrap(),
+        artifact
+            .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap(),
         artifact_wire(
             b"message\n",
             Some(&signature_wire(1, Some("key-1"), &[1, 2, 3])),
@@ -389,12 +464,8 @@ fn facade_construction_matches_buffa_0_5_generated_wire() {
 fn borrowed_views_reference_the_input_and_convert_directly_to_owned() {
     let carrier = signature_wire(1, Some("key-1"), &[1, 2, 3]);
     let wire = artifact_wire(b"message\n", Some(&carrier));
-    let borrowed = SignedYamlArtifactRef::decode_with_resource_limits(
-        &wire,
-        &ArtifactResourceLimits::default(),
-    )
-    .unwrap()
-    .unwrap();
+    let borrowed =
+        SignedYamlArtifactRef::decode(&wire, &ArtifactResourceLimits::default()).unwrap();
     let signature = borrowed.signature().unwrap();
 
     assert_points_into(&wire, borrowed.payload());
@@ -422,23 +493,37 @@ fn preallocated_encoding_appends_without_reallocation() {
     let mut signature = YamlSigilSignature::new(AlgorithmId::Ed25519, vec![1, 2, 3]);
     signature.set_keyid(Some("key-1".to_owned()));
     let artifact = SignedYamlArtifact::new(b"message\n".to_vec(), Some(signature));
-    let wire = artifact.encode_to_vec().unwrap();
+    let wire = artifact
+        .encode_to_vec(&yaml_sigil_core::ArtifactResourceLimits::unbounded())
+        .unwrap();
     assert_eq!(artifact.encoded_len().unwrap(), wire.len());
 
     let prefix = [0xaa, 0xbb];
     let mut owned_output = Vec::with_capacity(prefix.len() + wire.len());
     owned_output.extend_from_slice(&prefix);
     let owned_allocation = owned_output.as_ptr();
-    artifact.encode_into(&mut owned_output).unwrap();
+    artifact
+        .encode_into(
+            &mut owned_output,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap();
     assert_eq!(owned_output.as_ptr(), owned_allocation);
     assert_eq!(&owned_output[..prefix.len()], &prefix);
     assert_eq!(&owned_output[prefix.len()..], wire);
 
-    let borrowed = SignedYamlArtifactRef::decode(&wire).unwrap();
+    let borrowed =
+        SignedYamlArtifactRef::decode(&wire, &yaml_sigil_core::ArtifactResourceLimits::unbounded())
+            .unwrap();
     let mut borrowed_output = Vec::with_capacity(prefix.len() + wire.len());
     borrowed_output.extend_from_slice(&prefix);
     let borrowed_allocation = borrowed_output.as_ptr();
-    borrowed.encode_into(&mut borrowed_output).unwrap();
+    borrowed
+        .encode_into(
+            &mut borrowed_output,
+            &yaml_sigil_core::ArtifactResourceLimits::unbounded(),
+        )
+        .unwrap();
     assert_eq!(borrowed_output.as_ptr(), borrowed_allocation);
     assert_eq!(&borrowed_output[..prefix.len()], &prefix);
     assert_eq!(&borrowed_output[prefix.len()..], wire);
@@ -447,8 +532,7 @@ fn preallocated_encoding_appends_without_reallocation() {
     resource_output.extend_from_slice(&prefix);
     let allocation = resource_output.as_ptr();
     artifact
-        .encode_into_with_resource_limits(&mut resource_output, &finite(wire.len()))
-        .unwrap()
+        .encode_into(&mut resource_output, &finite(wire.len()))
         .unwrap();
     assert_eq!(resource_output.as_ptr(), allocation);
     assert_eq!(&resource_output[..prefix.len()], &prefix);
@@ -457,9 +541,12 @@ fn preallocated_encoding_appends_without_reallocation() {
     let mut rejected = Vec::with_capacity(prefix.len() + wire.len());
     rejected.extend_from_slice(&prefix);
     let before = rejected.clone();
-    let error = borrowed
-        .encode_into_with_resource_limits(&mut rejected, &finite(wire.len() - 1))
-        .unwrap_err();
+    let yaml_sigil_core::ArtifactEncodeError::Resource(error) = borrowed
+        .encode_into(&mut rejected, &finite(wire.len() - 1))
+        .unwrap_err()
+    else {
+        panic!("expected resource rejection")
+    };
     assert_eq!(
         error.kind(),
         ArtifactResourceErrorKind::OutputArtifactTooLarge

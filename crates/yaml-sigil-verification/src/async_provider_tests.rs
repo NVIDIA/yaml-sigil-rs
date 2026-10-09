@@ -5,9 +5,10 @@
 //! The adapters reuse the existing crypto helpers and attributed qualification
 //! inputs; they do not certify any third-party SDK's scheduling or randomness.
 
-use std::future::Future;
-use std::num::NonZeroUsize;
-use std::pin::Pin;
+use alloc::{boxed::Box, vec::Vec};
+use core::future::Future;
+use core::num::NonZeroUsize;
+use core::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
@@ -381,6 +382,7 @@ fn request<'a, K>(
     key: &'a K,
 ) -> SignRequest<'a, K, K> {
     SignRequest {
+        resource_limits: yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
         payload,
         algorithm,
         key: match algorithm {
@@ -415,7 +417,7 @@ fn builder<'a>(
 }
 fn success(outcome: SignOutcome) -> signing::SignSuccess {
     match outcome {
-        SignOutcome::Success(success) => success,
+        Ok(success) => success,
         other => panic!("{other:?}"),
     }
 }
@@ -503,21 +505,35 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                         facade.verify(&signed.artifact, form, &keys, VerifierOptions::default());
                     assert_send(&future);
                     assert_eq!(
-                        future.await.unwrap(),
+                        future.await.unwrap().state,
                         VerifierState::Verified {
-                            payload: expected.to_vec(),
+                            payload: expected,
                             algorithm
                         }
                     );
                     assert_eq!(control.verify_calls.load(Ordering::SeqCst), before + 1);
-                    let pre = facade.pre_verify(&signed.artifact, form, false, true).await;
+                    let pre = facade
+                        .pre_verify(
+                            &signed.artifact,
+                            form,
+                            yaml_sigil_traits::verification::PreVerifyOptions {
+                                allow_unsigned: false,
+                                include_parser_observations: true,
+                                resource_limits:
+                                    yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                            },
+                        )
+                        .await
+                        .unwrap();
                     let metadata = facade
-                        .verify_with_metadata(
+                        .verify(
                             &signed.artifact,
                             form,
                             &keys,
-                            VerifierOptions::default(),
-                            true,
+                            yaml_sigil_traits::verification::VerifierOptions {
+                                include_parser_observations: true,
+                                ..VerifierOptions::default()
+                            },
                         )
                         .await
                         .unwrap();
@@ -526,6 +542,7 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                         facade
                             .verify_from_pre_verify(&pre, &keys, VerifierOptions::default())
                             .await
+                            .map(|result| result.state)
                             .unwrap(),
                         metadata.state
                     );
@@ -537,16 +554,19 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                             VerifierOptions::default()
                         )
                         .await
+                        .map(|result| result.state)
                         .unwrap(),
                         metadata.state
                     );
                     assert_eq!(
-                        verify_with_async_provider_and_metadata(
+                        verify_with_async_provider(
                             &signed.artifact,
                             form,
                             &keys,
-                            VerifierOptions::default(),
-                            true
+                            yaml_sigil_traits::verification::VerifierOptions {
+                                include_parser_observations: true,
+                                ..VerifierOptions::default()
+                            }
                         )
                         .await
                         .unwrap(),
@@ -559,6 +579,7 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                             VerifierOptions::default()
                         )
                         .await
+                        .map(|result| result.state)
                         .unwrap(),
                         metadata.state
                     );
@@ -577,24 +598,39 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                     let keys = public_keys(algorithm, &key);
                     let facade = UnqualifiedProviderAsyncVerifier::default();
                     let expected_state = VerifierState::Verified {
-                        payload: expected.to_vec(),
+                        payload: expected,
                         algorithm,
                     };
                     assert_eq!(
                         facade
                             .verify(&signed.artifact, form, &keys, VerifierOptions::default())
                             .await
+                            .map(|result| result.state)
                             .unwrap(),
                         expected_state
                     );
-                    let pre = facade.pre_verify(&signed.artifact, form, false, true).await;
+                    let pre = facade
+                        .pre_verify(
+                            &signed.artifact,
+                            form,
+                            yaml_sigil_traits::verification::PreVerifyOptions {
+                                allow_unsigned: false,
+                                include_parser_observations: true,
+                                resource_limits:
+                                    yaml_sigil_traits::ArtifactResourceLimits::unbounded(),
+                            },
+                        )
+                        .await
+                        .unwrap();
                     let metadata = facade
-                        .verify_with_metadata(
+                        .verify(
                             &signed.artifact,
                             form,
                             &keys,
-                            VerifierOptions::default(),
-                            true,
+                            yaml_sigil_traits::verification::VerifierOptions {
+                                include_parser_observations: true,
+                                ..VerifierOptions::default()
+                            },
                         )
                         .await
                         .unwrap();
@@ -603,6 +639,7 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                         facade
                             .verify_from_pre_verify(&pre, &keys, VerifierOptions::default())
                             .await
+                            .map(|result| result.state)
                             .unwrap(),
                         expected_state
                     );
@@ -614,16 +651,19 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                             VerifierOptions::default()
                         )
                         .await
+                        .map(|result| result.state)
                         .unwrap(),
                         expected_state
                     );
                     assert_eq!(
-                        verify_with_unqualified_async_provider_and_metadata(
+                        verify_with_unqualified_async_provider(
                             &signed.artifact,
                             form,
                             &keys,
-                            VerifierOptions::default(),
-                            true
+                            yaml_sigil_traits::verification::VerifierOptions {
+                                include_parser_observations: true,
+                                ..VerifierOptions::default()
+                            }
                         )
                         .await
                         .unwrap(),
@@ -636,6 +676,7 @@ async fn async_trait_round_trips_preserve_both_algorithms_forms_and_metadata() {
                             VerifierOptions::default()
                         )
                         .await
+                        .map(|result| result.state)
                         .unwrap(),
                         expected_state
                     );
@@ -824,12 +865,17 @@ async fn verification_suspends_and_preserves_authoritative_failure_categories() 
     control.verification.release();
     assert_eq!(wake.0.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        operation.await.unwrap(),
+        operation.await.unwrap().state,
         VerifierState::Verified { .. }
     ));
     for (fault, expected) in [
         (1, Ok(VerifierState::SignedButFailedVerification)),
-        (2, Err(InvocationError::KeyResolutionFailure)),
+        (
+            2,
+            Err(yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::KeyResolutionFailure,
+            )),
+        ),
     ] {
         control.verify_fault.store(fault, Ordering::SeqCst);
         let before = control.verify_calls.load(Ordering::SeqCst);
@@ -840,7 +886,8 @@ async fn verification_suspends_and_preserves_authoritative_failure_categories() 
                 &keys,
                 VerifierOptions::default()
             )
-            .await,
+            .await
+            .map(|result| result.state),
             expected
         );
         assert_eq!(control.verify_calls.load(Ordering::SeqCst), before + 1);
@@ -870,17 +917,14 @@ async fn unqualified_signing_skips_only_self_verification() {
             let req = request(b"test: true\n", algorithm, OutputForm::Yaml, &qualified);
             assert!(matches!(
                 signing::sign_with_async_provider(&req).await,
-                SignOutcome::Signer(SignError::KeyOperationFailure)
+                Err(SignError::KeyOperationFailure)
             ));
             let req = request(b"test: true\n", algorithm, OutputForm::Yaml, &unqualified);
             let outcome = signing::sign_with_unqualified_async_provider(&req).await;
             if fault == 3 {
-                assert!(matches!(outcome, SignOutcome::Success(_)));
+                assert!(outcome.is_ok());
             } else {
-                assert!(matches!(
-                    outcome,
-                    SignOutcome::Signer(SignError::KeyOperationFailure)
-                ));
+                assert!(matches!(outcome, Err(SignError::KeyOperationFailure)));
             }
         }
     }
@@ -914,9 +958,11 @@ async fn invalid_inputs_and_resource_prechecks_never_poll_verification() {
         let keys = public_keys(algorithm, &key);
         for signature in [vec![], vec![0; 63], vec![0xff; 64]] {
             let pre = PreVerifyResponse {
+                source_artifact: &[],
+
                 outcome: PreVerifyOutcome::Ok,
                 form: ArtifactForm::Proto,
-                unverified_payload_bytes: Some(b"payload".to_vec()),
+                unverified_payload_bytes: Some(b"payload"),
                 unverified_signature: Some(UnverifiedSignature {
                     algorithm,
                     keyid: None,
@@ -931,6 +977,7 @@ async fn invalid_inputs_and_resource_prechecks_never_poll_verification() {
                     VerifierOptions::default()
                 )
                 .await
+                .map(|result| result.state)
                 .unwrap(),
                 VerifierState::MalformedAttemptedSigned
             );
@@ -943,17 +990,21 @@ async fn invalid_inputs_and_resource_prechecks_never_poll_verification() {
                 VerifierOptions::default()
             )
             .await
+            .map(|result| result.state)
             .unwrap(),
             VerifierState::MalformedAttemptedSigned
         );
         let options = VerifierOptions {
-            algorithm_parameters: vec![1],
+            algorithm_parameters: &[1],
             ..VerifierOptions::default()
         };
         assert_eq!(
             verify_with_unqualified_async_provider(b"bad", ArtifactForm::Yaml, &keys, options)
-                .await,
-            Err(InvocationError::InvalidAlgorithmParameters)
+                .await
+                .map(|result| result.state),
+            Err(yaml_sigil_traits::verification::VerifyError::Invocation(
+                InvocationError::InvalidAlgorithmParameters
+            ))
         );
         for form in [ArtifactForm::Yaml, ArtifactForm::Proto] {
             let rejected = async {
@@ -965,7 +1016,8 @@ async fn invalid_inputs_and_resource_prechecks_never_poll_verification() {
                         &keys,
                         VerifierOptions::default(),
                     )
-                    .await,
+                    .await
+                    .map(|result| result.state),
                 )
             }
             .await
@@ -997,19 +1049,20 @@ async fn bounded_signing_matches_sync_early_and_final_output_checks() {
                 macro_rules! compare_limits {
                     ($build:ident, $async_sign:ident, $async_bounded:ident, $sync_bounded:ident) => {{
                         let key = builder(&signer, algorithm).$build().unwrap();
-                        let req = request(b"key: value", algorithm, form, &key);
+                        let mut req = request(b"key: value", algorithm, form, &key);
                         let native_key = sync_builder.$build().unwrap();
-                        let native_req = request(b"key: value", algorithm, form, &native_key);
+                        let mut native_req = request(b"key: value", algorithm, form, &native_key);
                         let output = success(signing::$async_sign(&req).await);
                         for maximum in [1, output.artifact.len() - 1, output.artifact.len()] {
                             let policy = finite(maximum);
                             let before = control.sign_calls.load(Ordering::SeqCst);
-                            let actual = signing::$async_bounded(&req, &policy).await;
+                            req.resource_limits = policy.clone();
+                            native_req.resource_limits = policy;
+                            let actual = signing::$async_bounded(&req).await;
                             let async_calls = control.sign_calls.load(Ordering::SeqCst) - before;
                             let before = control.sign_calls.load(Ordering::SeqCst);
                             let expected = signing::$sync_bounded(
                                 &native_req,
-                                &policy,
                                 signing::signature_signing_callback(&sync_signer),
                             );
                             assert_eq!(
@@ -1024,10 +1077,7 @@ async fn bounded_signing_matches_sync_early_and_final_output_checks() {
                                     assert_eq!(async_calls, 1);
                                 }
                             } else {
-                                assert_eq!(
-                                    success(actual.unwrap().unwrap()).artifact,
-                                    success(expected.unwrap().unwrap()).artifact
-                                );
+                                assert_eq!(success(actual).artifact, success(expected).artifact);
                                 assert_eq!(async_calls, 1);
                             }
                         }
@@ -1037,15 +1087,15 @@ async fn bounded_signing_matches_sync_early_and_final_output_checks() {
                     compare_limits!(
                         build,
                         sign_with_async_provider,
-                        sign_with_async_provider_and_resource_limits,
-                        sign_with_provider_and_resource_limits
+                        sign_with_async_provider,
+                        sign_with_provider
                     );
                 } else {
                     compare_limits!(
                         build_unqualified,
                         sign_with_unqualified_async_provider,
-                        sign_with_unqualified_async_provider_and_resource_limits,
-                        sign_with_unqualified_provider_and_resource_limits
+                        sign_with_unqualified_async_provider,
+                        sign_with_unqualified_provider
                     );
                 }
             }
@@ -1078,37 +1128,38 @@ async fn signing_validation_precedes_the_await_and_retains_error_order() {
     req.algorithm = AlgorithmId::EcdsaP256Sha256;
     assert!(matches!(
         signing::sign_with_async_provider(&req).await,
-        SignOutcome::Invocation(signing::SignInvocationError::InvalidKeyid)
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            signing::SignInvocationError::InvalidKeyid
+        ))
     ));
+    req.resource_limits = finite(1);
     assert!(matches!(
-        signing::sign_with_async_provider_and_resource_limits(&req, &finite(1))
-            .await
-            .unwrap()
-            .unwrap(),
-        SignOutcome::Invocation(signing::SignInvocationError::InvalidOrUnsupportedAlgorithm)
+        signing::sign_with_async_provider(&req).await,
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            signing::SignInvocationError::InvalidOrUnsupportedAlgorithm
+        ))
     ));
     req.algorithm = AlgorithmId::Ed25519;
-    assert!(
-        signing::sign_with_async_provider_and_resource_limits(&req, &finite(1))
-            .await
-            .is_err()
-    );
+    assert!(signing::sign_with_async_provider(&req).await.is_err());
+    req.resource_limits = ArtifactResourceLimits::unbounded();
     req.keyid = None;
     req.payload = &[0xff];
     assert!(matches!(
         signing::sign_with_async_provider(&req).await,
-        SignOutcome::Signer(SignError::InvalidPayloadBytes)
+        Err(SignError::InvalidPayloadBytes)
     ));
     req.payload = b"missing newline";
     req.append_missing_final_newline = false;
     assert!(matches!(
         signing::sign_with_async_provider(&req).await,
-        SignOutcome::Signer(SignError::PayloadLineTerminatorRefusal)
+        Err(SignError::PayloadLineTerminatorRefusal)
     ));
     req.algorithm_parameters = &[1];
     assert!(matches!(
         signing::sign_with_async_provider(&req).await,
-        SignOutcome::Invocation(signing::SignInvocationError::InvalidAlgorithmParameters)
+        Err(yaml_sigil_traits::signing::SignError::Invocation(
+            signing::SignInvocationError::InvalidAlgorithmParameters
+        ))
     ));
     assert_eq!(control.sign_calls.load(Ordering::SeqCst), 0);
 }

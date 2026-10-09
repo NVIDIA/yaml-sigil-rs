@@ -334,7 +334,8 @@ These fixtures distinguish signature validity from application validity.
 | [`changed-keyid.yaml`](./fixtures/changed-keyid.yaml) | Success. | Changing the unsigned `keyid` hint leaves the signature intact; verification still uses the caller-selected signer. |
 | [`signed-application-invalid.yaml`](./fixtures/signed-application-invalid.yaml) | Success. | The signature matches even though `port: not-an-integer` violates the illustrative application's integer-port rule. |
 
-The last sample signs [`application-invalid.yaml`](./fixtures/application-invalid.yaml).
+The last sample signs
+[`application-invalid.yaml`](./fixtures/application-invalid.yaml).
 The example performs no application-level port check. Syntactically acceptable
 YAML and a matching signature do not imply a usable application configuration.
 The `changed-keyid.yaml` sample verifies in both username and direct-key modes
@@ -381,9 +382,10 @@ requests a signature.
 ## Discovery and verification
 
 [`main.rs`](./main.rs) keeps the public library calls visible. It binds the
-agent signing key or calls `pre_verify_yaml_with_resource_limits`, checks the
+agent signing key or calls `pre_verify` with
+`PreVerifyOptions::resource_limits`, checks the
 signature metadata, and uses
-`verify_from_pre_verify_yaml` with each caller-selected candidate Ed25519 key.
+`verify_from_pre_verify` with each caller-selected candidate Ed25519 key.
 It accepts only `VerifierState::Verified`. The caller retains responsibility
 for any use of the authenticated payload.
 
@@ -549,6 +551,7 @@ cargo test --package yaml-sigil-examples --example github-keys \
 ```
 
 The example uses `clap`, `anyhow`, `russh` `0.63.3` and its `ssh-key` re-export,
-Tokio, `ureq` `3.4`, `serde_json`, and the workspace's RustCrypto bindings and public
+Tokio, `ureq` `3.4`, `serde_json`, and the workspace's RustCrypto bindings and
+public
 `yaml-sigil` APIs. They are development dependencies of the unpublished
 example package, with usage documented in [`Cargo.toml`](../Cargo.toml).
