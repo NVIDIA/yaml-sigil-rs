@@ -365,7 +365,7 @@ cargo test --workspace --all-features
 cargo test --locked --manifest-path xtask/Cargo.toml
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-core-only
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-buffa-0-5
-cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-noyalib-0-0-35
+cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-core-downstream-noyalib-0-0-53
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-downstream-resource-api
 cargo test --manifest-path tests/downstream/Cargo.toml --package yaml-sigil-downstream-v1alpha1-api
 cargo-machete --with-metadata

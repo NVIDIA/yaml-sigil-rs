@@ -287,7 +287,7 @@ const DOWNSTREAM: &[Step] = &[
             "--manifest-path",
             "tests/downstream/Cargo.toml",
             "--package",
-            "yaml-sigil-core-downstream-noyalib-0-0-35",
+            "yaml-sigil-core-downstream-noyalib-0-0-53",
         ],
     },
     Step {

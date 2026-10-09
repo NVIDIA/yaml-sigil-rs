@@ -6,7 +6,7 @@ have implementation context. It is not a user-facing support matrix.
 
 ## Current Implementation
 
-`yaml-sigil-core` uses `noyalib` `0.0.46` as its private backend for
+`yaml-sigil-core` uses `noyalib` `0.0.56` as its private backend for
 `YamlSigilSignature.v1alpha1` YAML signature documents. The root `Cargo.toml`
 declares the workspace dependency, and `crates/yaml-sigil-core` inherits it with
 `noyalib = { workspace = true }`.
@@ -42,6 +42,14 @@ The parser applies these signature-document-specific resource limits:
 
 These parser budgets apply independently of any deployment-level artifact size
 limit. The parser does not register application-defined tag constructors.
+
+The backend requires a release patched for
+[RUSTSEC-2026-0333](https://rustsec.org/advisories/RUSTSEC-2026-0333.html).
+Signature-carrier validation retains its bounded AST precheck and parser
+policies. The typed-budget regression uses `SignatureDocument` with a
+default-shaped backend configuration to check event, node, and cumulative
+scalar limits on the streaming path; that check does not replace the
+authoritative parser for untrusted input.
 
 The dependency enables only `std` and disables default features. The optional
 `noyalib` features do not improve this parser:
@@ -103,9 +111,9 @@ forwarding must retain the original carrier bytes. The text inside
 error contract.
 
 The unpublished
-`tests/downstream/noyalib-0-0-35` fixture exact-pins `noyalib` `0.0.35` with
+`tests/downstream/noyalib-0-0-53` fixture exact-pins `noyalib` `0.0.53` with
 only its `std` feature. Cargo resolves that release independently alongside the
-workspace's `0.0.46` backend. The fixture passes values in both directions and
+workspace's `0.0.56` backend. The fixture passes values in both directions and
 compares parsed `SignatureDocument` values rather than serialized YAML bytes.
 This is same-library, cross-version characterization. It does not demonstrate
 cross-backend YAML portability, promise permanent support for either release,

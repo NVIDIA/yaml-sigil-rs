@@ -534,6 +534,35 @@ mod tests {
     }
 
     #[test]
+    fn typed_signature_document_honors_backend_resource_budgets() {
+        let carrier = "schema: YamlSigilSignature.v1alpha1\n\
+                       alg: ED25519_PUREEDDSA_RAW_RS64_CANONICAL\n\
+                       signature: Zm9v\n";
+        noyalib::from_str_with_config::<SignatureDocument>(carrier, &noyalib::ParserConfig::new())
+            .expect("valid carrier must deserialize before tightening backend budgets");
+
+        // A policy-free typed target exercises the streaming path behind RUSTSEC-2026-0333.
+        for config in [
+            noyalib::ParserConfig::new().max_events(1),
+            noyalib::ParserConfig::new().max_nodes(1),
+            noyalib::ParserConfig::new().max_total_scalar_bytes(1),
+        ] {
+            let typed = noyalib::from_str_with_config::<SignatureDocument>(carrier, &config)
+                .expect_err("typed decoding must enforce the tightened resource budget");
+            let loaded = noyalib::load_all_with_config(carrier, &config)
+                .expect_err("AST loading must enforce the same resource budget");
+            let (noyalib::Error::Budget(typed), noyalib::Error::Budget(loaded)) = (typed, loaded)
+            else {
+                panic!("both backend paths must reject with a resource-budget error");
+            };
+            assert_eq!(
+                typed, loaded,
+                "both backend paths must charge the same budget"
+            );
+        }
+    }
+
+    #[test]
     fn parse_checks_byte_budget_before_utf8() {
         let mut oversized = vec![b'x'; super::SIGNATURE_DOCUMENT_MAX_BYTES + 1];
         oversized[super::SIGNATURE_DOCUMENT_MAX_BYTES] = 0xff;

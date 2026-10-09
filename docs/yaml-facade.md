@@ -72,8 +72,8 @@ The example tests cover a quoted `keyid` and an absent `keyid`. The
 parses and serializes documents while depending directly on only
 `yaml-sigil-core`. It checks that using the facade does not require a direct
 YAML-backend dependency. The
-[downstream Serde fixture](../tests/downstream/noyalib-0-0-35/Cargo.toml) checks
-values in both directions between `noyalib` `0.0.35` and the current private
+[downstream Serde fixture](../tests/downstream/noyalib-0-0-53/Cargo.toml) checks
+values in both directions between `noyalib` `0.0.53` and the current private
 backend.
 
 ```shell

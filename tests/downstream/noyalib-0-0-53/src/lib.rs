@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 NVIDIA CORPORATION & AFFILIATES
 // SPDX-License-Identifier: Apache-2.0
 
-//! Downstream Serde interoperability characterization with `noyalib` 0.0.35.
+//! Downstream Serde interoperability characterization with `noyalib` 0.0.53.
 //!
 //! The exact dependency pin verifies one independently resolved release. It
 //! does not make `noyalib` part of the public API or establish a compatibility
@@ -25,10 +25,10 @@ mod tests {
     #[test]
     fn noyalib_serialization_parses_through_the_authoritative_entry_point() {
         let expected = document(Some("key-1"));
-        let yaml = noyalib::to_string(&expected).expect("serialize with noyalib 0.0.35");
+        let yaml = noyalib::to_string(&expected).expect("serialize with noyalib 0.0.53");
 
         let parsed = parse_signature_document(yaml.as_bytes())
-            .expect("parse noyalib 0.0.35 output through yaml-sigil-core");
+            .expect("parse noyalib 0.0.53 output through yaml-sigil-core");
 
         assert_eq!(parsed, expected);
     }
@@ -40,7 +40,7 @@ mod tests {
             .expect("serialize with the canonical yaml-sigil-core emitter");
 
         let parsed: SignatureDocument =
-            noyalib::from_str(&yaml).expect("deserialize with noyalib 0.0.35");
+            noyalib::from_str(&yaml).expect("deserialize with noyalib 0.0.53");
 
         assert_eq!(parsed, expected);
     }
@@ -49,15 +49,15 @@ mod tests {
     fn absent_keyid_round_trips_in_both_directions() {
         let expected = document(None);
 
-        let old_yaml = noyalib::to_string(&expected).expect("serialize with noyalib 0.0.35");
+        let old_yaml = noyalib::to_string(&expected).expect("serialize with noyalib 0.0.53");
         let parsed_by_core = parse_signature_document(old_yaml.as_bytes())
-            .expect("parse noyalib 0.0.35 output through yaml-sigil-core");
+            .expect("parse noyalib 0.0.53 output through yaml-sigil-core");
         assert_eq!(parsed_by_core, expected);
 
         let canonical_yaml = serialize_signature_document(&expected)
             .expect("serialize with the canonical yaml-sigil-core emitter");
         let parsed_by_old: SignatureDocument =
-            noyalib::from_str(&canonical_yaml).expect("deserialize with noyalib 0.0.35");
+            noyalib::from_str(&canonical_yaml).expect("deserialize with noyalib 0.0.53");
         assert_eq!(parsed_by_old, expected);
     }
 
