@@ -75,7 +75,7 @@ free functions; the portable traits intentionally do not prescribe key parsers.
 
 ## Expected Behavior Summary
 
-The private backends are `noyalib` `0.0.56` and `jsonschema` `0.56`. The
+The private backends are `noyalib` `0.0.57` and `jsonschema` `0.56`. The
 `yaml-signature-conformance/` and `schema-alignment/` suites check their
 expected parsing and validation outcomes. The downstream Serde fixture uses
 `noyalib` `0.0.53` to check the public data-model boundary across versions.

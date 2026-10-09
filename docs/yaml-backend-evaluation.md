@@ -6,10 +6,10 @@ have implementation context. It is not a user-facing support matrix.
 
 ## Current Implementation
 
-`yaml-sigil-core` uses `noyalib` `0.0.56` as its private backend for
+`yaml-sigil-core` uses `noyalib` `0.0.57` as its private backend for
 `YamlSigilSignature.v1alpha1` YAML signature documents. The root `Cargo.toml`
-declares the workspace dependency, and `crates/yaml-sigil-core` inherits it with
-`noyalib = { workspace = true }`.
+declares the dependency with an exact version pin, and
+`crates/yaml-sigil-core` inherits it with `noyalib = { workspace = true }`.
 
 The workspace does not expose YAML parser or protobuf codegen selection
 features. `yaml-sigil-core` generates protobuf wire helpers with `buffa`.
@@ -113,7 +113,7 @@ error contract.
 The unpublished
 `tests/downstream/noyalib-0-0-53` fixture exact-pins `noyalib` `0.0.53` with
 only its `std` feature. Cargo resolves that release independently alongside the
-workspace's `0.0.56` backend. The fixture passes values in both directions and
+workspace's `0.0.57` backend. The fixture passes values in both directions and
 compares parsed `SignatureDocument` values rather than serialized YAML bytes.
 This is same-library, cross-version characterization. It does not demonstrate
 cross-backend YAML portability, promise permanent support for either release,

@@ -29,7 +29,7 @@ use clap::{Args, Parser, Subcommand};
 
 use tools::require_tool;
 
-const WASM_PACK_INSTALL: &str = "cargo install --locked wasm-pack --version 0.15.0";
+const WASM_PACK_INSTALL: &str = "cargo install --locked wasm-pack --version 0.15";
 const WASM_TARGET_INSTALL: &str = "rustup target add --toolchain 1.95.0 wasm32-unknown-unknown";
 
 /// Arguments for a repository development task.

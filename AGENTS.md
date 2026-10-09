@@ -379,12 +379,12 @@ cargo audit --file xtask/Cargo.lock
 
 `cargo xtask wasm` is a separate provider-neutral local check for the
 source-only `yaml-sigil-wasm` boundary. It requires Rust 1.95.0 with
-`wasm32-unknown-unknown`, `wasm-pack` 0.15.0, Node.js 20 or newer, and
+`wasm32-unknown-unknown`, `wasm-pack` 0.15.x, Node.js 20 or newer, and
 Firefox:
 
 ```shell
 rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
-cargo install --locked wasm-pack --version 0.15.0
+cargo install --locked wasm-pack --version 0.15
 cargo xtask wasm
 ```
 

@@ -306,13 +306,13 @@ cargo test -p yaml-sigil-conformance --test e2e_buildtime_keys
 
 ### WebAssembly validation
 
-Install the Rust 1.95 target and pinned helper before running the local
+Install the Rust 1.95 target and `wasm-pack` 0.15.x before running the local
 source-only boundary validation. Node.js 20 or newer and Firefox must also be
 on `PATH`.
 
 ```shell
 rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
-cargo install --locked wasm-pack --version 0.15.0
+cargo install --locked wasm-pack --version 0.15
 cargo xtask wasm
 ```
 

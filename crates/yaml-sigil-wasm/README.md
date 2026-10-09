@@ -177,7 +177,7 @@ suite.
 ## Build for JavaScript
 
 Build the WebAssembly module and bindings locally from source. Install
-Rust 1.95.0 or newer with `wasm32-unknown-unknown`, and `wasm-pack` 0.15.0.
+Rust 1.95.0 or newer with `wasm32-unknown-unknown`, and `wasm-pack` 0.15.x.
 The dependency build obtains its pinned Buf tool, so the first build needs
 network access and a writable Cargo and Buf cache. A separate system `protoc`
 or Buf installation is unnecessary.
@@ -187,7 +187,7 @@ at the desired release tag, run:
 
 ```shell
 rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
-cargo install --locked wasm-pack --version 0.15.0
+cargo install --locked wasm-pack --version 0.15
 build_dir="$(mktemp -d)"
 RUSTUP_TOOLCHAIN=1.95.0 CARGO_TARGET_DIR="${build_dir}/target" \
   wasm-pack build crates/yaml-sigil-wasm --target web --release --no-pack \
@@ -255,11 +255,11 @@ rm -rf -- "${build_dir}"
 ## Local validation
 
 The validation task requires Rust 1.95.0, Node.js 20 or newer, Firefox, and
-`wasm-pack` 0.15.0:
+`wasm-pack` 0.15.x:
 
 ```shell
 rustup target add --toolchain 1.95.0 wasm32-unknown-unknown
-cargo install --locked wasm-pack --version 0.15.0
+cargo install --locked wasm-pack --version 0.15
 cargo xtask wasm
 ```
 

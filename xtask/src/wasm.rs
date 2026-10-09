@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
+use semver::{Version, VersionReq};
 use tempfile::{Builder, TempDir};
 
 use super::{
@@ -16,7 +17,7 @@ use super::{
 
 const TOOLCHAIN: &str = "1.95.0";
 const TARGET: &str = "wasm32-unknown-unknown";
-const WASM_PACK_VERSION: &str = "0.15.0";
+const WASM_PACK_VERSION_REQUIREMENT: &str = "~0.15.0";
 const WASM_CRATE: &str = "crates/yaml-sigil-wasm";
 const GENERATED_API_SMOKE: &str = "crates/yaml-sigil-wasm/tests/generated_api.cjs";
 const GENERATED_NODE_MODULE: &str = "yaml_sigil_wasm.js";
@@ -179,11 +180,7 @@ fn require_prerequisites() -> Result<()> {
         .output()
         .context("run wasm-pack --version")?;
     ensure!(output.status.success(), "wasm-pack --version failed");
-    let version = String::from_utf8_lossy(&output.stdout);
-    ensure!(
-        version.trim() == format!("wasm-pack {WASM_PACK_VERSION}"),
-        "wasm-pack {WASM_PACK_VERSION} is required; install it with `{WASM_PACK_INSTALL}`"
-    );
+    validate_wasm_pack_version(&String::from_utf8_lossy(&output.stdout))?;
 
     let node = require_tool("node", "install Node.js 20 or newer and put it on PATH")?;
     let output = Command::new(&node)
@@ -216,6 +213,21 @@ fn require_prerequisites() -> Result<()> {
             .lines()
             .any(|line| line.trim() == TARGET),
         "{TARGET} for Rust {TOOLCHAIN} is required; install it with `{WASM_TARGET_INSTALL}`"
+    );
+    Ok(())
+}
+
+fn validate_wasm_pack_version(output: &str) -> Result<()> {
+    let version = output
+        .trim()
+        .strip_prefix("wasm-pack ")
+        .context("parse wasm-pack --version output")?;
+    let version = Version::parse(version).context("parse wasm-pack version")?;
+    let requirement = VersionReq::parse(WASM_PACK_VERSION_REQUIREMENT)
+        .context("parse wasm-pack version requirement")?;
+    ensure!(
+        requirement.matches(&version),
+        "wasm-pack {WASM_PACK_VERSION_REQUIREMENT} is required; found {version}; install it with `{WASM_PACK_INSTALL}`"
     );
     Ok(())
 }
@@ -335,7 +347,29 @@ fn preserve_primary_error(
 mod tests {
     use anyhow::anyhow;
 
-    use super::{ensure_no_workspace_wasm, preserve_primary_error};
+    use super::{ensure_no_workspace_wasm, preserve_primary_error, validate_wasm_pack_version};
+
+    #[test]
+    fn wasm_pack_accepts_stable_patch_updates() {
+        for version in ["0.15.0", "0.15.1", "0.15.99"] {
+            validate_wasm_pack_version(&format!("wasm-pack {version}\n")).unwrap();
+        }
+    }
+
+    #[test]
+    fn wasm_pack_rejects_other_minor_lines_prereleases_and_invalid_output() {
+        for output in [
+            "wasm-pack 0.14.9",
+            "wasm-pack 0.16.0",
+            "wasm-pack 1.15.0",
+            "wasm-pack 0.15.1-rc.1",
+            "wasm-pack 0.15",
+            "wasm-pack unknown",
+            "other-tool 0.15.0",
+        ] {
+            assert!(validate_wasm_pack_version(output).is_err(), "{output}");
+        }
+    }
 
     #[test]
     fn validation_and_cleanup_errors_are_both_reported() {
