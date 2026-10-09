@@ -15,7 +15,7 @@ Versions from `0.6` onward, including RCs, select all five and
 `.release-plz-wasm.toml`. Historical recovery keeps the source's original
 four-package configuration; current policy carries both fixed paths in its
 provenance inventory. Wasm depends on the four implementation crates and
-resolves the exact traits crate transitively. The conformance, test-key,
+resolves the shared traits crate transitively. The conformance, test-key,
 workspace, and xtask packages remain unpublished. Releases never contain
 executable assets, installers, containers, or retained CI artifacts.
 
@@ -39,9 +39,11 @@ git merge --ff-only "origin/${base_branch}"
 git status --short
 ```
 
-Confirm that the exact `yaml-sigil-traits` version in `Cargo.toml` is already
-published and is the intended dependency. If it needs to change, land that
-dependency update on the selected base before starting the release branch.
+Confirm that the minimum `yaml-sigil-traits` version in `Cargo.toml` is already
+published and that later patches in its minor line are intended dependencies.
+Release validation requires one matching crates.io version and the same
+requirement across the implementation crates. If the requirement needs to
+change, land that update on the selected base before starting the release branch.
 
 Choose the reviewed stable or prerelease version and create its canonical
 same-repository branch. Do not reuse a prior release branch.

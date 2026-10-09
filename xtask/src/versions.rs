@@ -10,7 +10,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use cargo_metadata::{CrateType, Metadata, Package, TargetKind};
-use semver::{Version, VersionReq};
+use semver::{Op, Version, VersionReq};
 use toml_edit::{DocumentMut, Item};
 
 use crate::bounded_process::{self, VALIDATION_OUTPUT_LIMITS};
@@ -357,7 +357,7 @@ fn validate_internal_dependencies(
     Ok(())
 }
 
-fn validate_traits_declaration(packages: &[&Package]) -> Result<Version> {
+fn validate_traits_declaration(packages: &[&Package]) -> Result<VersionReq> {
     let mut requirements = Vec::new();
     for package in packages {
         let matches = package
@@ -372,10 +372,7 @@ fn validate_traits_declaration(packages: &[&Package]) -> Result<Version> {
             continue;
         }
         if matches.len() != 1 {
-            bail!(
-                "{} must have one exact {TRAITS_PACKAGE} dependency",
-                package.name
-            );
+            bail!("{} must have one {TRAITS_PACKAGE} dependency", package.name);
         }
         let dependency = matches[0];
         let source = dependency
@@ -393,16 +390,18 @@ fn validate_traits_declaration(packages: &[&Package]) -> Result<Version> {
     if requirements.iter().any(|requirement| requirement != first) {
         bail!("release packages disagree on the {TRAITS_PACKAGE} requirement");
     }
-    let exact = first
-        .to_string()
-        .strip_prefix('=')
-        .ok_or_else(|| anyhow!("{TRAITS_PACKAGE} requirement must be exact"))?
-        .to_string();
-    let version = Version::parse(&exact).context("parse exact traits dependency version")?;
-    if *first != VersionReq::parse(&format!("={version}"))? {
-        bail!("{TRAITS_PACKAGE} requirement is not canonical");
+    let [comparator] = first.comparators.as_slice() else {
+        bail!("{TRAITS_PACKAGE} requirement must pin a version or allow only patch updates");
+    };
+    let patch_compatible = match comparator.op {
+        Op::Exact | Op::Tilde => true,
+        Op::Caret => comparator.major == 0,
+        _ => false,
+    };
+    if !patch_compatible || comparator.minor.is_none() || comparator.patch.is_none() {
+        bail!("{TRAITS_PACKAGE} requirement must pin a full version or allow only patch updates");
     }
-    Ok(version)
+    Ok(first.clone())
 }
 
 fn validate_resolved_traits(metadata: &Metadata, packages: &[&Package]) -> Result<()> {
@@ -413,7 +412,7 @@ fn validate_resolved_traits(metadata: &Metadata, packages: &[&Package]) -> Resul
         .filter(|package| package.name == TRAITS_PACKAGE)
         .collect::<Vec<_>>();
     if matches.len() != 1
-        || matches[0].version != expected
+        || !expected.matches(&matches[0].version)
         || matches[0]
             .source
             .as_ref()
@@ -421,7 +420,7 @@ fn validate_resolved_traits(metadata: &Metadata, packages: &[&Package]) -> Resul
             .as_deref()
             != Some(CRATES_IO_SOURCE)
     {
-        bail!("Cargo did not resolve exact {TRAITS_PACKAGE} {expected} from crates.io");
+        bail!("Cargo must resolve one {TRAITS_PACKAGE} version matching {expected} from crates.io");
     }
     Ok(())
 }
@@ -554,6 +553,81 @@ mod tests {
             "invalid release fixture",
         )
         .unwrap()
+    }
+
+    fn metadata_with_traits(root: &Path, requirement: &str, resolved: &str) -> Metadata {
+        let mut metadata = metadata(root, "0.6.0", "0.6.0");
+        for package in &mut metadata.packages {
+            if package.name == TRAITS_PACKAGE {
+                package.version = Version::parse(resolved).unwrap();
+            }
+            for dependency in &mut package.dependencies {
+                if dependency.name == TRAITS_PACKAGE {
+                    dependency.req = VersionReq::parse(requirement).unwrap();
+                }
+            }
+        }
+        metadata
+    }
+
+    #[test]
+    fn traits_validation_accepts_patch_updates_and_exact_pins() {
+        let root = tempfile::tempdir().unwrap();
+        let version = Version::new(0, 6, 0);
+        for (requirement, resolved) in [
+            ("~0.4.1", "0.4.1"),
+            ("~0.4.1", "0.4.99"),
+            ("^0.4.1", "0.4.99"),
+            ("~1.4.1", "1.4.99"),
+            ("=0.4.1", "0.4.1"),
+            ("=0.4.0-rc.1", "0.4.0-rc.1"),
+        ] {
+            let metadata = metadata_with_traits(root.path(), requirement, resolved);
+            validate_metadata(root.path(), &metadata, &version, true).unwrap();
+        }
+    }
+
+    #[test]
+    fn traits_validation_rejects_broad_requirements_and_incompatible_versions() {
+        let root = tempfile::tempdir().unwrap();
+        let version = Version::new(0, 6, 0);
+        for (requirement, resolved) in [
+            ("~0.4.1", "0.4.0"),
+            ("~0.4.1", "0.5.0"),
+            ("~0.4.1", "0.4.2-rc.1"),
+            ("=0.4.1", "0.4.2"),
+            ("^1.4.1", "1.4.1"),
+            (">=0.4.1", "0.4.1"),
+            ("~0.4", "0.4.1"),
+            ("=0.4", "0.4.1"),
+            ("*", "0.4.1"),
+        ] {
+            let metadata = metadata_with_traits(root.path(), requirement, resolved);
+            assert!(
+                validate_metadata(root.path(), &metadata, &version, true).is_err(),
+                "{requirement} resolved to {resolved}"
+            );
+        }
+    }
+
+    #[test]
+    fn traits_validation_requires_one_registry_version_and_shared_requirement() {
+        let root = tempfile::tempdir().unwrap();
+        let version = Version::new(0, 6, 0);
+        let original = metadata_with_traits(root.path(), "~0.4.1", "0.4.2");
+
+        let mut divergent = original.clone();
+        divergent.packages[0].dependencies[0].req = VersionReq::parse("=0.4.2").unwrap();
+        assert!(validate_metadata(root.path(), &divergent, &version, true).is_err());
+
+        let mut duplicate = original.clone();
+        let traits = duplicate.packages.last().unwrap().clone();
+        duplicate.packages.push(traits);
+        assert!(validate_metadata(root.path(), &duplicate, &version, true).is_err());
+
+        let mut local = original;
+        local.packages.last_mut().unwrap().source = None;
+        assert!(validate_metadata(root.path(), &local, &version, true).is_err());
     }
 
     #[test]

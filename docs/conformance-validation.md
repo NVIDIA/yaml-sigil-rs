@@ -30,8 +30,10 @@ algorithm profiles, imported artifacts, and wire behavior are unchanged.
 `tests/downstream/v1alpha1-api` passes requests, key bindings, results,
 resource policies, owned protobuf values, and borrowed views between both
 styles. It also uses the selected traits directly and checks provider signing
-and YAML serialization. Existing protobuf wire-characterization and
-independent-consumer tests continue to check the retained paths.
+and YAML serialization. The fixture uses the workspace's `~0.4.1` requirement
+and checks that direct and re-exported traits retain the same identity.
+Existing protobuf wire-characterization and independent-consumer tests
+continue to check the retained paths.
 
 `crates/yaml-sigil-wasm/tests/wasm.rs` checks Rust namespace interoperability.
 `crates/yaml-sigil-wasm/tests/generated_api.cjs` mixes JavaScript namespace

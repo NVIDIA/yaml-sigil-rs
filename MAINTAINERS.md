@@ -719,6 +719,12 @@ core, transcription, signing, and verification. Its crate contains source and
 consumer build instructions; compiled WebAssembly and generated executable
 bindings are never distributed by this repository.
 
+Release validation accepts exact or patch-compatible `yaml-sigil-traits`
+requirements. Keep the requirement identical across the four Rust
+implementation crates and verify that Cargo resolves one matching version from
+crates.io. The Wasm crate resolves that version through its implementation
+dependencies. Follow `RELEASING.md` to review the requirement before preparation.
+
 Keep `.release-plz.toml` for historical four-package sources and
 `.release-plz-wasm.toml` for five-package sources. Typed qualification emits
 the fixed selected path; post-approval requalification must agree before the
