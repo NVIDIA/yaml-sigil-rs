@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.6.0...yaml-sigil-core-v0.6.1-rc.1) - 2026-10-12
+
+### Fixed
+
+- Require the private YAML backend `noyalib` `=0.0.57` and add regression
+  tests for typed parser budgets.
+
+### Changed
+
+- Accept compatible `yaml-sigil-traits` patch releases with `~0.4.1`.
+- Allow compatible patch updates for Buffa dependencies.
+
 ## [0.6.0](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.6.0-rc.3...yaml-sigil-core-v0.6.0) - 2026-09-24
 
 ### Changed
