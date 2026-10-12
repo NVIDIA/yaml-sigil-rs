@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-signing-v0.6.0...yaml-sigil-signing-v0.6.1-rc.1) - 2026-10-12
+
+### Changed
+
+- Advance implementation dependencies to `0.6.1-rc.1` for the YAML parser
+  update.
+- Accept compatible `yaml-sigil-traits` patch releases with `~0.4.1`.
+
 ## [0.6.0](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-signing-v0.6.0-rc.3...yaml-sigil-signing-v0.6.0) - 2026-09-24
 
 ### Changed
