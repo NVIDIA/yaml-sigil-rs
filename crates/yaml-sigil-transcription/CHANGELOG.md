@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-transcription-v0.6.1...yaml-sigil-transcription-v0.6.2-rc.1) - 2026-10-27
+
+### Changed
+
+- Prepare a maintenance RC after the compatible dependency refresh
+  ([#186](https://github.com/NVIDIA/yaml-sigil-rs/pull/186)).
+- Refresh application lockfiles with `cargo update` to pick up compatible
+  dependency fixes.
+
 ## [0.6.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-transcription-v0.6.1-rc.1...yaml-sigil-transcription-v0.6.1) - 2026-10-12
 
 ### Changed
