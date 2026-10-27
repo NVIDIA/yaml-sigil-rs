@@ -611,10 +611,12 @@ the root manifest without invoking release-plz or editing changelogs. Follow
 
 Release preparation always lets pinned release-plz update derive the
 transaction first. The first release from an `rc.0` stub, starting its derived
-version as a prerelease, advancing an unchanged `rc.N` to its next ordinal, or
-promoting the current same-core prerelease to stable may invoke pinned
-release-plz set-version afterward. These selections preserve the derived version
-core. The xtask restores member workspace inheritance and verifies that
+version as a prerelease, starting `rc.1` of the immediate next patch from
+unchanged stable package contents, advancing an unchanged `rc.N` to its next
+ordinal, or promoting the current same-core prerelease to stable may invoke
+pinned release-plz set-version afterward. Derived-version adjustments preserve
+that version core; the unchanged-stable case advances only one patch to `rc.1`.
+The xtask restores member workspace inheritance and verifies that
 release-plz synchronized every internal
 requirement. It rejects a pre-existing root `Cargo.lock` and removes only a
 lockfile generated during its bounded release operations. Land any external

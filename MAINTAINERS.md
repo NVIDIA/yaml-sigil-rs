@@ -75,6 +75,9 @@ release source.
 Release preparation can advance an unchanged `rc.N` to its immediate successor
 on the same version core. Pinned release-plz applies that explicit selection
 after `update`; follow `RELEASING.md` for the normal source checks and approvals.
+When `update` leaves a stable version unchanged, preparation also permits only
+`rc.1` of its immediate next patch. This covers tooling-only changes outside
+published package contents while retaining the normal source and release gates.
 
 Finalization uses [explicit guarded Latest selection](#latest-selection-during-finalization).
 Main stable releases advance Latest; prereleases, support releases, and older
