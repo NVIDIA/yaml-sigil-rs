@@ -21,7 +21,7 @@ const CARGO_DENY_INSTALL_GUIDANCE: &str =
 const CARGO_MACHETE_INSTALL_GUIDANCE: &str =
     "cargo +1.98.0 install --locked cargo-machete --version 0.9.2";
 #[cfg(test)]
-const BUF_VERSION_REQUIREMENT: &str = ">=1.73.0";
+const BUF_VERSION_REQUIREMENT: &str = ">=1.74.0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum CheckStep {

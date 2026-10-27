@@ -431,6 +431,10 @@ materialization, and exercise the candidate route after adopting an upgrade.
 The release workflow installs release-plz `0.3.169` directly through
 cargo-binstall `1.23.0`. Keep local preparation on the same CLI version.
 
+For a Buf minimum update, align the workspace, developer xtask, and Buffa 0.5
+fixture requirements. Compare descriptor and generated Rust bytes against the
+previous toolchain, and exercise ordinary copied-ref CI as well as staged CI.
+
 Choose the test path from the exact reviewed workflow. Ordinary copied-ref
 CI requires `.github/workflows/ci.yml`, `ci-trusted.yml`, and
 `ci-candidate.yml` to match current `main`. Keep that equality guard intact.
