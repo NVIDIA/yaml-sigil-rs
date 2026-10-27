@@ -277,10 +277,24 @@ fn require_exact_version_adjustment(
     if same_core && new_prerelease {
         return Ok("started the release-plz-derived version as a prerelease");
     }
+    // Tooling fixes can leave published package contents unchanged. Limit this
+    // explicit selection to the first RC of the immediate next patch.
+    let unchanged_next_patch_rc = original.pre.is_empty()
+        && original.build.is_empty()
+        && derived == original
+        && selected.major == original.major
+        && selected.minor == original.minor
+        && original.patch.checked_add(1) == Some(selected.patch)
+        && selected.pre.as_str() == "rc.1"
+        && selected.build.is_empty();
+    if unchanged_next_patch_rc {
+        return Ok("started the next patch RC from unchanged stable package contents");
+    }
     bail!(
-        "release-plz derived {derived}, not selected release {selected}; only a new \
-         prerelease, the first same-core release from rc.0, the next unchanged \
-         RC, or promotion of the current same-core prerelease is supported"
+        "release-plz derived {derived}, not selected release {selected}; only a \
+         derived prerelease, the first next-patch RC from unchanged stable package \
+         contents, the first same-core release from rc.0, the next unchanged RC, \
+         or promotion of the current same-core prerelease is supported"
     )
 }
 
@@ -833,6 +847,51 @@ mod tests {
                     &Version::parse(selected).unwrap(),
                 )
                 .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn unchanged_stable_package_contents_allow_only_the_first_next_patch_rc() {
+        for (original, selected) in [("0.6.1", "0.6.2-rc.1"), ("1.2.3", "1.2.4-rc.1")] {
+            let original = Version::parse(original).unwrap();
+            assert!(
+                require_exact_version_adjustment(
+                    &original,
+                    &original,
+                    &Version::parse(selected).unwrap(),
+                )
+                .is_ok()
+            );
+        }
+        for (original, derived, selected) in [
+            ("0.6.1", "0.6.1", "0.6.1-rc.1"),
+            ("0.6.1", "0.6.1", "0.6.2"),
+            ("0.6.1", "0.6.1", "0.6.2-rc.0"),
+            ("0.6.1", "0.6.1", "0.6.2-rc.2"),
+            ("0.6.1", "0.6.1", "0.6.2-beta.1"),
+            ("0.6.1", "0.6.1", "0.6.2-rc.1.preview"),
+            ("0.6.1", "0.6.1", "0.6.2-rc.1+local"),
+            ("0.6.1", "0.6.1", "0.6.3-rc.1"),
+            ("0.6.1", "0.6.1", "0.7.0-rc.1"),
+            ("0.6.1", "0.6.1", "1.0.0-rc.1"),
+            ("0.6.1+local", "0.6.1+local", "0.6.2-rc.1"),
+            ("0.6.1", "0.7.0", "0.6.2-rc.1"),
+            ("0.6.1-rc.1", "0.6.1-rc.1", "0.6.2-rc.1"),
+            (
+                "0.6.18446744073709551615",
+                "0.6.18446744073709551615",
+                "0.6.0-rc.1",
+            ),
+        ] {
+            assert!(
+                require_exact_version_adjustment(
+                    &Version::parse(original).unwrap(),
+                    &Version::parse(derived).unwrap(),
+                    &Version::parse(selected).unwrap(),
+                )
+                .is_err(),
+                "unexpected adjustment from {original}, derived {derived}, to {selected}"
             );
         }
     }

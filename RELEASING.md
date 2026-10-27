@@ -67,9 +67,10 @@ Prepare the exact version. The command requires the exact selected remote tip
 and runs `release-plz update` first. If current `main` carries an unpublished
 `MAJOR.MINOR.PATCH-rc.0` coordination stub, select either its first real RC or
 the stable `MAJOR.MINOR.PATCH`; never release `rc.0` itself. For that bounded
-selection, when starting a derived version as a prerelease, when advancing an
-unchanged `rc.N` to the next ordinal on the same version core, or when promoting
-the current same-version RC to stable, the command then uses
+selection, when starting a derived version as a prerelease, when starting
+`rc.1` of the immediate next patch from unchanged stable package contents,
+when advancing an unchanged `rc.N` to the next ordinal on the same version core,
+or when promoting the current same-version RC to stable, the command then uses
 `release-plz set-version`, restores workspace version inheritance, and verifies
 release-plz's internal dependency updates. Every other mismatch fails. Changes
 outside Cargo manifests and the selected package changelogs fail. A pre-existing
@@ -88,10 +89,11 @@ git diff --stat
 git diff
 ```
 
-Review every generated changelog entry and version change. When advancing an
-unchanged RC or promoting it to stable, pinned `set-version` can relabel the
-latest published RC entry. Retain the generated new entry and restore the
-previous published entry from `HEAD` alongside it.
+Review every generated changelog entry and version change. When starting the
+next patch RC from unchanged package contents, advancing an unchanged RC, or
+promoting it to stable, pinned `set-version` can relabel the latest published
+entry. Retain the generated new entry and restore the previous published entry
+from `HEAD` alongside it. Ensure the new entry describes the selected release.
 Then run the full provider-neutral validation sequence.
 
 ```shell
