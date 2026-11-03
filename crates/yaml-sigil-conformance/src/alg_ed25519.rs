@@ -25,6 +25,16 @@ use crate::{
 
 const CATEGORY: &str = "alg-ed25519";
 
+// Both verifier modes exercise the same canonical-encoding rejection matrix.
+const NONCANONICAL_ENCODINGS: &[(&str, ArtifactForm)] = &[
+    ("noncanonical-R.binpb", ArtifactForm::Proto),
+    ("noncanonical-R.yaml", ArtifactForm::Yaml),
+    ("noncanonical-S-equals-L.binpb", ArtifactForm::Proto),
+    ("noncanonical-S-equals-L.yaml", ArtifactForm::Yaml),
+    ("noncanonical-S-equals-L-plus-1.binpb", ArtifactForm::Proto),
+    ("noncanonical-S-equals-L-plus-1.yaml", ArtifactForm::Yaml),
+];
+
 fn parse_ed25519_pubkey(expected_txt: &str) -> EdVk {
     let bytes = require_hex_field(expected_txt, "public_key");
     let arr: [u8; 32] = bytes
@@ -107,12 +117,8 @@ fn noncanonical_encodings<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "noncanonical-encoding.expected.txt");
     let vk = parse_ed25519_pubkey(&expected);
     let keys = keys_with_ed25519(&vk);
-    for file in [
-        "noncanonical-R.binpb",
-        "noncanonical-S-equals-L.binpb",
-        "noncanonical-S-equals-L-plus-1.binpb",
-    ] {
-        // fixture: noncanonical-*.binpb -> MalformedAttemptedSigned. The
+    for &(file, form) in NONCANONICAL_ENCODINGS {
+        // fixture: noncanonical-*.{binpb,yaml} -> MalformedAttemptedSigned. The
         // verifier wraps `ed25519-dalek` with the spec's structural
         // canonical-encoding pre-check (R y-coord < p, S < L) so the
         // distinction between "malformed artifact bytes" and
@@ -121,12 +127,7 @@ fn noncanonical_encodings<V: ConformanceVerifier>(v: &V) {
         // historical divergence record).
         let bytes = load_bytes(CATEGORY, file);
         let state = v
-            .verify(
-                &bytes,
-                ArtifactForm::Proto,
-                &keys,
-                VerifierOptions::default(),
-            )
+            .verify(&bytes, form, &keys, VerifierOptions::default())
             .expect("noncanonical fixture should not return invocation error");
         assert_eq!(
             state,
@@ -309,19 +310,10 @@ async fn noncanonical_encodings_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "noncanonical-encoding.expected.txt");
     let vk = parse_ed25519_pubkey(&expected);
     let keys = keys_with_ed25519(&vk);
-    for file in [
-        "noncanonical-R.binpb",
-        "noncanonical-S-equals-L.binpb",
-        "noncanonical-S-equals-L-plus-1.binpb",
-    ] {
+    for &(file, form) in NONCANONICAL_ENCODINGS {
         let bytes = load_bytes(CATEGORY, file);
         let state = v
-            .verify(
-                &bytes,
-                ArtifactForm::Proto,
-                &keys,
-                VerifierOptions::default(),
-            )
+            .verify(&bytes, form, &keys, VerifierOptions::default())
             .await
             .expect("noncanonical fixture should not return invocation error");
         assert_eq!(

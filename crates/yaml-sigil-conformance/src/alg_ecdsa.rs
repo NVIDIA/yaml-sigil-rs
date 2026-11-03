@@ -29,6 +29,25 @@ use crate::{
 
 const CATEGORY: &str = "alg-ecdsa";
 
+// Share both-form rejection cases between the sync and async verifier suites.
+const INVALID_COMPONENT_RANGES: &[(&str, ArtifactForm)] = &[
+    ("invalid-r-zero.binpb", ArtifactForm::Proto),
+    ("invalid-r-zero.yaml", ArtifactForm::Yaml),
+    ("invalid-s-zero.binpb", ArtifactForm::Proto),
+    ("invalid-s-zero.yaml", ArtifactForm::Yaml),
+    ("invalid-r-equals-n.binpb", ArtifactForm::Proto),
+    ("invalid-r-equals-n.yaml", ArtifactForm::Yaml),
+    ("invalid-s-equals-n.binpb", ArtifactForm::Proto),
+    ("invalid-s-equals-n.yaml", ArtifactForm::Yaml),
+];
+
+const NON_FIXED_WIDTH_SIGNATURES: &[(&str, ArtifactForm)] = &[
+    ("signature-63-bytes.binpb", ArtifactForm::Proto),
+    ("signature-63-bytes.yaml", ArtifactForm::Yaml),
+    ("signature-65-bytes.binpb", ArtifactForm::Proto),
+    ("signature-65-bytes.yaml", ArtifactForm::Yaml),
+];
+
 fn parse_p256_pubkey(expected_txt: &str) -> P256Vk {
     // Try the prose form first (verify-happy-path.expected.txt and
     // two-nonce-instability.expected.txt), then the ACVP form.
@@ -158,24 +177,14 @@ fn invalid_component_ranges<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
-    for file in [
-        "invalid-r-zero.binpb",
-        "invalid-s-zero.binpb",
-        "invalid-r-equals-n.binpb",
-        "invalid-s-equals-n.binpb",
-    ] {
-        // fixture: invalid-*.binpb -> MalformedAttemptedSigned (per spec).
+    for &(file, form) in INVALID_COMPONENT_RANGES {
+        // fixture: invalid-*.{binpb,yaml} -> MalformedAttemptedSigned (per spec).
         // The `p256` crate's `Signature::from_slice` rejects R/S outside
         // `(0, n)`, so this lands at the structural stage rather than the
         // signature-equation stage.
         let bytes = load_bytes(CATEGORY, file);
         let state = v
-            .verify(
-                &bytes,
-                ArtifactForm::Proto,
-                &keys,
-                VerifierOptions::default(),
-            )
+            .verify(&bytes, form, &keys, VerifierOptions::default())
             .expect("invalid-* fixture should not return invocation error");
         assert_eq!(
             state,
@@ -191,16 +200,11 @@ fn non_fixed_width<V: ConformanceVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
-    for file in ["signature-63-bytes.binpb", "signature-65-bytes.binpb"] {
-        // fixture: signature-{63,65}-bytes.binpb -> MalformedAttemptedSigned
+    for &(file, form) in NON_FIXED_WIDTH_SIGNATURES {
+        // fixture: signature-{63,65}-bytes.{binpb,yaml} -> MalformedAttemptedSigned
         let bytes = load_bytes(CATEGORY, file);
         let state = v
-            .verify(
-                &bytes,
-                ArtifactForm::Proto,
-                &keys,
-                VerifierOptions::default(),
-            )
+            .verify(&bytes, form, &keys, VerifierOptions::default())
             .expect("non-fixed-width fixture should not return invocation error");
         assert_eq!(
             state,
@@ -471,21 +475,11 @@ async fn invalid_component_ranges_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
-    for file in [
-        "invalid-r-zero.binpb",
-        "invalid-s-zero.binpb",
-        "invalid-r-equals-n.binpb",
-        "invalid-s-equals-n.binpb",
-    ] {
-        // fixture: invalid-*.binpb -> MalformedAttemptedSigned (per spec).
+    for &(file, form) in INVALID_COMPONENT_RANGES {
+        // fixture: invalid-*.{binpb,yaml} -> MalformedAttemptedSigned (per spec).
         let bytes = load_bytes(CATEGORY, file);
         let state = v
-            .verify(
-                &bytes,
-                ArtifactForm::Proto,
-                &keys,
-                VerifierOptions::default(),
-            )
+            .verify(&bytes, form, &keys, VerifierOptions::default())
             .await
             .expect("invalid-* fixture (async) should not return invocation error");
         assert_eq!(
@@ -502,15 +496,10 @@ async fn non_fixed_width_async<V: ConformanceAsyncVerifier>(v: &V) {
     let expected = load_string(CATEGORY, "verify-happy-path.expected.txt");
     let vk = parse_p256_pubkey(&expected);
     let keys = keys_with_p256(&vk);
-    for file in ["signature-63-bytes.binpb", "signature-65-bytes.binpb"] {
+    for &(file, form) in NON_FIXED_WIDTH_SIGNATURES {
         let bytes = load_bytes(CATEGORY, file);
         let state = v
-            .verify(
-                &bytes,
-                ArtifactForm::Proto,
-                &keys,
-                VerifierOptions::default(),
-            )
+            .verify(&bytes, form, &keys, VerifierOptions::default())
             .await
             .expect("non-fixed-width fixture (async) should not return invocation error");
         assert_eq!(
