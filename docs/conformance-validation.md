@@ -159,11 +159,12 @@ The current fixture and regression set covers:
   lookup-hint handling.
 - URL-safe no-padding base64 behavior, including invalid alphabet, padding,
   whitespace, length, and trailing-bit cases.
-- Ed25519 happy paths, noncanonical encodings, small-order configured keys,
-  stable re-signing, and algorithm-parameter rejection.
+- Ed25519 happy paths, noncanonical encodings in YAML and protobuf forms,
+  small-order configured keys, stable re-signing, and algorithm-parameter
+  rejection.
 - ECDSA P-256/SHA-256 happy paths, ACVP-derived vectors, high-S/low-S
-  acceptance, invalid component ranges, wrong-size signatures, bad keys, and
-  nonce-instability fixtures.
+  acceptance, invalid component ranges and wrong-size signatures in both
+  artifact forms, bad keys, and nonce-instability fixtures.
 - YAML signature-document schema identity, universal known-key duplicate
   rejection, the markerless carrier byte limit, document count, mapping root,
   declared field types, explicit document-end handling, and unknown-key
@@ -175,6 +176,38 @@ an unnatural workaround.
 
 ## Import Review Notes
 
+- 2026-11-02: Reviewed and refreshed local artifacts from public
+  `NVIDIA/yaml-sigil-spec` `main` at
+  `b543712441436d7b561286690cc28b06b7ca030a`, advancing the reviewed revision
+  from `30b143f09630448abbace14cfae2188279536f56`. The import adds the nine
+  malformed-signature YAML counterparts from
+  [specification PR #98](https://github.com/NVIDIA/yaml-sigil-spec/pull/98).
+  Under `alg-ed25519/`, these are `noncanonical-R.yaml`,
+  `noncanonical-S-equals-L.yaml`, and `noncanonical-S-equals-L-plus-1.yaml`.
+  Under `alg-ecdsa/`, these are `invalid-r-zero.yaml`, `invalid-s-zero.yaml`,
+  `invalid-r-equals-n.yaml`, `invalid-s-equals-n.yaml`,
+  `signature-63-bytes.yaml`, and `signature-65-bytes.yaml`.
+
+  Each new fixture expects `MalformedAttemptedSigned` with its algorithm
+  enabled and documented valid verification key. The YAML signatures use
+  canonical URL-safe, unpadded base64 and carry the same decoded signature
+  and payload octets as their existing protobuf counterparts. Shared file/form
+  tables exercise both forms in the sync and async algorithm suites.
+  Three expected-outcome sidecars and the two imported notice copies now
+  describe the additional YAML representations without changing source terms.
+
+  The complete upstream delta also changes conformance generators, their
+  validation and dependency tooling, the implementation-kit manifest, and the
+  non-normative marker-selection diagram in
+  [specification PR #104](https://github.com/NVIDIA/yaml-sigil-spec/pull/104).
+  Those files are not imported. The implementation already selects the final
+  constrained marker while retaining one candidate, so the diagram correction
+  requires no code change. Existing protobuf and valid artifact bytes,
+  proto/schema inputs, crate-local notices, public contracts, and runtime
+  behavior are unchanged. The core and conformance README links identify the
+  reviewed specification revision. This workspace retains the exact
+  `yaml-sigil-traits` requirement `=0.4.2-rc.1`; no dependency update, traits
+  release, or conformance divergence is needed.
 - 2026-09-23: Reviewed and refreshed local artifacts from public
   `NVIDIA/yaml-sigil-spec` `main` at
   `30b143f09630448abbace14cfae2188279536f56`, advancing the reviewed revision
