@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.6.2-rc.3...yaml-sigil-core-v0.6.2) - 2026-11-03
+
+### Changed
+
+- Promote `0.6.2-rc.3` to stable and adopt `yaml-sigil-traits ~0.4.2`.
+
 ## [0.6.2-rc.3](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-core-v0.6.2-rc.2...yaml-sigil-core-v0.6.2-rc.3) - 2026-11-03
 
 ### Changed
