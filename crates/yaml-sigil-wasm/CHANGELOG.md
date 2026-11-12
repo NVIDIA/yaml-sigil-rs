@@ -4,6 +4,14 @@ All notable changes to this crate are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.3-rc.1](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-wasm-v0.6.2...yaml-sigil-wasm-v0.6.3-rc.1) - 2026-11-12
+
+### Changed
+
+- Follow the `0.6.3-rc.1` implementation family and its shared
+  `yaml-sigil-traits ~0.4.3-rc.1` contract. Public APIs and wire formats
+  remain unchanged.
+
 ## [0.6.2](https://github.com/NVIDIA/yaml-sigil-rs/compare/yaml-sigil-wasm-v0.6.2-rc.3...yaml-sigil-wasm-v0.6.2) - 2026-11-03
 
 ### Changed
