@@ -58,7 +58,7 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "net", "time", "
 
 # github-keys: SSH-agent transport and OpenSSH public-key decoding. The agent
 # owns private keys; RSA and SSH compression are not needed by this example.
-russh = { version = "=0.63.3", default-features = false, features = ["ring"] }
+russh = { version = "=0.65.0", default-features = false, features = ["ring"] }
 # github-keys: anonymous HTTPS discovery, JSON responses, and local verification.
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 serde_json = { workspace = true }
