@@ -548,7 +548,7 @@ cargo test --package yaml-sigil-examples --example github-keys \
   openssh_agent_round_trip -- --ignored
 ```
 
-The example uses `clap`, `anyhow`, `russh` `0.63.3` and its `ssh-key` re-export,
+The example uses `clap`, `anyhow`, `russh` `0.65.0` and its `ssh-key` re-export,
 Tokio, `ureq` `3.4`, `serde_json`, and the workspace's RustCrypto bindings and public
 `yaml-sigil` APIs. They are development dependencies of the unpublished
 example package, with usage documented in [`Cargo.toml`](../Cargo.toml).

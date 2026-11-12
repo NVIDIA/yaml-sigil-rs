@@ -53,6 +53,7 @@ cargo test --package yaml-sigil-examples --example protobuf-facade
 
 The [`github-keys` example](./github-keys/README.md) signs through an SSH agent
 with a qualified asynchronous provider and verifies locally with public keys.
+It uses `russh` `0.65.0` for SSH-agent transport and OpenSSH key decoding.
 Omit `--signer` to use supported agent identities, or restrict keys to a GitHub
 username or explicit OpenSSH public key. Both commands accept
 `--key-fingerprint`. The [numbered walkthrough](./github-keys/README.md#walkthrough)
